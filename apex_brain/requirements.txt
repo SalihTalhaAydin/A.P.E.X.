@@ -1,4 +1,4 @@
-# Jarvis Brain - Dependencies
+# Apex Brain - Dependencies
 # AI
 litellm>=1.30.0
 openai>=1.0.0

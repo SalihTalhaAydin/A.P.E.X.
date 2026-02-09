@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     # Server
     port: int = 8080
 
-    model_config = {"env_file": ".env", "extra": "ignore"}
+    model_config = {"env_file": [".env", "../.env"], "extra": "ignore"}
 
     @property
     def ha_headers(self) -> dict:

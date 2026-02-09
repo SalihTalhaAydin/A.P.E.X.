@@ -5,13 +5,13 @@ Personal AI assistant with persistent memory, smart home control, and semantic k
 ## Quick Start (Local Development)
 
 ```bash
-cd apex
+cd apex/apex_brain
 
 # Install dependencies
 pip install -r requirements.txt
 
 # Copy and configure environment
-cp .env.example .env
+cp ../.env.example .env
 # Edit .env with your API keys and HA connection info
 
 # Run the server
@@ -37,14 +37,14 @@ curl -X POST http://localhost:8080/api/chat \
 
 1. Push this repo to GitHub.
 2. In Home Assistant: open **Settings** (gear icon in the sidebar), then **Apps** (or **Add-ons**).  
-   - If you don’t see **Apps**, you may be on a non-OS install (no add-ons support).
+   - If you don't see **Apps**, you may be on a non-OS install (no add-ons support).
 3. Open the **App store** / **Install app** tab (or the store icon).  
    - Use the **⋮** (three dots) or **Add repository** (or similar) and paste:  
      `https://github.com/SalihTalhaAydin/A.P.E.X.`  
    - Click **Add**. The Apex Brain repository should appear in the store.
 4. Find **Apex Brain** in the list, open it, then **Install**.
 5. After installation: open **Apex Brain** → **Configuration**, set your API keys (and model if needed), **Save**, then **Start**.
-6. Check **Log** to confirm it’s running (e.g. "Apex Brain is online").
+6. Check **Log** to confirm it's running (e.g. "Apex Brain is online").
 
 ## Connect to HA Voice Pipeline
 
@@ -58,17 +58,28 @@ curl -X POST http://localhost:8080/api/chat \
 
 ## Architecture
 
-- **brain/**: FastAPI server, conversation orchestrator, config
-- **memory/**: Conversation history, knowledge store (sqlite-vec), fact extraction, context builder
-- **tools/**: Smart home, knowledge, datetime, calendar (decorator-based, auto-discovered)
-- **ha_addon/**: Dockerfile, config.yaml, run.sh for HA deployment
+```
+apex/
+├── .env.example          # Environment template
+├── docker-compose.yml    # Local Docker dev
+├── repository.yaml       # HA add-on repo metadata
+├── README.md
+└── apex_brain/           # All source code + HA add-on packaging
+    ├── config.yaml       # HA add-on config
+    ├── Dockerfile
+    ├── run.sh            # HA add-on entrypoint
+    ├── requirements.txt
+    ├── brain/            # FastAPI server, conversation orchestrator, config
+    ├── memory/           # Conversation history, knowledge store, fact extraction
+    └── tools/            # Smart home, knowledge, datetime, calendar tools
+```
 
 ## Adding New Tools
 
-Create a file in `tools/`, add the `@tool` decorator:
+Create a file in `apex_brain/tools/`, add the `@tool` decorator:
 
 ```python
-# tools/weather.py
+# apex_brain/tools/weather.py
 from tools.base import tool
 
 @tool(description="Get current weather for a location")
