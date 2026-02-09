@@ -1,19 +1,20 @@
-#!/usr/bin/with-contenv bashio
+#!/bin/bash
 # Apex Brain - HA Add-on startup script
 # Reads configuration from /data/options.json and starts the server.
+# init: false in config.yaml means this runs directly as PID 1 (no S6 overlay).
 
 echo "========================================"
 echo "  Apex Brain Add-on Starting..."
 echo "========================================"
 
-# Read add-on options and export as environment variables
-export LITELLM_MODEL=$(bashio::config 'litellm_model')
-export OPENAI_API_KEY=$(bashio::config 'openai_api_key')
-export ANTHROPIC_API_KEY=$(bashio::config 'anthropic_api_key')
-export EMBEDDING_MODEL=$(bashio::config 'embedding_model')
-export FACT_EXTRACTION_MODEL=$(bashio::config 'fact_extraction_model')
-export RECENT_TURNS=$(bashio::config 'recent_turns')
-export MAX_FACTS_IN_CONTEXT=$(bashio::config 'max_facts_in_context')
+# Read add-on options from /data/options.json using jq
+export LITELLM_MODEL=$(jq -r '.litellm_model' /data/options.json)
+export OPENAI_API_KEY=$(jq -r '.openai_api_key' /data/options.json)
+export ANTHROPIC_API_KEY=$(jq -r '.anthropic_api_key' /data/options.json)
+export EMBEDDING_MODEL=$(jq -r '.embedding_model' /data/options.json)
+export FACT_EXTRACTION_MODEL=$(jq -r '.fact_extraction_model' /data/options.json)
+export RECENT_TURNS=$(jq -r '.recent_turns' /data/options.json)
+export MAX_FACTS_IN_CONTEXT=$(jq -r '.max_facts_in_context' /data/options.json)
 
 # Database path (persistent volume)
 export DB_PATH="/data/apex.db"

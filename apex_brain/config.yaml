@@ -10,6 +10,7 @@ arch:
   - aarch64
 startup: application
 boot: auto
+init: false
 
 # Network
 ports:

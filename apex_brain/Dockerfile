@@ -1,6 +1,9 @@
 ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.13-alpine3.21
 FROM ${BUILD_FROM}
 
+# Install jq for reading /data/options.json (init: false = no bashio)
+RUN apk add --no-cache jq
+
 # Set working directory
 WORKDIR /app
 
