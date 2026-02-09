@@ -1,0 +1,19 @@
+# Local development - run with: docker compose up
+# Or just run directly: python -m brain.server
+version: "3.8"
+
+services:
+  jarvis:
+    build:
+      context: .
+      dockerfile: ha_addon/Dockerfile
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    volumes:
+      - jarvis_data:/data
+    restart: unless-stopped
+
+volumes:
+  jarvis_data:

@@ -1,0 +1,53 @@
+# Home Assistant Add-on Configuration
+# https://developers.home-assistant.io/docs/add-ons/configuration
+name: "Apex Brain"
+version: "0.1.0"
+slug: "apex_brain"
+description: "Personal AI assistant with memory, smart home control, and semantic knowledge"
+url: "https://github.com/SalihTalhaAydin/A.P.E.X."
+arch:
+  - amd64
+  - aarch64
+  - armv7
+startup: application
+boot: auto
+init: false
+
+# Network
+ports:
+  8080/tcp: 8080
+ports_description:
+  8080/tcp: "Apex Brain API"
+
+# Home Assistant API access
+hassio_api: true
+homeassistant_api: true
+hassio_role: default
+auth_api: true
+
+# Persistent storage for database
+map:
+  - data:rw
+
+# Configuration options (shown in HA add-on config panel)
+options:
+  litellm_model: "gpt-4o"
+  openai_api_key: ""
+  anthropic_api_key: ""
+  embedding_model: "text-embedding-3-small"
+  fact_extraction_model: "gpt-4o-mini"
+  recent_turns: 10
+  max_facts_in_context: 20
+
+schema:
+  litellm_model: str
+  openai_api_key: password
+  anthropic_api_key: password
+  embedding_model: str
+  fact_extraction_model: str
+  recent_turns: int
+  max_facts_in_context: int
+
+# Environment variables
+environment:
+  DB_PATH: /data/apex.db
