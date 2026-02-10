@@ -1,5 +1,13 @@
 # Home Assistant Add-on Configuration
 # https://developers.home-assistant.io/docs/add-ons/configuration
+#
+# Key settings:
+#   init: false  — disables bashio helper. S6 overlay still runs from the
+#                  base image. Use jq to read /data/options.json in run.sh.
+#                  run.sh uses with-contenv to inherit SUPERVISOR_TOKEN etc.
+#   hassio_api   — grants access to the Supervisor API (SUPERVISOR_TOKEN)
+#   homeassistant_api — grants access to the HA Core API
+
 name: "Apex Brain"
 version: "0.1.0"
 slug: "apex_brain"
@@ -12,7 +20,7 @@ startup: application
 boot: auto
 init: false
 
-# Network
+# Network — expose the API on port 8080
 ports:
   8080/tcp: 8080
 ports_description:
@@ -24,11 +32,12 @@ homeassistant_api: true
 hassio_role: default
 auth_api: true
 
-# Persistent storage for database
+# Persistent storage for SQLite databases
 map:
   - data:rw
 
-# Configuration options (shown in HA add-on config panel)
+# Configuration options (shown in HA add-on Configuration tab)
+# These are written to /data/options.json and read by run.sh via jq
 options:
   litellm_model: "gpt-4o"
   openai_api_key: ""
@@ -47,6 +56,6 @@ schema:
   recent_turns: int
   max_facts_in_context: int
 
-# Environment variables
+# Environment variables (available in the container at runtime)
 environment:
   DB_PATH: /data/apex.db

@@ -43,8 +43,23 @@ class Settings(BaseSettings):
     def ha_headers(self) -> dict:
         """Build auth headers for HA API calls."""
         import os
-        # Inside add-on: use SUPERVISOR_TOKEN (injected by HA Supervisor)
+        # Inside add-on: use SUPERVISOR_TOKEN (injected by HA Supervisor via S6)
         token = os.environ.get("SUPERVISOR_TOKEN", "") or self.ha_token
+
+        # Fallback: try reading from S6 container environment file
+        if not token:
+            for path in [
+                "/run/s6/container_environment/SUPERVISOR_TOKEN",
+                "/var/run/s6/container_environment/SUPERVISOR_TOKEN",
+            ]:
+                try:
+                    with open(path) as f:
+                        token = f.read().strip()
+                    if token:
+                        break
+                except (FileNotFoundError, PermissionError):
+                    continue
+
         return {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",

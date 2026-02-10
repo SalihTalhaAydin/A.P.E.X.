@@ -11,13 +11,18 @@ from brain.config import settings
 async def _ha_request(method: str, path: str, json_data: dict | None = None) -> dict | list | str:
     """Make an authenticated request to the HA REST API."""
     url = f"{settings.ha_api_url}{path}"
+    headers = settings.ha_headers
+    token = headers.get("Authorization", "")
+    print(f"  [HA API] {method} {url} (token: {'set' if len(token) > 10 else 'MISSING'})")
     async with httpx.AsyncClient(timeout=15.0) as client:
         response = await client.request(
             method=method,
             url=url,
-            headers=settings.ha_headers,
+            headers=headers,
             json=json_data,
         )
+        if response.status_code != 200:
+            print(f"  [HA API] ERROR: {response.status_code} {response.text[:200]}")
         response.raise_for_status()
         return response.json()
 

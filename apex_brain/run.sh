@@ -1,7 +1,7 @@
-#!/bin/bash
+#!/usr/bin/with-contenv bash
 # Apex Brain - HA Add-on startup script
 # Reads configuration from /data/options.json and starts the server.
-# init: false in config.yaml means this runs directly as PID 1 (no S6 overlay).
+# Uses with-contenv to inherit S6 container environment (SUPERVISOR_TOKEN, etc.)
 
 echo "========================================"
 echo "  Apex Brain Add-on Starting..."
@@ -21,10 +21,15 @@ export DB_PATH="/data/apex.db"
 
 # HA connection (automatic inside add-on)
 export HA_URL="http://supervisor/core"
-# SUPERVISOR_TOKEN is auto-injected by HA Supervisor
+# SUPERVISOR_TOKEN is injected by HA Supervisor via S6 container environment
 
 echo "  Model: ${LITELLM_MODEL}"
 echo "  Database: ${DB_PATH}"
+if [ -n "$SUPERVISOR_TOKEN" ]; then
+    echo "  SUPERVISOR_TOKEN: set (${#SUPERVISOR_TOKEN} chars)"
+else
+    echo "  WARNING: SUPERVISOR_TOKEN is NOT set!"
+fi
 echo "========================================"
 
 # Start the server
