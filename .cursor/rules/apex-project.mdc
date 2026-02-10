@@ -1,0 +1,122 @@
+---
+description: Apex Brain - Personal AI assistant project context, architecture, and conventions
+alwaysApply: true
+---
+
+# Apex Brain - Project Context
+
+## What This Is
+
+Apex is a personal AI assistant that runs as a Home Assistant Add-on on a dedicated HAOS mini PC (always on, 24/7). It has persistent memory, auto-learns about the user, and controls smart home devices. The repo is at https://github.com/SalihTalhaAydin/A.P.E.X.
+
+## Project Structure
+
+All source code lives in `apex_brain/`. This directory doubles as the HA add-on build context -- no duplicate files, no sync scripts. The root directory only contains dev/repo-level config.
+
+```
+.cursor/rules/           # Cursor AI rules (credentials.mdc is gitignored)
+.env.example, docker-compose.yml, repository.yaml, README.md
+apex_brain/              # Single source of truth for all code + HA add-on packaging
+    build.json           # Multi-arch base image map (amd64, aarch64)
+    config.yaml          # HA add-on configuration (slug, ports, options)
+    Dockerfile           # Python 3.13, Alpine 3.21 base
+    run.sh               # Entrypoint: reads options.json via jq, starts uvicorn
+    requirements.txt
+    brain/               # FastAPI server, orchestrator, config
+    memory/              # Conversation store, knowledge store, fact extraction
+    tools/               # Auto-discovered tool modules
+```
+
+## Architecture
+
+- **brain/server.py**: FastAPI server. Two endpoints: `/v1/chat/completions` (OpenAI-compatible, for HA) and `/api/chat` (simple JSON, for testing). Plus `/health`.
+- **brain/conversation.py**: Orchestrator. Flow: save user turn -> build context -> call LiteLLM -> tool-calling loop -> save response -> background fact extraction.
+- **brain/config.py**: Pydantic Settings. All config from env vars. Key: `litellm_model` (swap AI by changing this string). Checks both `.env` and `../.env` for flexibility (so `.env` can live in either `apex_brain/` or the repo root).
+- **brain/system_prompt.py**: Dynamic system prompt rebuilt every turn with injected context (time, facts, recent conversation).
+
+## Memory System (memory/)
+
+- **conversation_store.py**: Saves every conversation turn permanently in SQLite. Never deleted.
+- **knowledge_store.py**: Facts about the user + numpy cosine similarity over embeddings. No sqlite-vec extension needed.
+- **fact_extractor.py**: Background async task after each conversation. Calls a cheap model (gpt-4o-mini) to extract facts (preferences, people, events, habits). Stores with embeddings.
+- **context_builder.py**: Before each AI call, assembles: current time + recent turns + semantically relevant facts. Injected into system prompt.
+
+## Tool System (tools/)
+
+- **base.py**: `@tool` decorator + `TOOL_REGISTRY`. Auto-generates OpenAI function schemas from type hints. `get_openai_tool_definitions()` and `execute_tool()`.
+- **tools/__init__.py**: `discover_tools()` auto-imports all modules in tools/.
+- To add a tool: create a .py file in `apex_brain/tools/`, use `@tool(description="...")` decorator on an async function. Auto-discovered on restart.
+
+## Current Tools
+
+- `smart_home.py`: list_entities, get_entity_state, call_service, get_areas (HA REST API via Supervisor proxy). Includes debug logging for API calls (method, URL, token status, error responses).
+- `knowledge.py`: remember, recall, forget (backed by knowledge_store). Needs `set_knowledge_store()` called at startup.
+- `datetime_tool.py`: get_current_datetime
+- `calendar_tool.py`: Stub. Uncomment decorators when Google Calendar API is set up.
+
+## HA Add-on Details
+
+### Build System
+- **config.yaml**: slug=`apex_brain`, `hassio_api=true`, `homeassistant_api=true`, `init: false`. Options schema defines API keys, model selection, and tuning params.
+- **build.json**: Maps `amd64` and `aarch64` to `ghcr.io/home-assistant/{arch}-base-python:3.13-alpine3.21`. HA base images only carry the latest Python -- currently 3.13. If Python 3.14 ships and 3.13 images are removed, update both `build.json` and the `BUILD_FROM` default in `Dockerfile`.
+- **Dockerfile**: Uses `BUILD_FROM` ARG (overridden by Supervisor from `build.json`). Installs `jq` via apk (needed because bashio is unavailable). Copies code and `run.sh`.
+- **run.sh**: `#!/usr/bin/with-contenv bash`. Uses S6's `with-contenv` to inherit Supervisor-injected env vars (SUPERVISOR_TOKEN, etc.). Reads add-on options from `/data/options.json` using `jq -r` and exports as env vars. Starts uvicorn. Logs whether SUPERVISOR_TOKEN is set at startup.
+
+### init: false and S6 Behavior
+The `init: false` setting in `config.yaml` disables bashio but does NOT disable S6:
+- **S6 still runs**: The HA base image has S6 overlay baked in as the ENTRYPOINT. It starts regardless of `init: false` and manages `run.sh` as a service. You will see S6 startup messages in the logs (including the harmless `s6-overlay-suexec: fatal: can only run as pid 1` warning).
+- **with-contenv is required**: Because S6 runs services with a clean environment, Docker-injected env vars (like SUPERVISOR_TOKEN) are only available if the script uses `#!/usr/bin/with-contenv bash`. Without it, the token is missing and HA API calls fail with 401.
+- **No bashio**: `bashio::config` calls will NOT work. Use plain bash + jq to read `/data/options.json`.
+- **Trade-off**: You must install `jq` manually (`apk add --no-cache jq`) and read `/data/options.json` yourself.
+
+### Add-on Hostname
+The Supervisor assigns each add-on a Docker hostname: `{repo_hash}-{addon_slug}`. For this repo, the hostname is `14fc29d6-apex-brain`. Other containers (like HA Core) reach the API at `http://14fc29d6-apex-brain:8080`. This hostname is stable across restarts and rebuilds.
+
+### SUPERVISOR_TOKEN
+Injected by HA Supervisor into the container environment. Made available to `run.sh` via S6's `with-contenv`. Used for authenticating HA REST API calls through the Supervisor proxy (e.g., `Authorization: Bearer ${SUPERVISOR_TOKEN}`). The `config.py` has a fallback that reads from S6 container environment files (`/run/s6/container_environment/SUPERVISOR_TOKEN`) if the env var is somehow missing. No manual token setup needed inside the add-on.
+
+## Voice Pipeline Integration
+
+The add-on pairs with "Extended OpenAI Conversation" (a custom component, installable via HACS or manually). Configuration:
+- **Base URL**: `http://14fc29d6-apex-brain:8080/v1`
+- **API Key**: `apex` (dummy -- the add-on doesn't validate it)
+- The custom component translates HA's conversation pipeline into OpenAI-compatible API calls, which Apex Brain handles via `/v1/chat/completions`.
+
+## Key Conventions
+
+- All async. Use `httpx.AsyncClient` for HTTP, `aiosqlite` for DB.
+- LiteLLM for all AI calls (chat + embeddings). Never import openai/anthropic directly.
+- Embeddings stored as struct-packed bytes BLOBs in SQLite. Cosine similarity via numpy.
+- The `.env` file and `*.db` files are gitignored. Never commit secrets or databases.
+- The assistant's name is "Apex" everywhere (system prompt, logs, comments, branding).
+- Wake word will be "Hey Apex" (custom openWakeWord model, future). Currently can use "Hey Jarvis" (built-in).
+
+## Development Workflow
+
+- **Local dev**: `cd apex_brain && python -m brain.server` (runs on port 8080 with hot reload)
+- **Docker dev**: `docker compose up --build` (builds from `apex_brain/Dockerfile`)
+- **Test**: `curl http://localhost:8080/api/chat -H "Content-Type: application/json" -d '{"message": "hello"}'`
+- **Deploy**: push to GitHub, then in HA: refresh the add-on store -> update/rebuild
+- **Debug add-on**: SSH into HA, run `ha addons logs 14fc29d6_apex_brain` or check Log tab in HA UI
+- **Debug build**: `ha supervisor logs | tail -50` shows Docker build output
+
+## Gotchas & Lessons Learned
+
+1. **HA base images deprecate fast**: Python 3.12 Alpine images were removed within months. Always check what's currently published at `ghcr.io/home-assistant/amd64-base-python` before updating.
+2. **S6 runs regardless of init: false**: The HA base image always starts S6 overlay. Setting `init: false` only disables bashio, NOT S6 itself. S6 starts services with a clean environment, so `run.sh` MUST use `#!/usr/bin/with-contenv bash` to inherit Supervisor-injected env vars like SUPERVISOR_TOKEN. Without `with-contenv`, all HA API calls fail with 401.
+3. **HA API tokens**: Short-lived tokens (from the browser console) work for basic WebSocket API calls but do NOT work for Supervisor REST API endpoints or `config_entries/flow` WebSocket commands. For programmatic automation, use a Long-Lived Access Token (created in HA Profile > Security).
+4. **Custom component installation**: Custom components (like Extended OpenAI Conversation) need to be placed in `/config/custom_components/{integration_name}/` and require an HA Core restart (not just a reload) to load.
+5. **Docker build context**: For HA Supervisor builds, the build context is the add-on directory (`apex_brain/`), not the repo root. All files referenced in the Dockerfile must be relative to `apex_brain/`.
+6. **Don't duplicate source code**: Previously there were duplicate `brain/`, `memory/`, `tools/` dirs at the repo root AND inside `apex_brain/`. This was cleaned up -- `apex_brain/` is the single source of truth. Never re-introduce root-level source copies.
+7. **SUPERVISOR_TOKEN + with-contenv**: The token is injected as a Docker env var but S6 does NOT pass Docker env vars to services automatically. It writes them to `/run/s6/container_environment/` files and only injects them via `with-contenv`. If smart home tools get 401 errors, check that `run.sh` uses `#!/usr/bin/with-contenv bash` and that the startup log shows "SUPERVISOR_TOKEN: set".
+8. **Extended OpenAI Conversation openai dependency**: The custom component's `manifest.json` must pin `openai` to the exact version HA Core uses (e.g., `openai==2.15.0` for HA 2026.2.1). A loose pin like `openai~=2.8.0` causes `RequirementsNotFound` because HA won't install a conflicting version.
+
+## Planned Future Work (Phase 3+)
+
+- Email MCP tool (Gmail/Outlook)
+- PC Control MCP tool (runs on Windows PC, connects to Apex)
+- Web search/browse tool
+- iPhone notifications via HA companion app
+- Camera image analysis via HA AI Task integration
+- Custom "Hey Apex" openWakeWord model training
+- ATOM Echo mic satellites + existing speaker routing per room

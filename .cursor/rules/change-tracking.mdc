@@ -1,0 +1,61 @@
+---
+description: Requires AI to document all significant changes in CHANGELOG.md and keep project rules up to date
+alwaysApply: true
+---
+
+# Change Tracking
+
+After completing any significant change (new feature, bug fix, config change, architecture change, dependency update), you MUST update the documentation before finishing.
+
+## 1. Update CHANGELOG.md
+
+Append an entry to `CHANGELOG.md` under the current version heading. If the version was bumped, create a new heading.
+
+Format:
+
+```
+## [x.y.z] - YYYY-MM-DD
+
+### Added / Changed / Fixed / Removed
+- **Summary of change** -- brief why. Key files: `path/to/file.py`, `path/to/other.py`.
+```
+
+Rules:
+- Use the correct date (check system date).
+- Group entries under Added, Changed, Fixed, or Removed.
+- Include the specific files that were modified so future sessions can trace changes.
+- Keep each entry to 1-2 lines. Be specific, not vague.
+- If multiple changes are made in one session, list them all under the same version/date.
+
+## 2. Update apex-project.mdc When Needed
+
+If the change affects any of the following, update `.cursor/rules/apex-project.mdc` to match:
+- Project structure (new directories, files, or modules)
+- Architecture (new endpoints, changed data flow, new components)
+- Tool system (new tools added or removed)
+- HA add-on configuration (config.yaml, Dockerfile, run.sh, build system)
+- Key conventions or development workflow
+- Gotchas and lessons learned (add new discoveries)
+
+Only edit the specific sections that changed. Do NOT rewrite the entire file.
+
+## 3. What Counts as "Significant"
+
+Update docs for:
+- Any code change that would confuse a future AI session if undocumented
+- Bug fixes (especially ones with non-obvious root causes)
+- New tools, endpoints, or integrations
+- Config or infrastructure changes
+- Dependency additions or version bumps
+- Lessons learned from debugging
+
+Skip docs for:
+- Typo fixes, comment-only changes, formatting
+- Exploratory reads with no code changes
+- Changes the user explicitly says not to document
+
+## 4. Version Bumping
+
+- Bump the patch version in `apex_brain/config.yaml` when deploying a fix or minor change.
+- Bump the minor version for new features or significant additions.
+- Always keep `config.yaml` version and `CHANGELOG.md` heading in sync.

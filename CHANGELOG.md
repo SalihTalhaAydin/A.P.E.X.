@@ -24,6 +24,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [0.1.1] - 2026-02-10
 
+### Changed
+- **Repository restructured** -- Promoted `apex/` from a subfolder of `Random/` to a standalone project at `APEX/`. Moved `.cursor/rules/` into the project so rules are portable across machines. Deleted `jarvis-demo/`, browser fix MDs, old plan files, and `nul`. Updated all path references in rules, README, .env.example, and CHANGELOG. Added `credentials.mdc` to `.gitignore` (contains secrets). Added HA interaction documentation (browser + terminal methods) to `credentials.mdc`. Key files: `.cursor/rules/*.mdc`, `README.md`, `.env.example`, `.gitignore`, `CHANGELOG.md`.
+
 ### Fixed
 - **SUPERVISOR_TOKEN not available to smart home tools** -- S6 overlay runs in the container even with `init: false` in config.yaml. The old `#!/bin/bash` shebang in `run.sh` meant S6 started the script with a clean environment, stripping the Supervisor-injected token. All HA API calls from tools (list_entities, call_service, etc.) failed with 401 Unauthorized. Key files: `apex_brain/run.sh`, `apex_brain/brain/config.py`, `apex_brain/tools/smart_home.py`, `apex_brain/config.yaml`.
 

@@ -2,6 +2,9 @@
 .env
 *.db
 
+# Cursor credentials (contains secrets -- tokens, passwords, API keys)
+.cursor/rules/credentials.mdc
+
 # Python
 __pycache__/
 *.py[cod]
