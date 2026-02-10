@@ -96,7 +96,9 @@ class Conversation:
 
             # If no tool calls, we have our answer
             if not msg.tool_calls:
-                return msg.content or "Done."
+                text = msg.content or "Done."
+                print(f"  [AI] Text response (no tools called): {text[:150]}")
+                return text
 
             # Process tool calls
             messages.append(msg.model_dump())
@@ -108,9 +110,10 @@ class Conversation:
                 except json.JSONDecodeError:
                     args = {}
 
-                print(f"  [Tool] {fn_name}({json.dumps(args, default=str)[:200]})")
+                print(f"  [Tool] {fn_name}({json.dumps(args, default=str)[:500]})")
 
                 result = await execute_tool(fn_name, args)
+                print(f"  [Tool Result] {fn_name} -> {str(result)[:300]}")
 
                 messages.append({
                     "role": "tool",
