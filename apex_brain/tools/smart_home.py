@@ -177,7 +177,7 @@ async def list_entities(domain: str = "") -> str:
         "properties": {
             "entity_id": {
                 "type": "string",
-                "description": "The entity ID, e.g. 'light.living_room', 'climate.thermostat'",
+                "description": "The entity ID (Room_Fixture_Description), e.g. 'light.living_room_ceiling', 'climate.living_room_thermostat'",
             },
         },
         "required": ["entity_id"],
@@ -261,7 +261,7 @@ async def get_areas() -> str:
         "properties": {
             "entity_id": {
                 "type": "string",
-                "description": "The light entity ID, e.g. 'light.living_room'",
+                "description": "The light entity ID, e.g. 'light.living_room_ceiling', 'light.kitchen_floor_lamp'",
             },
             "action": {
                 "type": "string",
@@ -335,7 +335,7 @@ async def control_light(
         "properties": {
             "entity_id": {
                 "type": "string",
-                "description": "The climate entity ID, e.g. 'climate.thermostat'",
+                "description": "The climate entity ID, e.g. 'climate.living_room_thermostat'",
             },
             "temperature": {
                 "type": "number",
@@ -406,7 +406,7 @@ async def control_climate(
         "properties": {
             "entity_id": {
                 "type": "string",
-                "description": "The media_player entity ID, e.g. 'media_player.living_room_speaker'",
+                "description": "The media_player entity ID, e.g. 'media_player.living_room_tv', 'media_player.bedroom_speaker'",
             },
             "action": {
                 "type": "string",
@@ -485,7 +485,7 @@ async def control_media(
         "properties": {
             "entity_id": {
                 "type": "string",
-                "description": "The cover entity ID, e.g. 'cover.garage_door', 'cover.living_room_blinds'",
+                "description": "The cover entity ID, e.g. 'cover.living_room_blinds', 'cover.garage_door'",
             },
             "action": {
                 "type": "string",
@@ -543,7 +543,7 @@ async def control_cover(
         "properties": {
             "entity_id": {
                 "type": "string",
-                "description": "The fan entity ID, e.g. 'fan.bedroom'",
+                "description": "The fan entity ID, e.g. 'fan.bedroom_ceiling'",
             },
             "action": {
                 "type": "string",
@@ -613,7 +613,7 @@ async def control_fan(
             },
             "entity_id": {
                 "type": "string",
-                "description": "The entity ID to control, e.g. 'switch.office_plug', 'lock.front_door'",
+                "description": "The entity ID to control, e.g. 'switch.office_desk_lamp', 'lock.front_door'",
             },
             "service_data": {
                 "type": "object",

@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.1.3] - 2026-02-11
+
+### Added
+- **Device naming convention** -- Room + Fixture/Level + Description (friendly_name Title Case, entity_id snake_case when editable). Documented in `.cursor/rules/apex-device-naming.mdc`, `docs/device-naming.md`; system prompt and smart_home tool examples updated. Optional `scripts/suggest_device_names.py` (REST, suggests names only) and `scripts/ha_assign_devices.py` now supports `--dry-run` and a confirmation prompt before applying area/name updates in HA. Key files: `apex_brain/brain/system_prompt.py`, `apex_brain/tools/smart_home.py`, `docs/device-naming.md`, `scripts/ha_assign_devices.py`, `scripts/suggest_device_names.py`.
+
+### Changed
+- **Entity friendly names: abbreviation expansion** -- `scripts/ha_assign_devices.py` now expands abbreviations and typos when building friendly names from entity_id (e.g. bsmnt → Basement, ent → Entrance, bedr → Bedroom, upstaris → Upstairs, Mark S → Mark's, Adguard → AdGuard). All lights, switches, and other entities get readable names. Key file: `scripts/ha_assign_devices.py`.
+- **Cursor IDE orchestration (user + project level only, no code changes)** -- User-level rules file at `%USERPROFILE%\.cursor\cursor-user-rules-recommended.md` for pasting into Cursor Settings → User Rules (parallel, hands-off, auto-rule creation, zero repetition). Project-level: `.cursor/rules/apex-orchestration.mdc`, `AGENTS.md`, one-line reminder in `apex-project.mdc`, and `docs/cursor-user-rules-recommended.md` pointing to the user-level file. Key files: `.cursor/rules/apex-orchestration.mdc`, `AGENTS.md`, `docs/cursor-user-rules-recommended.md`.
+- **HA connectivity diagnostic** -- `/health` now includes `ha_reachable` (and `ha_error` on failure). New `GET /api/debug/ha` returns whether the add-on can reach the Home Assistant Core API (same URL/token as smart home tools), for quick diagnosis when "light didn't work". Key file: `apex_brain/brain/server.py`.
+
+---
+
 ## [0.1.2] - 2026-02-10
 
 ### Fixed

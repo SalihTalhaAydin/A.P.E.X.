@@ -10,6 +10,7 @@ import time
 import uuid
 import asyncio
 
+import httpx
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -35,6 +36,25 @@ import litellm
 # --------------------------------------------------------------------------
 conversation: Conversation | None = None
 startup_time: float = 0
+
+
+async def _check_ha_reachable() -> tuple[bool, str | None]:
+    """
+    Perform one GET to HA Core API from this process (add-on or local).
+    Returns (success, error_message). Uses same URL/headers as smart home tools.
+    Timeout 3s so health/debug endpoints do not block long.
+    """
+    url = f"{settings.ha_api_url}/config"
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            r = await client.get(url, headers=settings.ha_headers)
+            if r.status_code == 200:
+                return True, None
+            return False, f"HTTP {r.status_code}"
+    except httpx.TimeoutException:
+        return False, "timeout"
+    except Exception as e:
+        return False, str(e)[:200]
 
 
 async def _embed_text(text: str) -> list[float] | None:
@@ -146,13 +166,32 @@ class ChatResponse(BaseModel):
 
 @app.get("/health")
 async def health():
-    """Health check endpoint."""
+    """Health check endpoint. Includes HA connectivity when running as add-on."""
     uptime = time.time() - startup_time if startup_time else 0
-    return {
+    ha_ok, ha_err = await _check_ha_reachable()
+    out = {
         "status": "online",
         "model": settings.litellm_model,
         "uptime_seconds": round(uptime),
         "tools_loaded": list(TOOL_REGISTRY.keys()),
+        "ha_reachable": ha_ok,
+    }
+    if ha_err:
+        out["ha_error"] = ha_err
+    return out
+
+
+@app.get("/api/debug/ha")
+async def debug_ha():
+    """
+    Diagnostic: can this instance reach the Home Assistant Core API?
+    Uses the same URL and token as smart home tools. Useful after "light didn't work".
+    """
+    ha_ok, ha_err = await _check_ha_reachable()
+    return {
+        "ha_reachable": ha_ok,
+        "ha_error": ha_err,
+        "ha_url": settings.ha_url,
     }
 
 

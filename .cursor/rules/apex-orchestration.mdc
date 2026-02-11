@@ -1,0 +1,10 @@
+---
+description: APEX-specific orchestration — when to create project rules, parallel full-request behavior
+alwaysApply: true
+---
+
+# APEX Orchestration (Project-Level)
+
+- **User-level (generic)**: When the user states a preference that applies to any project, add it to the user-level rules file: `%USERPROFILE%\.cursor\cursor-user-rules-recommended.md` (Windows) or `~/.cursor/cursor-user-rules-recommended.md` (Mac/Linux). Tell the user it's captured so they won't repeat it; they can re-paste that file into Cursor Settings → User Rules to apply.
+- **Project-level (APEX only)**: When the preference applies only to APEX (Home Assistant, add-on, tools, memory, voice pipeline), create or update a rule in `.cursor/rules/` with an APEX-specific name (e.g. `apex-*.mdc`). Do not duplicate user-level orchestration content here.
+- When implementing features in this repo, prefer parallel tool execution and completing the full request before reporting back.

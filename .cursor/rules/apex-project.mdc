@@ -5,6 +5,8 @@ alwaysApply: true
 
 # Apex Brain - Project Context
 
+User-level orchestration (parallel, hands-off, auto-rule creation) is defined in the user's global Rules. For APEX-only conventions, use `.cursor/rules/` here.
+
 ## What This Is
 
 Apex is a personal AI assistant that runs as a Home Assistant Add-on on a dedicated HAOS mini PC (always on, 24/7). It has persistent memory, auto-learns about the user, and controls smart home devices. The repo is at https://github.com/SalihTalhaAydin/A.P.E.X.
@@ -14,7 +16,9 @@ Apex is a personal AI assistant that runs as a Home Assistant Add-on on a dedica
 All source code lives in `apex_brain/`. This directory doubles as the HA add-on build context -- no duplicate files, no sync scripts. The root directory only contains dev/repo-level config.
 
 ```
-.cursor/rules/           # Cursor AI rules (credentials.mdc is gitignored)
+.cursor/rules/           # Cursor AI rules (apex-project, apex-orchestration, change-tracking; credentials.mdc gitignored)
+docs/                    # cursor-user-rules-recommended.md (paste into Cursor User Rules)
+AGENTS.md                # Project-level agent instructions
 .env.example, docker-compose.yml, repository.yaml, README.md
 apex_brain/              # Single source of truth for all code + HA add-on packaging
     build.json           # Multi-arch base image map (amd64, aarch64)
@@ -29,7 +33,7 @@ apex_brain/              # Single source of truth for all code + HA add-on packa
 
 ## Architecture
 
-- **brain/server.py**: FastAPI server. Two endpoints: `/v1/chat/completions` (OpenAI-compatible, for HA) and `/api/chat` (simple JSON, for testing). Plus `/health`.
+- **brain/server.py**: FastAPI server. Endpoints: `/v1/chat/completions` (OpenAI-compatible, for HA), `/api/chat` (simple JSON, for testing), `/health` (includes `ha_reachable`), and `GET /api/debug/ha` (diagnostic: can add-on reach HA Core API?).
 - **brain/conversation.py**: Orchestrator. Flow: save user turn -> build context -> call LiteLLM -> tool-calling loop -> save response -> background fact extraction.
 - **brain/config.py**: Pydantic Settings. All config from env vars. Key: `litellm_model` (swap AI by changing this string). Checks both `.env` and `../.env` for flexibility (so `.env` can live in either `apex_brain/` or the repo root).
 - **brain/system_prompt.py**: Dynamic system prompt rebuilt every turn with injected context (time, facts, recent conversation).
@@ -99,6 +103,7 @@ The add-on pairs with "Extended OpenAI Conversation" (a custom component, instal
 - **Deploy**: push to GitHub, then in HA: refresh the add-on store -> update/rebuild
 - **Debug add-on**: SSH into HA, run `ha addons logs 14fc29d6_apex_brain` or check Log tab in HA UI
 - **Debug build**: `ha supervisor logs | tail -50` shows Docker build output
+- **Device naming in HA**: Use `scripts/ha_assign_devices.py --dry-run` to preview area/name updates, then run without `--dry-run` and confirm when prompted. See `docs/device-naming.md` and `.cursor/rules/apex-device-naming.mdc`.
 
 ## Gotchas & Lessons Learned
 
@@ -110,6 +115,7 @@ The add-on pairs with "Extended OpenAI Conversation" (a custom component, instal
 6. **Don't duplicate source code**: Previously there were duplicate `brain/`, `memory/`, `tools/` dirs at the repo root AND inside `apex_brain/`. This was cleaned up -- `apex_brain/` is the single source of truth. Never re-introduce root-level source copies.
 7. **SUPERVISOR_TOKEN + with-contenv**: The token is injected as a Docker env var but S6 does NOT pass Docker env vars to services automatically. It writes them to `/run/s6/container_environment/` files and only injects them via `with-contenv`. If smart home tools get 401 errors, check that `run.sh` uses `#!/usr/bin/with-contenv bash` and that the startup log shows "SUPERVISOR_TOKEN: set".
 8. **Extended OpenAI Conversation openai dependency**: The custom component's `manifest.json` must pin `openai` to the exact version HA Core uses (e.g., `openai==2.15.0` for HA 2026.2.1). A loose pin like `openai~=2.8.0` causes `RequirementsNotFound` because HA won't install a conflicting version.
+9. **Orchestration: user vs project rules**: Generic preferences (any project) go in Cursor User Rules (paste from `docs/cursor-user-rules-recommended.md`). APEX-only preferences go in `.cursor/rules/` with an `apex-*.mdc` name so they stay in this repo.
 
 ## Planned Future Work (Phase 3+)
 

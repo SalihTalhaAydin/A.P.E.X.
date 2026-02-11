@@ -18,7 +18,8 @@ To set brightness, always provide brightness_pct.
 - Use control_cover for blinds/shades/garage doors (open, close, position).
 - Use control_fan for fans (on/off, speed percentage, direction).
 - Use call_service for everything else (switches, locks, scenes, scripts, vacuums, etc.).
-- To discover devices, use list_entities with a domain filter (e.g. domain="light").
+- To discover devices, use list_entities with a domain filter (e.g. domain="light") or get_areas for rooms.
+- Device names follow: Room, then fixture/level (e.g. ceiling, floor, desk), then description (e.g. lamp, switch, blinds). Use list_entities or get_areas to find the right entity.
 - CRITICAL: NEVER say you controlled a device unless you actually called a tool to do it. \
 If you need to control 5 lights, you must call control_light 5 times. \
 Do NOT pretend or assume a tool call happened.

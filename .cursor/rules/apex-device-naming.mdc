@@ -1,0 +1,33 @@
+---
+description: APEX smart home device naming convention (Room + Fixture/Level + Description)
+alwaysApply: false
+---
+
+# Device Naming Convention
+
+When naming or referring to smart home devices (in HA or in code/docs), use this pattern so the AI and automations stay consistent.
+
+## Pattern
+
+**[Room] [Fixture / Level] [Description]**
+
+| Part | Meaning | Examples |
+|------|--------|----------|
+| **Room** | Area/room name | Living Room, Kitchen, Bedroom, Office |
+| **Fixture / Level** | Where or what kind of fixture | Ceiling, Floor, Desk, Wall, Bedside |
+| **Description** | What it is / does | Lamp, Switch, Blinds, Fan, Thermostat |
+
+## friendly_name (in Home Assistant)
+
+- Title Case, same order: Room + Fixture/Level + Description.
+- Examples: "Living Room Ceiling Lamp", "Kitchen Floor Lamp Switch", "Bedroom Ceiling", "Office Desk Lamp".
+
+## entity_id (when editable)
+
+- snake_case, same order: `{room}_{fixture}_{description}`.
+- Examples: `light.living_room_ceiling_main`, `switch.kitchen_floor_lamp`, `cover.living_room_blinds`.
+- Many entity IDs are set by integrations and cannot be changed; apply the convention to **friendly_name** and, where possible (helpers, new devices), to **entity_id**.
+
+## Areas
+
+- Assign every device to an **area** in Home Assistant so "room" is unambiguous and list_entities/get_areas align with the convention.
