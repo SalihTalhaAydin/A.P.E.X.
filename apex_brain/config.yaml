@@ -9,7 +9,7 @@
 #   homeassistant_api — grants access to the HA Core API
 
 name: "Apex Brain"
-version: "0.1.2"
+version: "0.1.4"
 slug: "apex_brain"
 description: "Personal AI assistant with memory, smart home control, and semantic knowledge"
 url: "https://github.com/SalihTalhaAydin/A.P.E.X."

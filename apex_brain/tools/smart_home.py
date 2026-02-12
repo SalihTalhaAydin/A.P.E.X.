@@ -10,13 +10,28 @@ domains without a dedicated tool.
 """
 
 import httpx
-from tools.base import tool
 from brain.config import settings
 
+from tools.base import tool
 
 # --------------------------------------------------
 # Internal helpers
 # --------------------------------------------------
+
+
+def _format_ha_error(entity_id: str, domain: str, e: Exception) -> str:
+    """Return a short, model-friendly error so the AI can report the real failure to the user."""
+    if isinstance(e, httpx.HTTPStatusError):
+        r = getattr(e, "response", None)
+        if r is not None:
+            code = r.status_code
+            body = (r.text or "")[:200]
+            if code == 404:
+                return f"Entity not found: {entity_id}. Check the entity_id with list_entities."
+            if code == 422:
+                return f"HA rejected the request (422). {body or str(e)}"
+            return f"HA error {code}: {body or str(e)}"
+    return f"Error ({domain}): {e}"
 
 
 async def _ha_request(
@@ -410,6 +425,8 @@ async def control_light(
         status = await _verify_light(entity_id)
         return f"Done. {status}"
 
+    except httpx.HTTPStatusError as e:
+        return _format_ha_error(entity_id, "light", e)
     except Exception as e:
         return f"Error controlling light: {e}"
 
@@ -519,6 +536,8 @@ async def control_climate(
         status = await _verify_climate(entity_id)
         return f"Done ({', '.join(actions_taken)}). {status}"
 
+    except httpx.HTTPStatusError as e:
+        return _format_ha_error(entity_id, "climate", e)
     except Exception as e:
         return f"Error controlling climate: {e}"
 
@@ -636,6 +655,8 @@ async def control_media(
         status = await _verify_media(entity_id)
         return f"Done. {status}"
 
+    except httpx.HTTPStatusError as e:
+        return _format_ha_error(entity_id, "media_player", e)
     except Exception as e:
         return f"Error controlling media player: {e}"
 
@@ -713,6 +734,8 @@ async def control_cover(
         status = await _verify_generic(entity_id)
         return f"Done. {status}"
 
+    except httpx.HTTPStatusError as e:
+        return _format_ha_error(entity_id, "cover", e)
     except Exception as e:
         return f"Error controlling cover: {e}"
 
@@ -774,6 +797,8 @@ async def control_fan(
         status = await _verify_generic(entity_id)
         return f"Done. {status}"
 
+    except httpx.HTTPStatusError as e:
+        return _format_ha_error(entity_id, "fan", e)
     except Exception as e:
         return f"Error controlling fan: {e}"
 
@@ -840,5 +865,7 @@ async def call_service(
         status = await _verify_generic(entity_id)
         return f"Done. {status}"
 
+    except httpx.HTTPStatusError as e:
+        return _format_ha_error(entity_id, domain, e)
     except Exception as e:
         return f"Error calling service: {e}"

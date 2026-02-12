@@ -53,9 +53,10 @@ apex_brain/              # Single source of truth for all code + HA add-on packa
 
 ## Current Tools
 
-- `smart_home.py`: list_entities (cap 50 when no domain, 200 when domain set; logs total/showing and appends "Showing first N of M" when truncated), get_entity_state, call_service, get_areas (HA REST API via Supervisor proxy). Includes debug logging for API calls (method, URL, token status, error responses).
+- `smart_home.py`: list_entities (cap 50 when no domain, 200 when domain set; logs total/showing and appends "Showing first N of M" when truncated), get_entity_state, control_light, control_climate, control_media, control_cover, control_fan, call_service, get_areas (HA REST API via Supervisor proxy). HA HTTP errors (404, 422) are formatted for the model via _format_ha_error so the AI can report real failures. Includes debug logging for API calls.
 - `knowledge.py`: remember, recall, forget (backed by knowledge_store). Needs `set_knowledge_store()` called at startup.
 - `datetime_tool.py`: get_current_datetime
+- `wait_tool.py`: wait_seconds(seconds) — pause between actions for timed sequences (e.g. "blink 3 times with 10s delay"). Max 300s.
 - `calendar_tool.py`: Stub. Uncomment decorators when Google Calendar API is set up.
 
 ## HA Add-on Details

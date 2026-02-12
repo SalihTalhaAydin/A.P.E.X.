@@ -5,14 +5,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.1.4] - 2026-02-11
+
+### Added
+- **Ruff lint and format** — pyproject.toml: Ruff lint (E, F, I, B, C4, UP, ARG; E501 ignored) and format; pre-commit hook enabled for Ruff. Key files: `pyproject.toml`, `.pre-commit-config.yaml`.
+- **Unit tests** — pytest, pytest-asyncio, pytest-cov; `apex_brain/tests/` with conftest (temp DB, mock embed), test_config, test_tools_base, test_knowledge_store, test_server (14 tests). Key files: `apex_brain/tests/*.py`, `pyproject.toml`.
+- **CI test-and-lint** — GitHub Action runs ruff check, ruff format --check, pytest on push/PR to main. Key file: `.github/workflows/test-and-lint.yml`.
+- **README badges** — Test and Lint, Secrets Check, Python 3.12+ badges; tests run command documented. Key file: `README.md`.
+- **wait_seconds tool** — Enables timed sequences (e.g. "turn kitchen lights on/off three times with 10-second delay"). AI can call control_light and wait_seconds in sequence; max wait 300s. Key file: `apex_brain/tools/wait_tool.py`.
+
+### Changed
+- **Docstrings and version** — Settings and KnowledgeStore class docstrings; change-tracking documents config.yaml as canonical version (pyproject matches). Key files: `apex_brain/brain/config.py`, `apex_brain/memory/knowledge_store.py`, `.cursor/rules/change-tracking.mdc`.
+- **Lint fixes** — Unused vars and loop var in conversation_store and ha_assign_devices; lifespan arg renamed to _app. Key files: `apex_brain/memory/conversation_store.py`, `apex_brain/brain/server.py`, `scripts/ha_assign_devices.py`.
+- **System prompt: full control and honesty** — Explicit "you have full control" and instructions to use wait_seconds for timed/repeated actions; never refuse with "not allowed" when tools can do it. Stronger rule: if a tool fails, say so clearly; never claim you did the action anyway. Key file: `apex_brain/brain/system_prompt.py`.
+- **Cleanup** — Removed unused `.prettierrc`; added `.coverage`, `htmlcov/`, `.pytest_cache/` to .gitignore. Key file: `.gitignore`.
+- **HA errors surfaced to the model** — Smart home control tools now catch httpx.HTTPStatusError and return short, model-friendly messages (e.g. "Entity not found: light.xyz", "HA error 422: ...") so the AI can report real failures instead of generic or false excuses. Key file: `apex_brain/tools/smart_home.py`.
+
+---
+
 ## [0.1.3] - 2026-02-11
 
 ### Fixed
 - **Security: remove hardcoded HA refresh token** -- Removed the fallback refresh token from `scripts/ha_assign_devices.py`; the script now requires `REFRESH_TOKEN` in the environment and exits with a clear error if unset. If this repo was ever pushed with the old code, rotate the token in HA (Profile → Security) and update `.cursor/rules/credentials.mdc`. Key file: `scripts/ha_assign_devices.py`.
 - **HA_TOKEN support in ha_assign_devices** -- Script accepts `HA_TOKEN` (long-lived access token) or `REFRESH_TOKEN`; prefer `HA_TOKEN` from Profile → Security → Long-Lived Access Tokens. Key file: `scripts/ha_assign_devices.py`.
+- **Security: no hardcoded private IP in scripts** -- `ha_assign_devices.py` default HA_URL changed from a specific local IP to `http://homeassistant.local:8123` so the repo does not expose your network. Key file: `scripts/ha_assign_devices.py`.
 - **Lights not accessible / turn on-off not working properly** -- `list_entities` was capped at 50 entities for all calls, so when the user had many lights (or many entities), only the first 50 were visible to the model and later ones were never controlled. Now when a domain filter is used (e.g. `domain="light"`), up to 200 entities are returned (cap 50 when no domain). When truncated, the response includes "(Showing first N of M entities)" and logs show `[list_entities] domain=... total=... showing=...` for debugging. Key files: `apex_brain/tools/smart_home.py`, `apex_brain/brain/system_prompt.py`.
 
 ### Added
+- **Pre-commit and CI secret scanning** -- Pre-commit hook (gitleaks) blocks commits that contain tokens, API keys, or passwords. Optional: `pip install pre-commit && pre-commit install`. `.gitleaks.toml` allowlists `.env.example`. GitHub Action `.github/workflows/check-secrets.yml` runs the same check on push/PR to main. Project rule `.cursor/rules/apex-no-secrets-in-code.mdc` forbids secrets in code and fallbacks; env or gitignored files only. Key files: `.pre-commit-config.yaml`, `.gitleaks.toml`, `.github/workflows/check-secrets.yml`, `.cursor/rules/apex-no-secrets-in-code.mdc`, `README.md`.
 - **HA device setup checklist** -- `docs/ha-device-setup-checklist.md` lists device types (Sengled, IKEA Dirigera, Hampton Bay/Tuya, Echo, temp sensors, Nest, BroadLink RM4 Pro), integration names, naming examples, and integration steps for fan/projector/curtains/laundry/basement. Wi‑Fi/Bluetooth-focused; Zigbee skipped for now. Key file: `docs/ha-device-setup-checklist.md`.
 - **Nest thermostat setup guide** -- `docs/nest-setup.md` step-by-step for adding Google Nest to HA (Cloud project, OAuth, Device Access $5, Pub/Sub topic, link account). Apex already supports climate entities via `control_climate`. Key file: `docs/nest-setup.md`.
 - **Device naming convention** -- Room + Fixture/Level + Description (friendly_name Title Case, entity_id snake_case when editable). Documented in `.cursor/rules/apex-device-naming.mdc`, `docs/device-naming.md`; system prompt and smart_home tool examples updated. Optional `scripts/suggest_device_names.py` (REST, suggests names only) and `scripts/ha_assign_devices.py` now supports `--dry-run` and a confirmation prompt before applying area/name updates in HA. Key files: `apex_brain/brain/system_prompt.py`, `apex_brain/tools/smart_home.py`, `docs/device-naming.md`, `scripts/ha_assign_devices.py`, `scripts/suggest_device_names.py`.
