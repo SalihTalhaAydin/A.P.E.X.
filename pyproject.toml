@@ -1,0 +1,13 @@
+[project]
+name = "apex-brain"
+version = "0.0.0"
+description = "Apex Brain - HA add-on and local dev"
+readme = "README.md"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 75
+target-version = "py312"
+
+[tool.ruff.format]
+quote-style = "double"

@@ -31,7 +31,9 @@ class Settings(BaseSettings):
     db_path: str = "./apex.db"
 
     # Memory tuning
-    recent_turns: int = 10          # conversation turns to always include in context
+    recent_turns: int = (
+        10  # conversation turns to always include in context
+    )
     max_facts_in_context: int = 20  # max relevant facts per AI call
 
     # Server
@@ -43,6 +45,7 @@ class Settings(BaseSettings):
     def ha_headers(self) -> dict:
         """Build auth headers for HA API calls."""
         import os
+
         # Inside add-on: use SUPERVISOR_TOKEN (injected by HA Supervisor via S6)
         token = os.environ.get("SUPERVISOR_TOKEN", "") or self.ha_token
 

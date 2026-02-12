@@ -26,7 +26,9 @@ class KnowledgeStore:
     def __init__(self, db_path: str):
         self.db_path = db_path
         self._db: aiosqlite.Connection | None = None
-        self._embed_fn = None  # Set externally: async fn(text) -> list[float]
+        self._embed_fn = (
+            None  # Set externally: async fn(text) -> list[float]
+        )
 
     def set_embed_function(self, fn):
         """Set the embedding function: async fn(text) -> list[float]."""
@@ -97,14 +99,25 @@ class KnowledgeStore:
             cursor = await self._db.execute(
                 "INSERT INTO facts (category, key, value, confidence, source, embedding, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (category, key, value, confidence, source, embedding_blob, now, now),
+                (
+                    category,
+                    key,
+                    value,
+                    confidence,
+                    source,
+                    embedding_blob,
+                    now,
+                    now,
+                ),
             )
             fact_id = cursor.lastrowid
 
         await self._db.commit()
         return fact_id
 
-    async def search_semantic(self, query: str, limit: int = 10) -> list[dict]:
+    async def search_semantic(
+        self, query: str, limit: int = 10
+    ) -> list[dict]:
         """Search facts by semantic similarity using cosine distance."""
         if not self._embed_fn:
             return await self.search_keyword(query, limit)
@@ -137,7 +150,10 @@ class KnowledgeStore:
                 fact_norm = np.linalg.norm(fact_embedding)
                 if fact_norm == 0:
                     continue
-                similarity = float(np.dot(query_vec, fact_embedding) / (query_norm * fact_norm))
+                similarity = float(
+                    np.dot(query_vec, fact_embedding)
+                    / (query_norm * fact_norm)
+                )
                 scored.append((similarity, row))
 
             # Sort by similarity (highest first) and take top K
@@ -145,23 +161,29 @@ class KnowledgeStore:
 
             results = []
             for similarity, row in scored[:limit]:
-                results.append({
-                    "id": row[0],
-                    "category": row[1],
-                    "key": row[2],
-                    "value": row[3],
-                    "confidence": row[4],
-                    "created_at": row[5],
-                    "updated_at": row[6],
-                    "similarity": round(similarity, 4),
-                })
+                results.append(
+                    {
+                        "id": row[0],
+                        "category": row[1],
+                        "key": row[2],
+                        "value": row[3],
+                        "confidence": row[4],
+                        "created_at": row[5],
+                        "updated_at": row[6],
+                        "similarity": round(similarity, 4),
+                    }
+                )
             return results
 
         except Exception as e:
-            print(f"[KnowledgeStore] Semantic search error ({e}), falling back to keyword.")
+            print(
+                f"[KnowledgeStore] Semantic search error ({e}), falling back to keyword."
+            )
             return await self.search_keyword(query, limit)
 
-    async def search_keyword(self, query: str, limit: int = 10) -> list[dict]:
+    async def search_keyword(
+        self, query: str, limit: int = 10
+    ) -> list[dict]:
         """Fallback keyword search using LIKE."""
         cursor = await self._db.execute(
             "SELECT id, category, key, value, confidence, created_at, updated_at "
@@ -172,13 +194,20 @@ class KnowledgeStore:
         rows = await cursor.fetchall()
         return [
             {
-                "id": r[0], "category": r[1], "key": r[2], "value": r[3],
-                "confidence": r[4], "created_at": r[5], "updated_at": r[6],
+                "id": r[0],
+                "category": r[1],
+                "key": r[2],
+                "value": r[3],
+                "confidence": r[4],
+                "created_at": r[5],
+                "updated_at": r[6],
             }
             for r in rows
         ]
 
-    async def get_all_facts(self, category: str | None = None, limit: int = 100) -> list[dict]:
+    async def get_all_facts(
+        self, category: str | None = None, limit: int = 100
+    ) -> list[dict]:
         """Get all facts, optionally filtered by category."""
         if category:
             cursor = await self._db.execute(
@@ -195,8 +224,13 @@ class KnowledgeStore:
         rows = await cursor.fetchall()
         return [
             {
-                "id": r[0], "category": r[1], "key": r[2], "value": r[3],
-                "confidence": r[4], "created_at": r[5], "updated_at": r[6],
+                "id": r[0],
+                "category": r[1],
+                "key": r[2],
+                "value": r[3],
+                "confidence": r[4],
+                "created_at": r[5],
+                "updated_at": r[6],
             }
             for r in rows
         ]

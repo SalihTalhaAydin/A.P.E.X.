@@ -38,13 +38,17 @@ class Conversation:
         # Silence litellm's verbose logging
         litellm.suppress_debug_info = True
 
-    async def handle(self, user_message: str, session_id: str = "default") -> str:
+    async def handle(
+        self, user_message: str, session_id: str = "default"
+    ) -> str:
         """
         Process a user message through the full Apex pipeline.
         Returns the final response text.
         """
         # 1. Save user turn
-        await self.conversation_store.save_turn("user", user_message, session_id)
+        await self.conversation_store.save_turn(
+            "user", user_message, session_id
+        )
 
         # 2. Build rich context (recent history + relevant facts + time)
         system_prompt = await self.context_builder.build(user_message)
@@ -62,18 +66,23 @@ class Conversation:
         response_text = await self._ai_tool_loop(messages, tool_defs)
 
         # 6. Save assistant response
-        await self.conversation_store.save_turn("assistant", response_text, session_id)
+        await self.conversation_store.save_turn(
+            "assistant", response_text, session_id
+        )
 
         # 7. Background fact extraction (user doesn't wait)
-        recent = await self.conversation_store.get_recent(n=4, session_id=session_id)
-        asyncio.create_task(
-            self._safe_extract_facts(recent)
+        recent = await self.conversation_store.get_recent(
+            n=4, session_id=session_id
         )
+        asyncio.create_task(self._safe_extract_facts(recent))
 
         return response_text
 
     async def _ai_tool_loop(
-        self, messages: list[dict], tool_defs: list[dict], max_iterations: int = 10
+        self,
+        messages: list[dict],
+        tool_defs: list[dict],
+        max_iterations: int = 10,
     ) -> str:
         """Call the AI, handle tool calls, repeat until we get a text response."""
         for _ in range(max_iterations):
@@ -97,7 +106,9 @@ class Conversation:
             # If no tool calls, we have our answer
             if not msg.tool_calls:
                 text = msg.content or "Done."
-                print(f"  [AI] Text response (no tools called): {text[:150]}")
+                print(
+                    f"  [AI] Text response (no tools called): {text[:150]}"
+                )
                 return text
 
             # Process tool calls
@@ -110,16 +121,20 @@ class Conversation:
                 except json.JSONDecodeError:
                     args = {}
 
-                print(f"  [Tool] {fn_name}({json.dumps(args, default=str)[:500]})")
+                print(
+                    f"  [Tool] {fn_name}({json.dumps(args, default=str)[:500]})"
+                )
 
                 result = await execute_tool(fn_name, args)
                 print(f"  [Tool Result] {fn_name} -> {str(result)[:300]}")
 
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": str(result),
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": str(result),
+                    }
+                )
 
         return "I ran into a loop processing your request. Could you rephrase?"
 

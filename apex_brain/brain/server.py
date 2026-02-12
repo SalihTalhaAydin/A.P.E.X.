@@ -17,7 +17,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 # Add project root to path so imports work
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(
+    0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 
 from brain.config import settings
 from brain.conversation import Conversation
@@ -202,7 +204,9 @@ async def simple_chat(req: ChatRequest):
     POST {"message": "turn off the lights"} -> {"response": "Done."}
     """
     if not conversation:
-        return JSONResponse(status_code=503, content={"error": "Not ready"})
+        return JSONResponse(
+            status_code=503, content={"error": "Not ready"}
+        )
 
     response_text = await conversation.handle(req.message, req.session_id)
     return ChatResponse(response=response_text, session_id=req.session_id)
@@ -217,7 +221,9 @@ async def openai_compatible(request: Request):
     in OpenAI's expected format.
     """
     if not conversation:
-        return JSONResponse(status_code=503, content={"error": "Not ready"})
+        return JSONResponse(
+            status_code=503, content={"error": "Not ready"}
+        )
 
     body = await request.json()
     messages = body.get("messages", [])
@@ -230,7 +236,10 @@ async def openai_compatible(request: Request):
             if isinstance(content, list):
                 # Handle multimodal format
                 for part in content:
-                    if isinstance(part, dict) and part.get("type") == "text":
+                    if (
+                        isinstance(part, dict)
+                        and part.get("type") == "text"
+                    ):
                         user_message = part.get("text", "")
                         break
             else:
@@ -275,6 +284,7 @@ async def openai_compatible(request: Request):
 # --------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "brain.server:app",
         host="0.0.0.0",

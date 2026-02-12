@@ -22,6 +22,7 @@ def tool(description: str, parameters: dict | None = None):
 
     Parameters schema is auto-generated from type hints if not provided.
     """
+
     def decorator(func: Callable) -> Callable:
         # Auto-generate parameter schema from type hints
         schema = parameters or _schema_from_hints(func)
@@ -97,14 +98,16 @@ def get_openai_tool_definitions() -> list[dict]:
     """Convert all registered tools to OpenAI function-calling format."""
     definitions = []
     for name, info in TOOL_REGISTRY.items():
-        definitions.append({
-            "type": "function",
-            "function": {
-                "name": name,
-                "description": info["description"],
-                "parameters": info["parameters"],
-            },
-        })
+        definitions.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": info["description"],
+                    "parameters": info["parameters"],
+                },
+            }
+        )
     return definitions
 
 

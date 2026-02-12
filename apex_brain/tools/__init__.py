@@ -3,6 +3,7 @@ import importlib
 import pkgutil
 from pathlib import Path
 
+
 def discover_tools():
     """Import all modules in the tools package to register @tool functions."""
     package_dir = Path(__file__).parent

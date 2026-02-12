@@ -37,7 +37,9 @@ Extract new facts (JSON array only, no other text):"""
 
 
 class FactExtractor:
-    def __init__(self, knowledge_store: KnowledgeStore, model: str = "gpt-4o-mini"):
+    def __init__(
+        self, knowledge_store: KnowledgeStore, model: str = "gpt-4o-mini"
+    ):
         self.knowledge_store = knowledge_store
         self.model = model
 
@@ -65,7 +67,12 @@ class FactExtractor:
             response = await litellm_completion(
                 model=self.model,
                 messages=[
-                    {"role": "user", "content": EXTRACTION_PROMPT.format(conversation=convo_text)}
+                    {
+                        "role": "user",
+                        "content": EXTRACTION_PROMPT.format(
+                            conversation=convo_text
+                        ),
+                    }
                 ],
                 temperature=0.3,
                 max_tokens=1000,

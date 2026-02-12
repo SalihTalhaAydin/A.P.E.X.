@@ -34,7 +34,9 @@ class ConversationStore:
         """)
         await self._db.commit()
 
-    async def save_turn(self, role: str, content: str, session_id: str = "default"):
+    async def save_turn(
+        self, role: str, content: str, session_id: str = "default"
+    ):
         """Save a conversation turn (user or assistant)."""
         if not content or not content.strip():
             return
@@ -45,7 +47,9 @@ class ConversationStore:
         )
         await self._db.commit()
 
-    async def get_recent(self, n: int = 10, session_id: str | None = None) -> list[dict]:
+    async def get_recent(
+        self, n: int = 10, session_id: str | None = None
+    ) -> list[dict]:
         """Get the last N conversation turns, newest last (chronological order)."""
         if session_id:
             cursor = await self._db.execute(

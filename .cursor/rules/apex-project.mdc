@@ -17,7 +17,7 @@ All source code lives in `apex_brain/`. This directory doubles as the HA add-on 
 
 ```
 .cursor/rules/           # Cursor AI rules (apex-project, apex-orchestration, change-tracking; credentials.mdc gitignored)
-docs/                    # cursor-user-rules-recommended.md (paste into Cursor User Rules)
+docs/                    # device-naming.md, ha-device-setup-checklist.md, nest-setup.md; cursor-user-rules-recommended.md (paste into Cursor User Rules)
 AGENTS.md                # Project-level agent instructions
 .env.example, docker-compose.yml, repository.yaml, README.md
 apex_brain/              # Single source of truth for all code + HA add-on packaging
@@ -53,7 +53,7 @@ apex_brain/              # Single source of truth for all code + HA add-on packa
 
 ## Current Tools
 
-- `smart_home.py`: list_entities, get_entity_state, call_service, get_areas (HA REST API via Supervisor proxy). Includes debug logging for API calls (method, URL, token status, error responses).
+- `smart_home.py`: list_entities (cap 50 when no domain, 200 when domain set; logs total/showing and appends "Showing first N of M" when truncated), get_entity_state, call_service, get_areas (HA REST API via Supervisor proxy). Includes debug logging for API calls (method, URL, token status, error responses).
 - `knowledge.py`: remember, recall, forget (backed by knowledge_store). Needs `set_knowledge_store()` called at startup.
 - `datetime_tool.py`: get_current_datetime
 - `calendar_tool.py`: Stub. Uncomment decorators when Google Calendar API is set up.

@@ -18,7 +18,7 @@ def set_knowledge_store(store):
 
 @tool(
     description=(
-            "Store information the user explicitly asks to remember. "
+        "Store information the user explicitly asks to remember. "
         "Use when the user says 'remember X', 'save this', 'note that', etc. "
         "Apex will store this in its personal knowledge base."
     ),
@@ -53,7 +53,7 @@ async def remember(key: str, value: str) -> str:
 
 @tool(
     description=(
-            "Search Apex's memory for stored information. "
+        "Search Apex's memory for stored information. "
         "Use when the user asks 'do you remember X', 'what do you know about X', "
         "'what was that thing about X', etc."
     ),

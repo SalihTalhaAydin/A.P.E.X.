@@ -56,7 +56,10 @@ class ContextBuilder:
         core_facts = await self.knowledge_store.get_all_facts(limit=50)
         core_set = {f["id"] for f in relevant_facts}
         for fact in core_facts:
-            if fact["id"] not in core_set and fact.get("confidence", 0) >= 0.9:
+            if (
+                fact["id"] not in core_set
+                and fact.get("confidence", 0) >= 0.9
+            ):
                 relevant_facts.append(fact)
                 if len(relevant_facts) >= self.max_facts:
                     break

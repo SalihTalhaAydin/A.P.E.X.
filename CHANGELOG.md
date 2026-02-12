@@ -7,7 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [0.1.3] - 2026-02-11
 
+### Fixed
+- **Lights not accessible / turn on-off not working properly** -- `list_entities` was capped at 50 entities for all calls, so when the user had many lights (or many entities), only the first 50 were visible to the model and later ones were never controlled. Now when a domain filter is used (e.g. `domain="light"`), up to 200 entities are returned (cap 50 when no domain). When truncated, the response includes "(Showing first N of M entities)" and logs show `[list_entities] domain=... total=... showing=...` for debugging. Key files: `apex_brain/tools/smart_home.py`, `apex_brain/brain/system_prompt.py`.
+
 ### Added
+- **HA device setup checklist** -- `docs/ha-device-setup-checklist.md` lists device types (Sengled, IKEA Dirigera, Hampton Bay/Tuya, Echo, temp sensors, Nest, BroadLink RM4 Pro), integration names, naming examples, and integration steps for fan/projector/curtains/laundry/basement. Wi‑Fi/Bluetooth-focused; Zigbee skipped for now. Key file: `docs/ha-device-setup-checklist.md`.
+- **Nest thermostat setup guide** -- `docs/nest-setup.md` step-by-step for adding Google Nest to HA (Cloud project, OAuth, Device Access $5, Pub/Sub topic, link account). Apex already supports climate entities via `control_climate`. Key file: `docs/nest-setup.md`.
 - **Device naming convention** -- Room + Fixture/Level + Description (friendly_name Title Case, entity_id snake_case when editable). Documented in `.cursor/rules/apex-device-naming.mdc`, `docs/device-naming.md`; system prompt and smart_home tool examples updated. Optional `scripts/suggest_device_names.py` (REST, suggests names only) and `scripts/ha_assign_devices.py` now supports `--dry-run` and a confirmation prompt before applying area/name updates in HA. Key files: `apex_brain/brain/system_prompt.py`, `apex_brain/tools/smart_home.py`, `docs/device-naming.md`, `scripts/ha_assign_devices.py`, `scripts/suggest_device_names.py`.
 
 ### Changed
