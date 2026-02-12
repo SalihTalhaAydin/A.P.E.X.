@@ -8,7 +8,7 @@ SAFE FLOW (recommended):
   2. Review the printed device and entity updates.
   3. Run without --dry-run to apply; you will be asked to confirm before any changes.
 
-Requires: REFRESH_TOKEN and HA_URL in env (never hardcode tokens). pip install websockets.
+Requires: HA_TOKEN (long-lived) or REFRESH_TOKEN, and HA_URL in env (never hardcode tokens). pip install websockets.
 """
 
 import argparse
@@ -30,6 +30,7 @@ except ImportError:
 # Config from env only (never hardcode tokens)
 # ---------------------------------------------------------------------------
 HA_URL = os.environ.get("HA_URL", "http://192.168.68.113:8123")
+HA_TOKEN = (os.environ.get("HA_TOKEN") or "").strip()  # Long-lived access token (preferred)
 REFRESH_TOKEN = (os.environ.get("REFRESH_TOKEN") or "").strip()
 # Client ID must match what was used when refresh token was created (often homeassistant.local)
 CLIENT_ID = os.environ.get("CLIENT_ID", "http://homeassistant.local:8123/")
@@ -92,6 +93,9 @@ CONTEXT_KEYWORDS = {
 
 
 def get_access_token():
+    """Return HA access token: use HA_TOKEN if set, else exchange REFRESH_TOKEN."""
+    if HA_TOKEN:
+        return HA_TOKEN
     data = f"grant_type=refresh_token&refresh_token={REFRESH_TOKEN}&client_id={CLIENT_ID}".encode()
     req = urllib.request.Request(
         f"{HA_URL}/auth/token",
@@ -595,9 +599,9 @@ if __name__ == "__main__":
         help="Update every entity to convention name and try to assign area to every device.",
     )
     args = parser.parse_args()
-    if not REFRESH_TOKEN:
+    if not HA_TOKEN and not REFRESH_TOKEN:
         print(
-            "Error: REFRESH_TOKEN is not set. Set it in your environment (e.g. from .cursor/rules/credentials.mdc, which is gitignored).",
+            "Error: Set HA_TOKEN (long-lived) or REFRESH_TOKEN in your environment (e.g. from .cursor/rules/credentials.mdc, which is gitignored).",
             file=sys.stderr,
         )
         sys.exit(1)
