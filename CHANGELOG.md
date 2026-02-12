@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [0.1.3] - 2026-02-11
 
 ### Fixed
+- **Security: remove hardcoded HA refresh token** -- Removed the fallback refresh token from `scripts/ha_assign_devices.py`; the script now requires `REFRESH_TOKEN` in the environment and exits with a clear error if unset. If this repo was ever pushed with the old code, rotate the token in HA (Profile → Security) and update `.cursor/rules/credentials.mdc`. Key file: `scripts/ha_assign_devices.py`.
 - **Lights not accessible / turn on-off not working properly** -- `list_entities` was capped at 50 entities for all calls, so when the user had many lights (or many entities), only the first 50 were visible to the model and later ones were never controlled. Now when a domain filter is used (e.g. `domain="light"`), up to 200 entities are returned (cap 50 when no domain). When truncated, the response includes "(Showing first N of M entities)" and logs show `[list_entities] domain=... total=... showing=...` for debugging. Key files: `apex_brain/tools/smart_home.py`, `apex_brain/brain/system_prompt.py`.
 
 ### Added

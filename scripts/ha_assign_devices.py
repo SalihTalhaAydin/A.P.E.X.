@@ -8,7 +8,7 @@ SAFE FLOW (recommended):
   2. Review the printed device and entity updates.
   3. Run without --dry-run to apply; you will be asked to confirm before any changes.
 
-Requires: REFRESH_TOKEN and HA_URL in env (or defaults). pip install websockets.
+Requires: REFRESH_TOKEN and HA_URL in env (never hardcode tokens). pip install websockets.
 """
 
 import argparse
@@ -27,12 +27,10 @@ except ImportError:
     websockets = None
 
 # ---------------------------------------------------------------------------
-# Config from env or credentials
+# Config from env only (never hardcode tokens)
 # ---------------------------------------------------------------------------
 HA_URL = os.environ.get("HA_URL", "http://192.168.68.113:8123")
-REFRESH_TOKEN = (os.environ.get("REFRESH_TOKEN") or "").strip() or (
-    "9cb9646761043093af589052e2977d3fb7af6e22748e38e05d43e36d2938811d960ccbc6fe773f226d937f1cb8c19ac3aa79bcb3fed67627618b7698567e92e1"
-)
+REFRESH_TOKEN = (os.environ.get("REFRESH_TOKEN") or "").strip()
 # Client ID must match what was used when refresh token was created (often homeassistant.local)
 CLIENT_ID = os.environ.get("CLIENT_ID", "http://homeassistant.local:8123/")
 WS_URL = (
@@ -597,4 +595,10 @@ if __name__ == "__main__":
         help="Update every entity to convention name and try to assign area to every device.",
     )
     args = parser.parse_args()
+    if not REFRESH_TOKEN:
+        print(
+            "Error: REFRESH_TOKEN is not set. Set it in your environment (e.g. from .cursor/rules/credentials.mdc, which is gitignored).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     asyncio.run(run(dry_run=args.dry_run, force_all=args.force_all))
