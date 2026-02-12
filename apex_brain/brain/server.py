@@ -5,33 +5,26 @@ plus a simple /api/chat endpoint for direct testing.
 """
 
 import os
-import sys
 import time
 import uuid
-import asyncio
+from contextlib import asynccontextmanager
 
 import httpx
-from contextlib import asynccontextmanager
+import litellm
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-
-# Add project root to path so imports work
-sys.path.insert(
-    0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-)
-
-from brain.config import settings
-from brain.conversation import Conversation
-from memory.conversation_store import ConversationStore
-from memory.knowledge_store import KnowledgeStore
-from memory.fact_extractor import FactExtractor
 from memory.context_builder import ContextBuilder
+from memory.conversation_store import ConversationStore
+from memory.fact_extractor import FactExtractor
+from memory.knowledge_store import KnowledgeStore
+from pydantic import BaseModel
 from tools import discover_tools
 from tools.base import TOOL_REGISTRY
 from tools.knowledge import set_knowledge_store
 
-import litellm
+from brain.config import settings
+from brain.conversation import Conversation
+from brain.version import __version__
 
 # --------------------------------------------------------------------------
 # Globals (initialized on startup)
@@ -73,7 +66,7 @@ async def _embed_text(text: str) -> list[float] | None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     """Startup and shutdown logic."""
     global conversation, startup_time
     startup_time = time.time()
@@ -143,7 +136,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Apex Brain",
     description="Personal AI assistant with memory and smart home control",
-    version="0.1.0",
+    version=__version__,
     lifespan=lifespan,
 )
 

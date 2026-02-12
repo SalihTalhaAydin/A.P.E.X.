@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "browser_storage": {
+      "command": "node",
+      "args": ["mcp-browser-storage/index.js"]
+    }
+  }
+}

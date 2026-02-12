@@ -14,12 +14,18 @@ __pycache__/
 dist/
 build/
 *.egg
+.coverage
+htmlcov/
+.pytest_cache/
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+
+# MCP browser-storage (Node)
+mcp-browser-storage/node_modules/
 
 # OS
 .DS_Store

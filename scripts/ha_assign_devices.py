@@ -8,7 +8,7 @@ SAFE FLOW (recommended):
   2. Review the printed device and entity updates.
   3. Run without --dry-run to apply; you will be asked to confirm before any changes.
 
-Requires: HA_TOKEN (long-lived) or REFRESH_TOKEN, and HA_URL in env (never hardcode tokens). pip install websockets.
+Requires: HA_TOKEN (long-lived) or REFRESH_TOKEN, and HA_URL in .env or env (never hardcode tokens). Loads .env from repo root if present. pip install websockets.
 """
 
 import argparse
@@ -17,8 +17,21 @@ import json
 import os
 import re
 import sys
-import urllib.request
 import urllib.error
+import urllib.request
+
+# Load .env from repo root (parent of scripts/)
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_repo_root = os.path.dirname(_script_dir)
+_env_path = os.path.join(_repo_root, ".env")
+if os.path.exists(_env_path):
+    with open(_env_path) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                v = v.strip().strip('"').strip("'")
+                os.environ.setdefault(k, v)
 
 # Optional: use websockets if available
 try:
@@ -29,8 +42,10 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Config from env only (never hardcode tokens)
 # ---------------------------------------------------------------------------
-HA_URL = os.environ.get("HA_URL", "http://192.168.68.113:8123")
-HA_TOKEN = (os.environ.get("HA_TOKEN") or "").strip()  # Long-lived access token (preferred)
+HA_URL = os.environ.get("HA_URL", "http://homeassistant.local:8123")
+HA_TOKEN = (
+    os.environ.get("HA_TOKEN") or ""
+).strip()  # Long-lived access token (preferred)
 REFRESH_TOKEN = (os.environ.get("REFRESH_TOKEN") or "").strip()
 # Client ID must match what was used when refresh token was created (often homeassistant.local)
 CLIENT_ID = os.environ.get("CLIENT_ID", "http://homeassistant.local:8123/")
@@ -308,9 +323,6 @@ async def run(dry_run: bool, force_all: bool = False):
         area_id_by_name = {
             a["name"]: a["area_id"] for a in areas if a.get("name")
         }
-        area_id_by_name_lower = {
-            normalize(n): aid for n, aid in area_id_by_name.items()
-        }
         print(
             f"  Found {len(areas)} areas: {list(area_id_by_name.keys())}"
         )
@@ -320,7 +332,6 @@ async def run(dry_run: bool, force_all: bool = False):
             {"id": next_id(), "type": "config/device_registry/list"}
         )
         devices = r_devices.get("result", [])
-        devices_by_id = {d["id"]: d for d in devices}
         print(f"  Found {len(devices)} devices")
 
         print("Fetching entity registry...")
@@ -336,7 +347,7 @@ async def run(dry_run: bool, force_all: bool = False):
                 entities[eid] = e
         # Group entities by device_id
         entities_by_device = {}
-        for eid, e in entities.items():
+        for _eid, e in entities.items():
             did = e.get("device_id")
             if did:
                 entities_by_device.setdefault(did, []).append(e)

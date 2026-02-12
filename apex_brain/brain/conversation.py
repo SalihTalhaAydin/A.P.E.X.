@@ -4,16 +4,35 @@ Handles the full flow: context build -> AI call -> tool loop -> response.
 Triggers background fact extraction after each conversation.
 """
 
-import json
 import asyncio
+import json
 import traceback
+
 import litellm
-from brain.config import settings
-from memory.conversation_store import ConversationStore
-from memory.knowledge_store import KnowledgeStore
-from memory.fact_extractor import FactExtractor
 from memory.context_builder import ContextBuilder
-from tools.base import get_openai_tool_definitions, execute_tool
+from memory.conversation_store import ConversationStore
+from memory.fact_extractor import FactExtractor
+from memory.knowledge_store import KnowledgeStore
+from tools.base import execute_tool, get_openai_tool_definitions
+
+from brain.config import settings
+
+
+def _looks_like_device_action_claim(content: str) -> bool:
+    """True if the text reads like the AI claiming it performed a device action."""
+    if not content or not isinstance(content, str):
+        return False
+    lower = content.lower()
+    phrases = (
+        "cycled",
+        "turned off",
+        "turned on",
+        "turned the light",
+        "turned the lamp",
+        "i've ",
+        "i have ",
+    )
+    return any(p in lower for p in phrases)
 
 
 class Conversation:
@@ -85,7 +104,8 @@ class Conversation:
         max_iterations: int = 10,
     ) -> str:
         """Call the AI, handle tool calls, repeat until we get a text response."""
-        for _ in range(max_iterations):
+        retry_nudge_done = False
+        for iteration in range(max_iterations):
             try:
                 kwargs = {
                     "model": settings.litellm_model,
@@ -102,16 +122,44 @@ class Conversation:
                 return f"Error reaching AI: {e}"
 
             msg = response.choices[0].message
+            is_first_response = len(messages) == 2  # only system + user
 
-            # If no tool calls, we have our answer
+            # If no tool calls, we have our answer (or a confabulation)
             if not msg.tool_calls:
                 text = msg.content or "Done."
                 print(
                     f"  [AI] Text response (no tools called): {text[:150]}"
                 )
+                if is_first_response:
+                    print("  [AI] First response had 0 tool calls.")
+                if _looks_like_device_action_claim(text):
+                    print(
+                        "  [AI] WARNING: Responded with text only (no tool calls); "
+                        "possible confabulation."
+                    )
+                    # One retry: nudge the model to use tools
+                    if (
+                        tool_defs
+                        and not retry_nudge_done
+                        and is_first_response
+                    ):
+                        retry_nudge_done = True
+                        messages.append(msg.model_dump())
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "You must use the tools to perform the action. "
+                                    "Do not reply with a summary only."
+                                ),
+                            },
+                        )
+                        continue
                 return text
 
             # Process tool calls
+            if is_first_response:
+                print(f"  [AI] First response had {len(msg.tool_calls)} tool calls.")
             messages.append(msg.model_dump())
 
             for tc in msg.tool_calls:

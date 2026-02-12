@@ -4,11 +4,11 @@ Uses numpy cosine similarity over embeddings stored as BLOBs in SQLite.
 Simple, portable, no extensions needed. Fast enough for tens of thousands of facts.
 """
 
-import json
 import struct
+from datetime import UTC, datetime
+
 import aiosqlite
 import numpy as np
-from datetime import datetime, timezone
 
 
 def _serialize_embedding(embedding: list[float]) -> bytes:
@@ -23,6 +23,8 @@ def _deserialize_embedding(blob: bytes) -> np.ndarray:
 
 
 class KnowledgeStore:
+    """Stores and retrieves user facts with optional semantic search via embeddings."""
+
     def __init__(self, db_path: str):
         self.db_path = db_path
         self._db: aiosqlite.Connection | None = None
@@ -69,7 +71,7 @@ class KnowledgeStore:
         source: str = "auto",
     ) -> int:
         """Store a fact. If a similar key exists in the same category, update it."""
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         # Generate embedding
         embedding_blob = None

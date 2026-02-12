@@ -6,10 +6,8 @@ Room + Fixture/Level + Description (entity_id suffix -> Title Case with spaces).
 Uses HA REST API: GET /states. No automatic renames; only prints a mapping so you can
 bulk-edit in HA (Settings → Devices → Entity name) or use another tool.
 
-Requires: HA_URL and either HA_TOKEN (long-lived) or REFRESH_TOKEN (to obtain access token).
-Example (from repo root):
-  set HA_URL=http://homeassistant.local:8123
-  set REFRESH_TOKEN=your_refresh_token
+Requires: HA_URL and either HA_TOKEN (long-lived) or REFRESH_TOKEN in .env or env. Loads .env from repo root if present.
+Example (from repo root): put HA_URL, HA_TOKEN or REFRESH_TOKEN in .env, then run:
   python scripts/suggest_device_names.py [--domain light] [--out mapping.txt]
 """
 
@@ -19,6 +17,19 @@ import os
 import sys
 import urllib.error
 import urllib.request
+
+# Load .env from repo root (parent of scripts/)
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_repo_root = os.path.dirname(_script_dir)
+_env_path = os.path.join(_repo_root, ".env")
+if os.path.exists(_env_path):
+    with open(_env_path) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                v = v.strip().strip('"').strip("'")
+                os.environ.setdefault(k, v)
 
 
 def get_access_token(

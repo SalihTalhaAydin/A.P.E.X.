@@ -1,13 +1,37 @@
 [project]
 name = "apex-brain"
-version = "0.0.0"
+version = "0.1.5"
 description = "Apex Brain - HA add-on and local dev"
 readme = "README.md"
 requires-python = ">=3.12"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+]
 
 [tool.ruff]
 line-length = 75
 target-version = "py312"
 
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "C4", "UP", "ARG"]
+ignore = ["E501"]
+
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["apex_brain/tests"]
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["apex_brain"]
+omit = ["apex_brain/tests/*", "*/__init__.py"]
+
+[tool.coverage.report]
+exclude_lines = ["pragma: no cover", "def __repr__", "raise NotImplementedError"]

@@ -1,0 +1,19 @@
+# Pre-commit hooks: run before every commit.
+# Install: pip install pre-commit && pre-commit install
+# See https://pre-commit.com/
+
+default_language_version:
+  python: python3
+
+repos:
+  # Block commits that contain secrets (tokens, API keys, passwords, etc.)
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.1
+    hooks:
+      - id: gitleaks-docker
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        args: [--fix]

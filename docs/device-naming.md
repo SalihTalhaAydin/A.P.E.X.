@@ -61,14 +61,12 @@ After updating names and areas in HA, Apex will use the same convention in promp
 From the repo root you can use the helper script to assign devices to areas and set entity/device names in bulk:
 
 1. **Preview (no changes)**  
-   Run with `--dry-run` to see exactly which devices would get an area and which entities would be renamed. Nothing is written to Home Assistant.
+   Run with `--dry-run` to see exactly which devices would get an area and which entities would be renamed. Nothing is written to Home Assistant. Put `HA_URL`, `HA_TOKEN` or `REFRESH_TOKEN` in `.env` at repo root (see `.env.example`); the script loads `.env` automatically.
    ```bash
-   set HA_URL=http://homeassistant.local:8123
-   set REFRESH_TOKEN=your_refresh_token
    python scripts/ha_assign_devices.py --dry-run
    ```
 
 2. **Apply**  
    Run without `--dry-run`. The script will show the same summary and ask for confirmation (`Apply ... ? [y/N]`) before making any changes. Only after you answer `y` will it call the Home Assistant WebSocket API to update the device registry (areas) and entity registry (names).
 
-Requires: `pip install websockets`, and `HA_URL` + `REFRESH_TOKEN` (or `HA_TOKEN`) in your environment. The script uses your existing area names to match devices to areas; entity names are suggested from the entity ID (snake_case → Title Case) per the convention above.
+Requires: `pip install websockets`, and `HA_URL` + `REFRESH_TOKEN` (or `HA_TOKEN`) in `.env` (see `.env.example`). The script uses your existing area names to match devices to areas; entity names are suggested from the entity ID (snake_case → Title Case) per the convention above.

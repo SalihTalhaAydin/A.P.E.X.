@@ -1,5 +1,9 @@
 # Apex Brain
 
+[![Test and Lint](https://github.com/SalihTalhaAydin/A.P.E.X./actions/workflows/test-and-lint.yml/badge.svg)](https://github.com/SalihTalhaAydin/A.P.E.X./actions/workflows/test-and-lint.yml)
+[![Secrets Check](https://github.com/SalihTalhaAydin/A.P.E.X./actions/workflows/check-secrets.yml/badge.svg)](https://github.com/SalihTalhaAydin/A.P.E.X./actions/workflows/check-secrets.yml)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+
 Personal AI assistant with persistent memory, smart home control, and semantic knowledge. Runs as a Home Assistant **App** (formerly "add-on") on a dedicated HAOS mini PC.
 
 ## Quick Start (Local Development)
@@ -12,11 +16,21 @@ pip install -r requirements.txt
 
 # Copy and configure environment
 cp ../.env.example .env
-# Edit .env with your API keys and HA connection info
+# Edit .env with your API keys and HA connection info.
+# All secrets (API keys, HA URL/tokens, optional SSH) live in .env; see .env.example for variable names.
 
 # Run the server
 python -m brain.server
 ```
+
+**Pre-commit (secret scanning):** Commits are scanned for secrets (tokens, API keys, etc.). Install once per clone:
+```bash
+pip install pre-commit
+pre-commit install
+```
+If you don't install, CI will still run the same check on push.
+
+**Tests:** From repo root: `PYTHONPATH=apex_brain python -m pytest apex_brain/tests -v`
 
 Test it:
 ```bash
@@ -143,8 +157,9 @@ Change `LITELLM_MODEL` in your .env or HA add-on config:
 ## Updating the Add-on
 
 After pushing changes to GitHub:
-1. In HA: **Settings > Add-ons > Apex Brain > Check for updates** (or the refresh icon)
-2. If HA doesn't see the update, remove and re-add the repository (see Troubleshooting)
+1. In HA: **Settings > Add-ons > Add-on Store** → **⋮** → **Reload** (refresh), then open **Apex Brain** and click **Update** if available.
+2. Or from your machine (with `HA_TOKEN` in `.env`): `python scripts/ha_update_apex_addon.py` to reload the store and update the add-on.
+3. If HA doesn't see the update, remove and re-add the repository (see Troubleshooting).
 3. Click **Update** / **Rebuild** to pull the latest code
 
 ## Troubleshooting

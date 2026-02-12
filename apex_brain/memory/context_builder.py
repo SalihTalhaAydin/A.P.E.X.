@@ -5,9 +5,11 @@ This is what makes Apex feel like it actually knows you.
 """
 
 import datetime
+
+from brain.system_prompt import build_system_prompt
+
 from memory.conversation_store import ConversationStore
 from memory.knowledge_store import KnowledgeStore
-from brain.system_prompt import build_system_prompt
 
 
 class ContextBuilder:

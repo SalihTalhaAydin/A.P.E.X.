@@ -1,0 +1,10 @@
+# Gitleaks allowlist: files or patterns that may look like secrets but are safe.
+# https://github.com/gitleaks/gitleaks
+
+title = "APEX allowlist"
+
+[allowlist]
+description = "Example/placeholder files only"
+paths = [
+  '''\.env\.example$''',
+]

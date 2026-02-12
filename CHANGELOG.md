@@ -5,21 +5,42 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.1.5] - 2026-02-12
+
+### Added
+- **Single source for version** — Version lives only in `apex_brain/brain/version.py` (`__version__`). FastAPI app reads it; `scripts/sync_version.py` syncs it to `apex_brain/config.yaml` and `pyproject.toml`. Bump in one place, then run the script. Key files: `apex_brain/brain/version.py`, `apex_brain/brain/server.py`, `scripts/sync_version.py`, `.cursor/rules/change-tracking.mdc`, `.cursor/rules/apex-project.mdc`.
+
+---
+
 ## [0.1.4] - 2026-02-11
 
 ### Added
+- **HA_USERNAME, HA_PASSWORD, SSH_* in .env.example** — Optional HA login and SSH vars; all secrets centralized in `.env` (see Changed).
+- **cycle_light_timed tool** — Cycles a light off/on N times with S seconds between (e.g. "blink 3 times with 10s delay"). One tool call runs the full sequence server-side; caps times 1–10 and seconds 1–60. Key file: `apex_brain/tools/smart_home.py`.
+- **Diagnostics for tool-call confabulation** — When the AI responds with text only (no tool calls), log "First response had 0 tool calls" and, if the text looks like a device-action claim, log "WARNING: possible confabulation". Key file: `apex_brain/brain/conversation.py`.
+- **Retry nudge when AI claims action without calling tools** — If the first response has no tool_calls but content looks like a device-action claim, append "You must use the tools to perform the action. Do not reply with a summary only." and run one more iteration. Key file: `apex_brain/brain/conversation.py`.
 - **Ruff lint and format** — pyproject.toml: Ruff lint (E, F, I, B, C4, UP, ARG; E501 ignored) and format; pre-commit hook enabled for Ruff. Key files: `pyproject.toml`, `.pre-commit-config.yaml`.
 - **Unit tests** — pytest, pytest-asyncio, pytest-cov; `apex_brain/tests/` with conftest (temp DB, mock embed), test_config, test_tools_base, test_knowledge_store, test_server (14 tests). Key files: `apex_brain/tests/*.py`, `pyproject.toml`.
 - **CI test-and-lint** — GitHub Action runs ruff check, ruff format --check, pytest on push/PR to main. Key file: `.github/workflows/test-and-lint.yml`.
 - **README badges** — Test and Lint, Secrets Check, Python 3.12+ badges; tests run command documented. Key file: `README.md`.
 - **wait_seconds tool** — Enables timed sequences (e.g. "turn kitchen lights on/off three times with 10-second delay"). AI can call control_light and wait_seconds in sequence; max wait 300s. Key file: `apex_brain/tools/wait_tool.py`.
+- **ha_update_apex_addon.py** — Script to reload the add-on store and update Apex Brain from the CLI (requires HA_TOKEN in .env). Key file: `scripts/ha_update_apex_addon.py`.
+- **Browser storage read** — Doc and optional MCP for reading localStorage/sessionStorage (e.g. HA access token). Cursor in-IDE browser cannot be read; use optional mcp-browser-storage MCP. Key files: `docs/browser-storage-read.md`, `mcp-browser-storage/` (browser_get_storage, browser_navigate, **browser_login_ha**), `.cursor/mcp.json`, `.cursor/rules/apex-project.mdc`.
+- **Automatic HA login in mcp-browser-storage** — MCP loads `.env` from workspace root and exposes **browser_login_ha** (uses HA_URL, HA_USERNAME, HA_PASSWORD to log in automatically). With credentials in `.env`, call browser_login_ha then browser_get_storage for fully automatic flow. Key files: `mcp-browser-storage/index.js`, `mcp-browser-storage/package.json` (dotenv), `docs/browser-storage-read.md`, `.cursor/rules/apex-project.mdc`.
+
+### Fixed
+- **E402 in brain/server.py** — Removed `sys.path.insert` so all imports are at top of file; run via `python -m` from add-on root (unchanged). Key file: `apex_brain/brain/server.py`.
 
 ### Changed
+- **Centralized secrets in .env** — All secrets (API keys, HA URL/tokens, HA login, optional SSH) live in `.env` at repo root; `.env.example` documents variable names. Refactored `credentials.mdc` to documentation-only (no secret values). Scripts `ha_assign_devices.py` and `suggest_device_names.py` load `.env` from repo root; docs and rules reference `.env` / `.env.example`. Key files: `.env.example`, `.cursor/rules/credentials.mdc`, `scripts/ha_assign_devices.py`, `scripts/suggest_device_names.py`, `README.md`, `.cursor/rules/apex-project.mdc`, `apex-do-it-yourself.mdc`, `apex-no-secrets-in-code.mdc`, `docs/device-naming.md`, `docs/browser-storage-read.md`.
 - **Docstrings and version** — Settings and KnowledgeStore class docstrings; change-tracking documents config.yaml as canonical version (pyproject matches). Key files: `apex_brain/brain/config.py`, `apex_brain/memory/knowledge_store.py`, `.cursor/rules/change-tracking.mdc`.
 - **Lint fixes** — Unused vars and loop var in conversation_store and ha_assign_devices; lifespan arg renamed to _app. Key files: `apex_brain/memory/conversation_store.py`, `apex_brain/brain/server.py`, `scripts/ha_assign_devices.py`.
 - **System prompt: full control and honesty** — Explicit "you have full control" and instructions to use wait_seconds for timed/repeated actions; never refuse with "not allowed" when tools can do it. Stronger rule: if a tool fails, say so clearly; never claim you did the action anyway. Key file: `apex_brain/brain/system_prompt.py`.
+- **System prompt: timed cycles and do-it-again** — Prefer cycle_light_timed for "N times with S second intervals"; otherwise require calling control_light and wait_seconds in sequence and not replying with a summary until every step is called. If the user says you didn't do it or asks to do it again, you must use the tools now (no text-only reply). Key file: `apex_brain/brain/system_prompt.py`.
 - **Cleanup** — Removed unused `.prettierrc`; added `.coverage`, `htmlcov/`, `.pytest_cache/` to .gitignore. Key file: `.gitignore`.
 - **HA errors surfaced to the model** — Smart home control tools now catch httpx.HTTPStatusError and return short, model-friendly messages (e.g. "Entity not found: light.xyz", "HA error 422: ...") so the AI can report real failures instead of generic or false excuses. Key file: `apex_brain/tools/smart_home.py`.
+- **README** — After-push steps: reload store in HA UI, or run `scripts/ha_update_apex_addon.py` with HA_TOKEN in .env. Key file: `README.md`.
+- **Agent rule: do it yourself** — `.cursor/rules/apex-do-it-yourself.mdc`: use API, browser, SSH, and project credentials to do everything (refresh/update add-on, write .env when needed); only ask the user when genuinely impossible. Key file: `.cursor/rules/apex-do-it-yourself.mdc`.
 
 ---
 

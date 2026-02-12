@@ -9,6 +9,8 @@ optional objects. The generic call_service is kept as a fallback for
 domains without a dedicated tool.
 """
 
+import asyncio
+
 import httpx
 from brain.config import settings
 
@@ -429,6 +431,66 @@ async def control_light(
         return _format_ha_error(entity_id, "light", e)
     except Exception as e:
         return f"Error controlling light: {e}"
+
+
+_CYCLE_LIGHT_TIMES_MIN = 1
+_CYCLE_LIGHT_TIMES_MAX = 10
+_CYCLE_LIGHT_SECONDS_MIN = 1.0
+_CYCLE_LIGHT_SECONDS_MAX = 60.0
+
+
+@tool(
+    description=(
+        "Cycle a light off and on a given number of times with a delay between each cycle. "
+        "Use this for requests like 'blink the light 3 times with 10 second intervals'. "
+        "Runs the full sequence server-side in one call."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "entity_id": {
+                "type": "string",
+                "description": (
+                    "The light entity ID, e.g. 'light.salih_office_left_lamp'. "
+                    "Use list_entities(domain='light') if needed."
+                ),
+            },
+            "times": {
+                "type": "integer",
+                "description": "Number of off/on cycles (1-10).",
+            },
+            "seconds_between": {
+                "type": "number",
+                "description": "Seconds to wait between turning off and turning on each cycle (1-60).",
+            },
+        },
+        "required": ["entity_id", "times", "seconds_between"],
+    },
+)
+async def cycle_light_timed(
+    entity_id: str,
+    times: int,
+    seconds_between: float,
+) -> str:
+    """Turn a light off and on N times with S seconds between each cycle. Capped to avoid runaway."""
+    try:
+        t = max(_CYCLE_LIGHT_TIMES_MIN, min(int(times), _CYCLE_LIGHT_TIMES_MAX))
+        sec = max(
+            _CYCLE_LIGHT_SECONDS_MIN,
+            min(float(seconds_between), _CYCLE_LIGHT_SECONDS_MAX),
+        )
+        for i in range(t):
+            await _call_ha_service("light", "turn_off", entity_id, None)
+            await asyncio.sleep(sec)
+            await _call_ha_service("light", "turn_on", entity_id, None)
+            if i < t - 1:
+                await asyncio.sleep(sec)
+        status = await _verify_light(entity_id)
+        return f"Done. Cycled {t} times with {sec}s between. {status}"
+    except httpx.HTTPStatusError as e:
+        return _format_ha_error(entity_id, "light", e)
+    except Exception as e:
+        return f"Error cycling light: {e}"
 
 
 @tool(

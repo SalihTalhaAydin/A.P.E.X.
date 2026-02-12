@@ -1,0 +1,10 @@
+---
+description: Agent does everything itself using API, browser, SSH; only ask when genuinely impossible
+alwaysApply: true
+---
+
+# APEX: Do It Yourself
+
+- You have **API access** (WebSocket Supervisor API, HA REST), **browser** (HA UI), **SSH** (credentials in `.env`: SSH_HOST, SSH_USER, SSH_PASSWORD, etc.; see credentials.mdc for which vars to set), and **file write** (e.g. .env, config).
+- **Do everything yourself.** Use the API to refresh/update add-ons, use the browser to check HA, use SSH to run `ha` commands, write tokens or config to .env when needed so scripts work. Do not ask the user to "put the token in .env" or "click Update in the UI" unless you literally cannot do it (e.g. no credentials anywhere, or a step only the user can perform).
+- **Only ask when you really cannot.** If credentials exist in the project (in `.env`; credentials.mdc documents structure and which vars to set) or the user has provided a token in chat, use them. Prefer SSH + `ha` CLI when no token is set; use WebSocket with token when available. Update docs and configs yourself; run scripts yourself.

@@ -4,8 +4,8 @@ Drop a .py file in tools/, add @tool decorator, done. Auto-discovered.
 """
 
 import inspect
-from typing import Any, Callable, get_type_hints
-
+from collections.abc import Callable
+from typing import Any, get_type_hints
 
 # Global registry of all tools
 TOOL_REGISTRY: dict[str, dict] = {}

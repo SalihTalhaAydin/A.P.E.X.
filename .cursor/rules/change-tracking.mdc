@@ -56,6 +56,6 @@ Skip docs for:
 
 ## 4. Version Bumping
 
-- Bump the patch version in `apex_brain/config.yaml` when deploying a fix or minor change.
-- Bump the minor version for new features or significant additions.
-- Always keep `config.yaml` version and `CHANGELOG.md` heading in sync.
+- **Single source of truth**: `apex_brain/brain/version.py` (`__version__`). The FastAPI app and scripts read from here. Do not edit version in `config.yaml` or `pyproject.toml` by hand.
+- After changing `__version__` in `brain/version.py`, run `python scripts/sync_version.py` from the repo root to update `apex_brain/config.yaml` and `pyproject.toml`. Keep `CHANGELOG.md` heading in sync when cutting a release.
+- Bump the patch version for fixes or minor changes; bump the minor version for new features or significant additions.

@@ -1,0 +1,22 @@
+{
+  "name": "mcp-browser-storage",
+  "version": "1.0.0",
+  "description": "MCP server that exposes browser_get_storage and browser_navigate for reading localStorage/sessionStorage",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "mcp-browser-storage": "index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "dotenv": "^16.4.0",
+    "playwright": "^1.49.0",
+    "zod": "^3.23.0"
+  }
+}

@@ -6,8 +6,8 @@ Uses a cheap/fast model to keep costs low.
 
 import json
 import traceback
-from memory.knowledge_store import KnowledgeStore
 
+from memory.knowledge_store import KnowledgeStore
 
 EXTRACTION_PROMPT = """\
 Analyze this conversation and extract any NEW facts about the user. \

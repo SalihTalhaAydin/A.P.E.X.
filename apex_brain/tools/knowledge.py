@@ -48,7 +48,7 @@ async def remember(key: str, value: str) -> str:
         confidence=1.0,
         source="explicit",
     )
-    return f"Got it. I'll remember that."
+    return "Got it. I'll remember that."
 
 
 @tool(

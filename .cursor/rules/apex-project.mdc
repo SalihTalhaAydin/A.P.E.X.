@@ -16,17 +16,17 @@ Apex is a personal AI assistant that runs as a Home Assistant Add-on on a dedica
 All source code lives in `apex_brain/`. This directory doubles as the HA add-on build context -- no duplicate files, no sync scripts. The root directory only contains dev/repo-level config.
 
 ```
-.cursor/rules/           # Cursor AI rules (apex-project, apex-orchestration, change-tracking; credentials.mdc gitignored)
+.cursor/rules/           # Cursor AI rules (apex-project, apex-orchestration, change-tracking, apex-do-it-yourself). Secrets live in .env at repo root; credentials.mdc documents which env vars to set (gitignored).
 docs/                    # device-naming.md, ha-device-setup-checklist.md, nest-setup.md; cursor-user-rules-recommended.md (paste into Cursor User Rules)
 AGENTS.md                # Project-level agent instructions
 .env.example, docker-compose.yml, repository.yaml, README.md
 apex_brain/              # Single source of truth for all code + HA add-on packaging
     build.json           # Multi-arch base image map (amd64, aarch64)
-    config.yaml          # HA add-on configuration (slug, ports, options)
+    config.yaml          # HA add-on configuration (slug, ports, options); version synced from brain/version.py via scripts/sync_version.py
     Dockerfile           # Python 3.13, Alpine 3.21 base
     run.sh               # Entrypoint: reads options.json via jq, starts uvicorn
     requirements.txt
-    brain/               # FastAPI server, orchestrator, config
+    brain/               # FastAPI server, orchestrator, config; add-on version in brain/version.py (run scripts/sync_version.py after bumping)
     memory/              # Conversation store, knowledge store, fact extraction
     tools/               # Auto-discovered tool modules
 ```
@@ -53,7 +53,7 @@ apex_brain/              # Single source of truth for all code + HA add-on packa
 
 ## Current Tools
 
-- `smart_home.py`: list_entities (cap 50 when no domain, 200 when domain set; logs total/showing and appends "Showing first N of M" when truncated), get_entity_state, control_light, control_climate, control_media, control_cover, control_fan, call_service, get_areas (HA REST API via Supervisor proxy). HA HTTP errors (404, 422) are formatted for the model via _format_ha_error so the AI can report real failures. Includes debug logging for API calls.
+- `smart_home.py`: list_entities (cap 50 when no domain, 200 when domain set; logs total/showing and appends "Showing first N of M" when truncated), get_entity_state, control_light, cycle_light_timed (off/on N times with S seconds between; use for "blink 3 times with 10s delay"), control_climate, control_media, control_cover, control_fan, call_service, get_areas (HA REST API via Supervisor proxy). HA HTTP errors (404, 422) are formatted for the model via _format_ha_error so the AI can report real failures. Includes debug logging for API calls.
 - `knowledge.py`: remember, recall, forget (backed by knowledge_store). Needs `set_knowledge_store()` called at startup.
 - `datetime_tool.py`: get_current_datetime
 - `wait_tool.py`: wait_seconds(seconds) — pause between actions for timed sequences (e.g. "blink 3 times with 10s delay"). Max 300s.
@@ -92,7 +92,7 @@ The add-on pairs with "Extended OpenAI Conversation" (a custom component, instal
 - All async. Use `httpx.AsyncClient` for HTTP, `aiosqlite` for DB.
 - LiteLLM for all AI calls (chat + embeddings). Never import openai/anthropic directly.
 - Embeddings stored as struct-packed bytes BLOBs in SQLite. Cosine similarity via numpy.
-- The `.env` file and `*.db` files are gitignored. Never commit secrets or databases.
+- Secrets live in `.env` at repo root (single source of truth); see `.env.example` for variable names. `credentials.mdc` documents which env vars to set; it contains no secret values. The `.env` file and `*.db` files are gitignored. Never commit secrets or databases.
 - The assistant's name is "Apex" everywhere (system prompt, logs, comments, branding).
 - Wake word will be "Hey Apex" (custom openWakeWord model, future). Currently can use "Hey Jarvis" (built-in).
 
@@ -105,6 +105,7 @@ The add-on pairs with "Extended OpenAI Conversation" (a custom component, instal
 - **Debug add-on**: SSH into HA, run `ha addons logs 14fc29d6_apex_brain` or check Log tab in HA UI
 - **Debug build**: `ha supervisor logs | tail -50` shows Docker build output
 - **Device naming in HA**: Use `scripts/ha_assign_devices.py --dry-run` to preview area/name updates, then run without `--dry-run` and confirm when prompted. See `docs/device-naming.md` and `.cursor/rules/apex-device-naming.mdc`.
+- **Browser storage (HA tokens)**: The Cursor in-IDE browser cannot be read by the agent. Use the optional mcp-browser-storage MCP (project config in `.cursor/mcp.json`): it loads `.env` and exposes **browser_login_ha** (uses HA_URL, HA_USERNAME, HA_PASSWORD for automatic login) and **browser_get_storage**. So with credentials in `.env`, login and storage read are automatic. See `mcp-browser-storage/README.md` and `docs/browser-storage-read.md`.
 
 ## Gotchas & Lessons Learned
 
@@ -117,6 +118,7 @@ The add-on pairs with "Extended OpenAI Conversation" (a custom component, instal
 7. **SUPERVISOR_TOKEN + with-contenv**: The token is injected as a Docker env var but S6 does NOT pass Docker env vars to services automatically. It writes them to `/run/s6/container_environment/` files and only injects them via `with-contenv`. If smart home tools get 401 errors, check that `run.sh` uses `#!/usr/bin/with-contenv bash` and that the startup log shows "SUPERVISOR_TOKEN: set".
 8. **Extended OpenAI Conversation openai dependency**: The custom component's `manifest.json` must pin `openai` to the exact version HA Core uses (e.g., `openai==2.15.0` for HA 2026.2.1). A loose pin like `openai~=2.8.0` causes `RequirementsNotFound` because HA won't install a conflicting version.
 9. **Orchestration: user vs project rules**: Generic preferences (any project) go in Cursor User Rules (paste from `docs/cursor-user-rules-recommended.md`). APEX-only preferences go in `.cursor/rules/` with an `apex-*.mdc` name so they stay in this repo.
+10. **Model confabulation (saying it did it without calling tools)**: Sometimes the LLM returns a text-only response (e.g. "I've cycled the lamp...") without issuing any tool calls, so no tools run. We log "[AI] WARNING: Responded with text only (no tool calls); possible confabulation" and do one retry with a "use the tools" nudge. For timed cycles, prefer `cycle_light_timed` (one tool call runs the full sequence server-side). Check add-on logs to see whether the first response had 0 vs N tool calls.
 
 ## Planned Future Work (Phase 3+)
 
