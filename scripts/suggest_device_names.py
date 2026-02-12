@@ -12,6 +12,7 @@ Example (from repo root):
   set REFRESH_TOKEN=your_refresh_token
   python scripts/suggest_device_names.py [--domain light] [--out mapping.txt]
 """
+
 import argparse
 import json
 import os
@@ -20,7 +21,9 @@ import urllib.error
 import urllib.request
 
 
-def get_access_token(ha_url: str, refresh_token: str, client_id: str) -> str:
+def get_access_token(
+    ha_url: str, refresh_token: str, client_id: str
+) -> str:
     """Exchange refresh token for short-lived access token."""
     data = (
         f"grant_type=refresh_token&refresh_token={refresh_token}&client_id={client_id}"
@@ -70,14 +73,21 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    ha_url = os.environ.get("HA_URL", "http://homeassistant.local:8123").rstrip("/")
+    ha_url = os.environ.get(
+        "HA_URL", "http://homeassistant.local:8123"
+    ).rstrip("/")
     token = os.environ.get("HA_TOKEN", "").strip()
     if not token:
         refresh = os.environ.get("REFRESH_TOKEN", "").strip()
         if not refresh:
-            print("Set HA_TOKEN or REFRESH_TOKEN (and optionally HA_URL).", file=sys.stderr)
+            print(
+                "Set HA_TOKEN or REFRESH_TOKEN (and optionally HA_URL).",
+                file=sys.stderr,
+            )
             sys.exit(1)
-        client_id = os.environ.get("CLIENT_ID", "http://homeassistant.local:8123/")
+        client_id = os.environ.get(
+            "CLIENT_ID", "http://homeassistant.local:8123/"
+        )
         token = get_access_token(ha_url, refresh, client_id)
 
     try:
@@ -90,26 +100,40 @@ def main() -> None:
         sys.exit(1)
 
     if args.domain:
-        states = [s for s in states if s.get("entity_id", "").startswith(f"{args.domain}.")]
+        states = [
+            s
+            for s in states
+            if s.get("entity_id", "").startswith(f"{args.domain}.")
+        ]
 
     lines = []
     for s in states:
         entity_id = s.get("entity_id", "")
-        current = (s.get("attributes") or {}).get("friendly_name") or entity_id
+        current = (s.get("attributes") or {}).get(
+            "friendly_name"
+        ) or entity_id
         suggested = suggested_friendly_name(entity_id)
         if current == suggested:
             continue  # skip already-conforming
         line = f"{entity_id} | {current} | {suggested}"
         lines.append(line)
 
-    out_text = "\n".join(lines) if lines else "# No entities to suggest (all already match convention)."
+    out_text = (
+        "\n".join(lines)
+        if lines
+        else "# No entities to suggest (all already match convention)."
+    )
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
-            f.write("# entity_id | current_friendly_name | suggested_friendly_name\n")
+            f.write(
+                "# entity_id | current_friendly_name | suggested_friendly_name\n"
+            )
             f.write(out_text)
         print(f"Wrote {len(lines)} suggestions to {args.out}")
     else:
-        print("# entity_id | current_friendly_name | suggested_friendly_name")
+        print(
+            "# entity_id | current_friendly_name | suggested_friendly_name"
+        )
         print(out_text)
 
 

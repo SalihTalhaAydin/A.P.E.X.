@@ -10,6 +10,7 @@ SAFE FLOW (recommended):
 
 Requires: REFRESH_TOKEN and HA_URL in env (or defaults). pip install websockets.
 """
+
 import argparse
 import asyncio
 import json
@@ -34,7 +35,10 @@ REFRESH_TOKEN = (os.environ.get("REFRESH_TOKEN") or "").strip() or (
 )
 # Client ID must match what was used when refresh token was created (often homeassistant.local)
 CLIENT_ID = os.environ.get("CLIENT_ID", "http://homeassistant.local:8123/")
-WS_URL = HA_URL.replace("http://", "ws://").replace("https://", "wss://") + "/api/websocket"
+WS_URL = (
+    HA_URL.replace("http://", "ws://").replace("https://", "wss://")
+    + "/api/websocket"
+)
 
 # User's area names (normalized lowercase for matching)
 USER_AREAS = [
@@ -68,7 +72,12 @@ USER_AREAS = [
 
 # Keywords to disambiguate (e.g. "office" -> my office vs alona's office)
 CONTEXT_KEYWORDS = {
-    "basement": ["my office", "basement kitchen", "gym", "basement living area"],
+    "basement": [
+        "my office",
+        "basement kitchen",
+        "gym",
+        "basement living area",
+    ],
     "entrance": ["entrance guest room", "entrance bathroom"],
     "master": ["master bedroom", "master bathroom", "closet"],
     "mark": ["mark's playroom", "mark's room"],
@@ -192,17 +201,26 @@ def expand_entity_id_to_friendly(suffix: str) -> str:
     return result
 
 
-def match_area_for_device(device_name: str, entity_names: list, area_id_by_name: dict) -> str | None:
+def match_area_for_device(
+    device_name: str, entity_names: list, area_id_by_name: dict
+) -> str | None:
     """Return area_id if we can match device/entity names to a known area."""
-    combined = " ".join([normalize(device_name or "")] + [normalize(n) for n in entity_names])
+    combined = " ".join(
+        [normalize(device_name or "")]
+        + [normalize(n) for n in entity_names]
+    )
     if not combined:
         return None
     candidates = []
     for area_name, area_id in area_id_by_name.items():
         an = normalize(area_name)
         # HA may use "Cinema/Living Room" - match full name or any part after /
-        parts = [p.strip() for p in an.replace(" ", "/").split("/") if p.strip()]
-        if an in combined or an.replace(" ", "") in combined.replace(" ", ""):
+        parts = [
+            p.strip() for p in an.replace(" ", "/").split("/") if p.strip()
+        ]
+        if an in combined or an.replace(" ", "") in combined.replace(
+            " ", ""
+        ):
             candidates.append((area_name, area_id))
         elif any(p in combined for p in parts if len(p) >= 3):
             candidates.append((area_name, area_id))
@@ -225,7 +243,9 @@ def match_area_for_device(device_name: str, entity_names: list, area_id_by_name:
     return candidates[0][1] if candidates else None
 
 
-def suggest_entity_name(entity_id: str, current_name: str, force_all: bool = False) -> str | None:
+def suggest_entity_name(
+    entity_id: str, current_name: str, force_all: bool = False
+) -> str | None:
     """Suggest convention name: entity_id suffix with abbreviations expanded (e.g. bsmnt -> Basement)."""
     suffix = entity_id.split(".")[-1]
     derived = expand_entity_id_to_friendly(suffix)
@@ -234,7 +254,11 @@ def suggest_entity_name(entity_id: str, current_name: str, force_all: bool = Fal
     if force_all:
         return derived
     # If current is already human-looking and good, don't override
-    if len(current_name) > 3 and " " in current_name and not looks_like_kasa_duplicate(current_name):
+    if (
+        len(current_name) > 3
+        and " " in current_name
+        and not looks_like_kasa_duplicate(current_name)
+    ):
         return None
     return derived
 
@@ -275,20 +299,32 @@ async def run(dry_run: bool, force_all: bool = False):
 
         # Fetch registries
         print("Fetching area registry...")
-        r_areas = await send_recv({"id": next_id(), "type": "config/area_registry/list"})
+        r_areas = await send_recv(
+            {"id": next_id(), "type": "config/area_registry/list"}
+        )
         areas = r_areas.get("result", [])
-        area_id_by_name = {a["name"]: a["area_id"] for a in areas if a.get("name")}
-        area_id_by_name_lower = {normalize(n): aid for n, aid in area_id_by_name.items()}
-        print(f"  Found {len(areas)} areas: {list(area_id_by_name.keys())}")
+        area_id_by_name = {
+            a["name"]: a["area_id"] for a in areas if a.get("name")
+        }
+        area_id_by_name_lower = {
+            normalize(n): aid for n, aid in area_id_by_name.items()
+        }
+        print(
+            f"  Found {len(areas)} areas: {list(area_id_by_name.keys())}"
+        )
 
         print("Fetching device registry...")
-        r_devices = await send_recv({"id": next_id(), "type": "config/device_registry/list"})
+        r_devices = await send_recv(
+            {"id": next_id(), "type": "config/device_registry/list"}
+        )
         devices = r_devices.get("result", [])
         devices_by_id = {d["id"]: d for d in devices}
         print(f"  Found {len(devices)} devices")
 
         print("Fetching entity registry...")
-        r_entities = await send_recv({"id": next_id(), "type": "config/entity_registry/list"})
+        r_entities = await send_recv(
+            {"id": next_id(), "type": "config/entity_registry/list"}
+        )
         entities_raw = r_entities.get("result", [])
         # Build entity_id -> entry (with name, device_id, etc.)
         entities = {}
@@ -318,7 +354,11 @@ async def run(dry_run: bool, force_all: bool = False):
             dev_entities = entities_by_device.get(device_id, [])
             entity_names = []
             for e in dev_entities:
-                ename = e.get("name") or e.get("original_name") or e.get("entity_id", "").split(".")[-1]
+                ename = (
+                    e.get("name")
+                    or e.get("original_name")
+                    or e.get("entity_id", "").split(".")[-1]
+                )
                 entity_names.append(ename)
             # Check if device or any entity looks like Kasa duplicate
             if looks_like_kasa_duplicate(d_name):
@@ -329,7 +369,9 @@ async def run(dry_run: bool, force_all: bool = False):
                 kasa_skipped_devices.add(device_id)
                 continue
             # Suggest area
-            suggested_area = match_area_for_device(d_name, entity_names, area_id_by_name)
+            suggested_area = match_area_for_device(
+                d_name, entity_names, area_id_by_name
+            )
             if suggested_area and suggested_area != d_area:
                 device_updates.append((device_id, suggested_area, None))
             elif not d_area and suggested_area:
@@ -338,23 +380,43 @@ async def run(dry_run: bool, force_all: bool = False):
             better_device_name = None
             if dev_entities and not d_name:
                 first_entity = dev_entities[0]
-                ename = first_entity.get("name") or first_entity.get("entity_id", "").split(".")[-1]
+                ename = (
+                    first_entity.get("name")
+                    or first_entity.get("entity_id", "").split(".")[-1]
+                )
                 if not looks_like_kasa_duplicate(ename):
                     better_device_name = ename.replace("_", " ").title()
             if better_device_name and not device.get("name_by_user"):
                 # Append to device_updates if we already have an entry, or add new
-                found = next((u for u in device_updates if u[0] == device_id), None)
+                found = next(
+                    (u for u in device_updates if u[0] == device_id), None
+                )
                 if found:
-                    device_updates = [(did, aid, better_device_name if did == device_id else nb) for did, aid, nb in device_updates]
+                    device_updates = [
+                        (
+                            did,
+                            aid,
+                            better_device_name if did == device_id else nb,
+                        )
+                        for did, aid, nb in device_updates
+                    ]
                 else:
-                    device_updates.append((device_id, d_area or suggested_area, better_device_name))
+                    device_updates.append(
+                        (
+                            device_id,
+                            d_area or suggested_area,
+                            better_device_name,
+                        )
+                    )
 
         for entity_id, e in entities.items():
             if looks_like_kasa_duplicate(e.get("name") or ""):
                 kasa_skipped_entities.add(entity_id)
                 continue
             current_name = e.get("name") or e.get("original_name") or ""
-            suggested = suggest_entity_name(entity_id, current_name, force_all=force_all)
+            suggested = suggest_entity_name(
+                entity_id, current_name, force_all=force_all
+            )
             if suggested and suggested != current_name:
                 entity_updates.append((entity_id, suggested))
 
@@ -366,7 +428,9 @@ async def run(dry_run: bool, force_all: bool = False):
             else:
                 prev_aid, prev_nb = seen_dev[did]
                 seen_dev[did] = (aid or prev_aid, nb or prev_nb)
-        device_updates = [(did, aid, nb) for did, (aid, nb) in seen_dev.items()]
+        device_updates = [
+            (did, aid, nb) for did, (aid, nb) in seen_dev.items()
+        ]
 
         # With force_all, also assign area to devices that have none (try matching from entity_id)
         if force_all and area_id_by_name:
@@ -378,19 +442,34 @@ async def run(dry_run: bool, force_all: bool = False):
                 if d_area:
                     continue
                 dev_entities = entities_by_device.get(device_id, [])
-                entity_names = [e.get("name") or e.get("original_name") or e.get("entity_id", "").split(".")[-1] for e in dev_entities]
-                suggested_area = match_area_for_device(device.get("name_by_user") or device.get("name") or "", entity_names, area_id_by_name)
+                entity_names = [
+                    e.get("name")
+                    or e.get("original_name")
+                    or e.get("entity_id", "").split(".")[-1]
+                    for e in dev_entities
+                ]
+                suggested_area = match_area_for_device(
+                    device.get("name_by_user") or device.get("name") or "",
+                    entity_names,
+                    area_id_by_name,
+                )
                 if not suggested_area and dev_entities:
                     # Try matching from first entity_id only (e.g. light.mark_s_fan_lights -> mark)
                     first_id = dev_entities[0].get("entity_id", "")
                     suffix = first_id.split(".")[-1].lower()
                     for area_name, area_id in area_id_by_name.items():
                         an = normalize(area_name)
-                        if an in suffix or any(part in suffix for part in an.replace("'", " ").split() if len(part) >= 4):
+                        if an in suffix or any(
+                            part in suffix
+                            for part in an.replace("'", " ").split()
+                            if len(part) >= 4
+                        ):
                             suggested_area = area_id
                             break
                 if suggested_area:
-                    device_updates.append((device_id, suggested_area, None))
+                    device_updates.append(
+                        (device_id, suggested_area, None)
+                    )
             seen_dev = {}
             for did, aid, nb in device_updates:
                 if did not in seen_dev:
@@ -398,14 +477,26 @@ async def run(dry_run: bool, force_all: bool = False):
                 else:
                     prev_aid, prev_nb = seen_dev[did]
                     seen_dev[did] = (aid or prev_aid, nb or prev_nb)
-            device_updates = [(did, aid, nb) for did, (aid, nb) in seen_dev.items()]
+            device_updates = [
+                (did, aid, nb) for did, (aid, nb) in seen_dev.items()
+            ]
 
         device_ids_being_updated = {d[0] for d in device_updates}
-        no_area_after = [d["id"] for d in devices if not d.get("area_id") and d["id"] not in kasa_skipped_devices and d["id"] not in device_ids_being_updated]
+        no_area_after = [
+            d["id"]
+            for d in devices
+            if not d.get("area_id")
+            and d["id"] not in kasa_skipped_devices
+            and d["id"] not in device_ids_being_updated
+        ]
         if no_area_after:
-            print(f"Devices still with no area (no match): {len(no_area_after)}")
+            print(
+                f"Devices still with no area (no match): {len(no_area_after)}"
+            )
 
-        print(f"\nKasa skipped: {len(kasa_skipped_devices)} devices, {len(kasa_skipped_entities)} entities")
+        print(
+            f"\nKasa skipped: {len(kasa_skipped_devices)} devices, {len(kasa_skipped_entities)} entities"
+        )
         print(f"Device updates (area/name): {len(device_updates)}")
         print(f"Entity name updates: {len(entity_updates)}")
 
@@ -414,20 +505,35 @@ async def run(dry_run: bool, force_all: bool = False):
             if device_updates:
                 print("\nPlanned device updates (area_id / name_by_user):")
                 for device_id, area_id, name_by_user in device_updates:
-                    area_name = next((n for n, aid in area_id_by_name.items() if aid == area_id), area_id or "")
-                    print(f"  {device_id} -> area={area_name!r} ({area_id}), name_by_user={name_by_user!r}")
+                    area_name = next(
+                        (
+                            n
+                            for n, aid in area_id_by_name.items()
+                            if aid == area_id
+                        ),
+                        area_id or "",
+                    )
+                    print(
+                        f"  {device_id} -> area={area_name!r} ({area_id}), name_by_user={name_by_user!r}"
+                    )
             if entity_updates:
                 print("\nPlanned entity name updates:")
                 for entity_id, name in entity_updates:
                     print(f"  {entity_id} -> {name!r}")
-            print("\nRun without --dry-run to apply. You will be asked to confirm.")
+            print(
+                "\nRun without --dry-run to apply. You will be asked to confirm."
+            )
             return
 
         if device_updates or entity_updates:
             try:
-                reply = input(
-                    f"\nApply {len(device_updates)} device update(s) and {len(entity_updates)} entity name(s)? [y/N]: "
-                ).strip().lower()
+                reply = (
+                    input(
+                        f"\nApply {len(device_updates)} device update(s) and {len(entity_updates)} entity name(s)? [y/N]: "
+                    )
+                    .strip()
+                    .lower()
+                )
             except EOFError:
                 reply = "n"
             if reply not in ("y", "yes"):
@@ -436,7 +542,12 @@ async def run(dry_run: bool, force_all: bool = False):
 
         # Apply device updates
         for device_id, area_id, name_by_user in device_updates:
-            msg = {"id": next_id(), "type": "config/device_registry/update", "device_id": device_id, "area_id": area_id}
+            msg = {
+                "id": next_id(),
+                "type": "config/device_registry/update",
+                "device_id": device_id,
+                "area_id": area_id,
+            }
             if name_by_user:
                 msg["name_by_user"] = name_by_user
             try:
@@ -450,7 +561,12 @@ async def run(dry_run: bool, force_all: bool = False):
         for entity_id, name in entity_updates:
             try:
                 r = await send_recv(
-                    {"id": next_id(), "type": "config/entity_registry/update", "entity_id": entity_id, "name": name}
+                    {
+                        "id": next_id(),
+                        "type": "config/entity_registry/update",
+                        "entity_id": entity_id,
+                        "name": name,
+                    }
                 )
                 if not r.get("success", True):
                     print(f"  Entity update failed: {entity_id} {r}")
@@ -458,8 +574,12 @@ async def run(dry_run: bool, force_all: bool = False):
                 print(f"  Entity {entity_id}: {ex}")
 
         print("\nDone.")
-        print(f"Summary: {len(device_updates)} devices updated (area/name), {len(entity_updates)} entities renamed.")
-        print(f"Skipped (Kasa duplicate/unnamed): {len(kasa_skipped_devices)} devices, {len(kasa_skipped_entities)} entities.")
+        print(
+            f"Summary: {len(device_updates)} devices updated (area/name), {len(entity_updates)} entities renamed."
+        )
+        print(
+            f"Skipped (Kasa duplicate/unnamed): {len(kasa_skipped_devices)} devices, {len(kasa_skipped_entities)} entities."
+        )
 
 
 if __name__ == "__main__":
