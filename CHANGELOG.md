@@ -8,6 +8,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [0.1.5] - 2026-02-12
 
 ### Added
+- **HA repo impact and Kasa troubleshooting doc** — `docs/ha-repo-impact-and-kasa-troubleshooting.md` summarizes what in this repo can change HA (only `ha_assign_devices.py`: areas and entity names) and provides a Kasa troubleshooting checklist for random "unavailable" / disconnects. Key file: `docs/ha-repo-impact-and-kasa-troubleshooting.md`.
+- **ha_kasa_diagnostic.py** — Script to list all light entities and their state (on/off/unavailable) via HA REST API; run from repo root with `HA_URL` and `HA_TOKEN` or `REFRESH_TOKEN` in `.env`. Key file: `scripts/ha_kasa_diagnostic.py`.
 - **Single source for version** — Version lives only in `apex_brain/brain/version.py` (`__version__`). FastAPI app reads it; `scripts/sync_version.py` syncs it to `apex_brain/config.yaml` and `pyproject.toml`. Bump in one place, then run the script. Key files: `apex_brain/brain/version.py`, `apex_brain/brain/server.py`, `scripts/sync_version.py`, `.cursor/rules/change-tracking.mdc`, `.cursor/rules/apex-project.mdc`.
 
 ---

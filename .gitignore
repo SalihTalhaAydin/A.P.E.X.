@@ -2,10 +2,9 @@
 .env
 *.db
 
-# Cursor credentials (contains secrets -- tokens, passwords, API keys)
-.cursor/rules/credentials.mdc
-# Local plan artifacts (do not push)
-.cursor/plans/
+# Local tool config
+.claude/
+.playwright-mcp/
 
 # Python
 __pycache__/
@@ -23,9 +22,6 @@ htmlcov/
 .idea/
 *.swp
 *.swo
-
-# MCP browser-storage (Node)
-mcp-browser-storage/node_modules/
 
 # OS
 .DS_Store
