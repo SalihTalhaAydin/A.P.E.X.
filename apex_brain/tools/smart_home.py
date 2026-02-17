@@ -474,7 +474,9 @@ async def cycle_light_timed(
 ) -> str:
     """Turn a light off and on N times with S seconds between each cycle. Capped to avoid runaway."""
     try:
-        t = max(_CYCLE_LIGHT_TIMES_MIN, min(int(times), _CYCLE_LIGHT_TIMES_MAX))
+        t = max(
+            _CYCLE_LIGHT_TIMES_MIN, min(int(times), _CYCLE_LIGHT_TIMES_MAX)
+        )
         sec = max(
             _CYCLE_LIGHT_SECONDS_MIN,
             min(float(seconds_between), _CYCLE_LIGHT_SECONDS_MAX),
@@ -606,8 +608,8 @@ async def control_climate(
 
 @tool(
     description=(
-        "Control a media player: play, pause, stop, volume, mute, skip, "
-        "source. Set volume with volume_level 0-100."
+        "Control a media player: turn on/off, play, pause, stop, volume, "
+        "mute, skip, source. Set volume with volume_level 0-100."
     ),
     parameters={
         "type": "object",
@@ -623,6 +625,8 @@ async def control_climate(
             "action": {
                 "type": "string",
                 "enum": [
+                    "turn_on",
+                    "turn_off",
                     "play",
                     "pause",
                     "stop",
@@ -633,7 +637,10 @@ async def control_climate(
                     "mute",
                     "unmute",
                 ],
-                "description": "Playback or volume action to perform.",
+                "description": (
+                    "Action: turn_on/turn_off for power, or playback/volume "
+                    "(play, pause, volume_up, etc.)."
+                ),
             },
             "volume_level": {
                 "type": "integer",
@@ -661,6 +668,8 @@ async def control_media(
     try:
         # Map actions to HA services
         action_map = {
+            "turn_on": "turn_on",
+            "turn_off": "turn_off",
             "play": "media_play",
             "pause": "media_pause",
             "stop": "media_stop",
@@ -676,8 +685,11 @@ async def control_media(
         if not service:
             return f"Unknown media action: {action}"
 
+        # Handle power (turn_on/turn_off) - no extra payload
+        if action in ("turn_on", "turn_off"):
+            await _call_ha_service("media_player", service, entity_id)
         # Handle mute/unmute data
-        if action == "mute":
+        elif action == "mute":
             await _call_ha_service(
                 "media_player",
                 service,

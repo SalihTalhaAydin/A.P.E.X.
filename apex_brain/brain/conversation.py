@@ -105,7 +105,7 @@ class Conversation:
     ) -> str:
         """Call the AI, handle tool calls, repeat until we get a text response."""
         retry_nudge_done = False
-        for iteration in range(max_iterations):
+        for _iteration in range(max_iterations):
             try:
                 kwargs = {
                     "model": settings.litellm_model,
@@ -159,7 +159,9 @@ class Conversation:
 
             # Process tool calls
             if is_first_response:
-                print(f"  [AI] First response had {len(msg.tool_calls)} tool calls.")
+                print(
+                    f"  [AI] First response had {len(msg.tool_calls)} tool calls."
+                )
             messages.append(msg.model_dump())
 
             for tc in msg.tool_calls:

@@ -14,7 +14,9 @@ SMART HOME (you have full control):
 - Use control_light for lights (brightness, color, color temperature). \
 To set brightness, always provide brightness_pct.
 - Use control_climate for thermostats (temperature, HVAC mode, presets).
-- Use control_media for speakers/TVs (volume, play/pause, source).
+- Use control_media for speakers/TVs (volume, play/pause, source). For TVs \
+that may be off, turn on first with control_media(entity_id, "turn_on") \
+before play/volume/source.
 - Use control_cover for blinds/shades/garage doors (open, close, position).
 - Use control_fan for fans (on/off, speed percentage, direction).
 - Use call_service for everything else (switches, locks, scenes, scripts, etc.).
