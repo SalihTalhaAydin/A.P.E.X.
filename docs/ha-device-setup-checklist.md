@@ -19,9 +19,12 @@ Use this when adding new smart home devices to Home Assistant. Prefer **Wi‑Fi 
 | All Echo devices | Alexa Smart Home / Amazon Alexa | Living Room Echo, Bedroom Echo Dot |
 | All temperature sensors | Wi‑Fi or Bluetooth (Tuya, BLE, etc.) | Living Room Temperature, Bedroom Temperature |
 | Thermostat (Google Nest) | Google Nest (SDM API); see [nest-setup.md](nest-setup.md) for full steps | Hallway Thermostat, Living Room Thermostat |
+| Feit Electric light bulb | Tuya or Smart Life (Wi‑Fi) | Living Room Lamp, Bedroom Desk Lamp |
 | BroadLink RM4 Pro | Broadlink | Universal Remote RM4 Pro |
 
 **RM4 Pro (IR/RF)**: Use for projector (IR), upstairs fan (IR/RF), curtains (IR/RF), laundry light remote (IR/RF). In HA: **Developer Tools → Services → `remote.learn_command`**; choose IR or RF, then press the button on the original remote. Create **scripts** or **buttons** for each learned command so Apex can call them via `script.turn_on` or `button.press`.
+
+**Easy setup:** See [broadlink-easy-setup.md](broadlink-easy-setup.md) — SmartIR (pre-made codes) or HA learn (no app). [broadlink-import-from-econtrol.md](broadlink-import-from-econtrol.md) only if you must export from e-Control.
 
 ---
 

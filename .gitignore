@@ -7,6 +7,11 @@
 # Local tool config
 .playwright-mcp/
 
+# Broadlink import (user export from e-Control app)
+scripts/broadlink_import/jsonSubIr
+scripts/broadlink_import/jsonButton
+scripts/broadlink_import/jsonIrCode
+
 # Python
 __pycache__/
 *.py[cod]

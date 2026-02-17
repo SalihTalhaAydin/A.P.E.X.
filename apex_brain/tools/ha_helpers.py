@@ -1,0 +1,111 @@
+"""
+Shared helpers for Home Assistant API access.
+Used by all smart-home tool modules. No @tool decorators here.
+"""
+
+import httpx
+from brain.config import settings
+
+
+def format_ha_error(
+    entity_id: str, domain: str, e: Exception
+) -> str:
+    """Return a short, model-friendly error."""
+    if isinstance(e, httpx.HTTPStatusError):
+        r = getattr(e, "response", None)
+        if r is not None:
+            code = r.status_code
+            body = (r.text or "")[:200]
+            if code == 404:
+                return (
+                    f"Entity not found: {entity_id}. "
+                    "Check the entity_id with list_entities."
+                )
+            if code == 422:
+                return (
+                    "HA rejected the request (422). "
+                    f"{body or str(e)}"
+                )
+            return f"HA error {code}: {body or str(e)}"
+    return f"Error ({domain}): {e}"
+
+
+async def ha_request(
+    method: str,
+    path: str,
+    json_data: dict | None = None,
+) -> dict | list | str:
+    """Make an authenticated request to the HA REST API."""
+    url = f"{settings.ha_api_url}{path}"
+    headers = settings.ha_headers
+    token = headers.get("Authorization", "")
+    tok = "set" if len(token) > 10 else "MISSING"
+    print(f"  [HA API] {method} {url} (token: {tok})")
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.request(
+            method=method,
+            url=url,
+            headers=headers,
+            json=json_data,
+        )
+        if response.status_code != 200:
+            err = (
+                f"  [HA API] ERROR: {response.status_code} "
+                f"{response.text[:300]}"
+            )
+            print(err)
+        response.raise_for_status()
+        content_type = response.headers.get(
+            "content-type", ""
+        )
+        if "application/json" in content_type:
+            return response.json()
+        return response.text
+
+
+def friendly_name(entity_id: str) -> str:
+    """Derive a human-friendly name from an entity_id."""
+    return (
+        entity_id.split(".")[-1].replace("_", " ").title()
+    )
+
+
+async def call_ha_service(
+    domain: str,
+    service: str,
+    entity_id: str,
+    data: dict | None = None,
+) -> None:
+    """Call an HA service and log the full payload."""
+    payload = {"entity_id": entity_id}
+    if data:
+        payload.update(data)
+    print(
+        f"  [HA SVC] {domain}.{service} -> "
+        f"{entity_id} data={data}"
+    )
+    await ha_request(
+        "POST",
+        f"/services/{domain}/{service}",
+        json_data=payload,
+    )
+
+
+async def read_state(entity_id: str) -> dict:
+    """Read entity state. Returns the full state dict."""
+    return await ha_request("GET", f"/states/{entity_id}")
+
+
+async def verify_generic(entity_id: str) -> str:
+    """Read back any entity's basic state."""
+    try:
+        state = await read_state(entity_id)
+        fn = state.get("attributes", {}).get(
+            "friendly_name", friendly_name(entity_id)
+        )
+        return f"{fn}: {state.get('state', 'unknown')}"
+    except Exception:
+        return (
+            f"{friendly_name(entity_id)}: "
+            "(state unconfirmed)"
+        )

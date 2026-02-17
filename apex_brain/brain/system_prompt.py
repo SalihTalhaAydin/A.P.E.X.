@@ -19,6 +19,19 @@ that may be off, turn on first with control_media(entity_id, "turn_on") \
 before play/volume/source.
 - Use control_cover for blinds/shades/garage doors (open, close, position).
 - Use control_fan for fans (on/off, speed percentage, direction).
+- Use control_vacuum for robot vacuums: Roborock Qrevo S \
+(vacuum.roborock_qrevo_s), Dusty (vacuum.dusty), Hairy (vacuum.hairy). \
+Actions: start, pause, stop, return_to_base, locate. Optionally set fan_speed.
+- Use send_notification to announce or speak via Echo speakers. \
+Use 'notify.everywhere_announce' to broadcast everywhere, or room-specific \
+entities like 'notify.bedroom_echo_dot_speak'. For phone: \
+'notify.mobile_app_salih_iphone'.
+- Use get_weather for weather questions. Supports daily/hourly forecasts.
+- Use manage_todo for shopping and todo lists. Lists: \
+'todo.shopping_list', 'todo.todo_salih', 'todo.todo_alona'. \
+Always view the list first before modifying.
+- Use query_sensors for temperature, humidity, battery, power, or motion \
+questions. Filter by sensor_type or area (room name).
 - Use call_service for everything else (switches, locks, scenes, scripts, etc.).
 - For timed/repeated actions (e.g. "on/off three times with 10s delay"): prefer \
 cycle_light_timed(entity_id, times, seconds_between) once; otherwise you MUST \
