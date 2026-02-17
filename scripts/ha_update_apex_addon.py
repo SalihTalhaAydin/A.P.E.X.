@@ -72,7 +72,10 @@ async def main():
         )
         sys.exit(1)
 
-    ws_url = HA_URL.replace("http://", "ws://").replace("https://", "wss://") + "/api/websocket"
+    ws_url = (
+        HA_URL.replace("http://", "ws://").replace("https://", "wss://")
+        + "/api/websocket"
+    )
 
     async with websockets.connect(ws_url) as ws:
         await ws.recv()
@@ -85,7 +88,12 @@ async def main():
         # 1. Reload add-on store so Supervisor fetches latest from GitHub
         await ws.send(
             json.dumps(
-                {"id": 1, "type": "supervisor/api", "endpoint": "/addons/reload", "method": "post"}
+                {
+                    "id": 1,
+                    "type": "supervisor/api",
+                    "endpoint": "/addons/reload",
+                    "method": "post",
+                }
             )
         )
         r1 = json.loads(await ws.recv())
@@ -132,12 +140,16 @@ async def main():
             )
             r3 = json.loads(await ws.recv())
             if r3.get("success", True):
-                print("Update started successfully. Restart the add-on from HA UI if needed.")
+                print(
+                    "Update started successfully. Restart the add-on from HA UI if needed."
+                )
             else:
                 print("Update failed:", r3.get("error", r3))
         else:
             if version != version_latest:
-                print("No update available yet. Wait a minute and run again, or use Rebuild in HA UI.")
+                print(
+                    "No update available yet. Wait a minute and run again, or use Rebuild in HA UI."
+                )
             else:
                 print("Add-on is already on the latest version.")
 

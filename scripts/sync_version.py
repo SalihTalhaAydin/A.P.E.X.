@@ -17,6 +17,7 @@ def get_version() -> str:
     sys.path.insert(0, str(APEX_BRAIN))
     try:
         from brain.version import __version__
+
         return __version__
     finally:
         sys.path.pop(0)
