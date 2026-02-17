@@ -3,7 +3,6 @@
 *.db
 
 # Local tool config
-.claude/
 .playwright-mcp/
 
 # Python
