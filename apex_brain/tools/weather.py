@@ -76,6 +76,7 @@ async def get_weather(
                     "entity_id": entity_id,
                     "type": forecast_type,
                 },
+                return_response=True,
             )
             # Response: {entity_id: {"forecast": [...]}}
             forecasts = (

@@ -13,6 +13,7 @@ To enable:
 import asyncio
 import datetime as _dt
 
+from brain.config import settings
 from tools.base import tool
 
 # Lazy-init: built once on first use
@@ -200,15 +201,16 @@ async def create_event(
     if not svc:
         return "Calendar not configured yet."
 
+    tz = settings.timezone
     body = {
         "summary": title,
         "start": {
             "dateTime": start,
-            "timeZone": "America/New_York",
+            "timeZone": tz,
         },
         "end": {
             "dateTime": end,
-            "timeZone": "America/New_York",
+            "timeZone": tz,
         },
     }
     if description:

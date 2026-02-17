@@ -34,9 +34,21 @@ async def ha_request(
     method: str,
     path: str,
     json_data: dict | None = None,
+    *,
+    return_response: bool = False,
 ) -> dict | list | str:
-    """Make an authenticated request to the HA REST API."""
+    """Make an authenticated request to the HA REST API.
+
+    Set *return_response=True* for service calls that
+    require ``?return_response`` (e.g. todo/get_items,
+    weather/get_forecasts).  The wrapper is automatically
+    stripped so callers receive the ``service_response``
+    dict directly.
+    """
     url = f"{settings.ha_api_url}{path}"
+    if return_response:
+        sep = "&" if "?" in path else "?"
+        url += f"{sep}return_response"
     headers = settings.ha_headers
     token = headers.get("Authorization", "")
     tok = "set" if len(token) > 10 else "MISSING"
@@ -59,7 +71,14 @@ async def ha_request(
             "content-type", ""
         )
         if "application/json" in content_type:
-            return response.json()
+            result = response.json()
+            if (
+                return_response
+                and isinstance(result, dict)
+                and "service_response" in result
+            ):
+                return result["service_response"]
+            return result
         return response.text
 
 

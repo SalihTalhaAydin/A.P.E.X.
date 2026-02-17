@@ -18,6 +18,7 @@ async def _get_items(entity_id: str) -> list[dict]:
         "POST",
         "/services/todo/get_items",
         json_data={"entity_id": entity_id},
+        return_response=True,
     )
     # Response: {entity_id: {"items": [...]}}
     if isinstance(resp, dict):

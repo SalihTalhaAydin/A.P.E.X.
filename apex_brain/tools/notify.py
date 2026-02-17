@@ -1,12 +1,21 @@
 """
 Notification tool for Home Assistant.
 Supports Echo speakers (speak/announce) and mobile phone notifications.
+
+HA 2024.11+ uses entity-based notify: call notify.send_message
+with an entity_id instead of per-device service names.
+Legacy services (persistent_notification) are kept as fallback.
 """
 
 import httpx
 
 from tools.base import tool
 from tools.ha_helpers import format_ha_error, ha_request
+
+# Legacy services that still use the old calling convention
+_LEGACY_SERVICES = frozenset(
+    {"persistent_notification", "notify"}
+)
 
 
 @tool(
@@ -53,20 +62,35 @@ async def send_notification(
 ) -> str:
     """Send a notification via HA notify service."""
     try:
-        # Extract service name from entity_id
-        # notify.everywhere_announce -> everywhere_announce
-        service_name = entity_id.replace("notify.", "", 1)
+        service_name = entity_id.replace(
+            "notify.", "", 1
+        )
+        target = (
+            service_name.replace("_", " ").title()
+        )
 
         data: dict = {"message": message}
         if title is not None:
             data["title"] = title
 
-        await ha_request(
-            "POST",
-            f"/services/notify/{service_name}",
-            json_data=data,
-        )
-        target = service_name.replace("_", " ").title()
+        if service_name in _LEGACY_SERVICES:
+            # Legacy services (persistent_notification)
+            await ha_request(
+                "POST",
+                f"/services/notify/{service_name}",
+                json_data=data,
+            )
+        else:
+            # Entity-based notify (HA 2024.11+)
+            await ha_request(
+                "POST",
+                "/services/notify/send_message",
+                json_data={
+                    "entity_id": entity_id,
+                    **data,
+                },
+            )
+
         return f"Sent to {target}: \"{message}\""
 
     except httpx.HTTPStatusError as e:

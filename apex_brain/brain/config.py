@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     google_calendar_credentials_path: str = ""
     google_calendar_id: str = "primary"
 
+    # Timezone (must match your HA instance)
+    timezone: str = "America/Chicago"
+
     # Webhook / event-driven reactions
     webhook_secret: str = ""
     webhook_cooldown_seconds: int = 60
