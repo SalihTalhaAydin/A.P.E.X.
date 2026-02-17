@@ -18,5 +18,9 @@ aiosqlite>=0.20.0
 pydantic-settings>=2.7.0
 python-dotenv>=1.0.0
 
+# Google Calendar (optional - for calendar tool)
+google-api-python-client>=2.0.0
+google-auth>=2.0.0
+
 # Utilities
 numpy>=1.26.0

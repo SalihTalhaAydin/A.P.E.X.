@@ -5,6 +5,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.3.0] - 2026-02-17
+
+### Added
+- **Automations & Scenes tools** — `list_automations`, `trigger_automation`, `toggle_automation` (enable/disable), `list_scenes`, `activate_scene`. Voice-control HA automations and scenes directly. Key file: `apex_brain/tools/automation.py`.
+- **Presence Awareness** — `get_presence` tool queries HA person entities. Presence summary ("Salih: home, Alena: away") is auto-injected into the system prompt every turn. Key files: `apex_brain/tools/presence.py`, `apex_brain/memory/context_builder.py`.
+- **Smarter System Prompt** — Time-of-day awareness (morning/afternoon/evening/night), seasonal context (winter/spring/summer/fall), proactive behavioral hints (mention weather in morning, suggest winding down in evening). Key file: `apex_brain/brain/system_prompt.py`.
+- **Google Calendar integration** — `get_events`, `create_event`, `get_today_schedule`, `delete_event`. Uses service account auth for headless operation. Today's schedule auto-injected into system prompt. Key files: `apex_brain/tools/calendar_tool.py`, `apex_brain/brain/config.py`.
+- **Routines Engine** — `define_routine`, `list_routines`, `run_routine`, `delete_routine`. Multi-step sequences (e.g. "good morning" = lights + thermostat + weather + calendar) stored in knowledge base and executed via AI tool chaining. Key files: `apex_brain/tools/routines.py`, `apex_brain/brain/server.py`.
+- **Event-Driven Reactions** — `POST /api/webhook` endpoint receives events from HA automations (motion, door, temperature). EventHandler with cooldown prevents reaction storms. `GET /api/webhook/config` returns example HA automation YAML. Key files: `apex_brain/brain/event_handler.py`, `apex_brain/brain/server.py`.
+- **Memory Improvements** — Fact deduplication via embedding similarity (threshold 0.92), conflict resolution (higher confidence wins), temporal metadata (`last_mentioned_at`, `expires_at`), expired fact cleanup. Schema auto-migrates. Key file: `apex_brain/memory/knowledge_store.py`.
+- **Temporal fact extraction** — Fact extractor now extracts `expires` dates for time-bound facts (e.g. "dentist Thursday" → expires 2026-02-20). Key file: `apex_brain/memory/fact_extractor.py`.
+- **New tests** — test_automation, test_presence, test_system_prompt, test_calendar, test_routines, test_webhook (30+ new tests).
+- **Google Calendar dependencies** — `google-api-python-client`, `google-auth` added to requirements.txt.
+
+### Changed
+- **Tool-calling loop** — Max iterations bumped from 10 to 15 to support complex routines. Key file: `apex_brain/brain/conversation.py`.
+- **Context builder** — Now assembles presence, time context, and calendar (when configured) into every system prompt. Key file: `apex_brain/memory/context_builder.py`.
+- **System prompt** — Added sections for automations, scenes, presence, routines, and proactive hints. Updated `call_service` to note dedicated tools for automations/scenes. Key file: `apex_brain/brain/system_prompt.py`.
+- **Health endpoint** — Now includes `webhook_enabled` status. Key file: `apex_brain/brain/server.py`.
+- **Config** — Added `google_calendar_credentials_path`, `google_calendar_id`, `webhook_secret`, `webhook_cooldown_seconds`, `webhook_enabled`. Key file: `apex_brain/brain/config.py`.
+
+---
+
 ## [0.1.5] - 2026-02-12
 
 ### Added

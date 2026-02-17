@@ -101,7 +101,7 @@ class Conversation:
         self,
         messages: list[dict],
         tool_defs: list[dict],
-        max_iterations: int = 10,
+        max_iterations: int = 15,
     ) -> str:
         """Call the AI, handle tool calls, repeat until we get a text response."""
         retry_nudge_done = False

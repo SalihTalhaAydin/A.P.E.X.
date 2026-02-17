@@ -22,12 +22,17 @@ Categories:
 - habit: Routines, patterns, regular activities
 - reminder: Things the user wants to be reminded about
 
+If a fact has a time limit (e.g. "visiting next week", "sale ends Friday"), \
+include "expires": "YYYY-MM-DD" in the JSON object. Only include expires \
+for truly temporary facts, not permanent preferences.
+
 Return ONLY a JSON array. If nothing new to extract, return [].
 
 Example output:
 [
   {{"category": "preference", "key": "favorite cuisine", "value": "loves sushi", "confidence": 0.9}},
-  {{"category": "person", "key": "Sarah", "value": "friend, birthday March 15", "confidence": 0.8}}
+  {{"category": "person", "key": "Sarah", "value": "friend, birthday March 15", "confidence": 0.8}},
+  {{"category": "event", "key": "dentist appointment", "value": "Thursday at 2pm", "confidence": 0.95, "expires": "2026-02-20"}}
 ]
 
 Conversation:
@@ -103,12 +108,14 @@ class FactExtractor:
                 confidence = fact.get("confidence", 0.7)
 
                 if key and value:
+                    expires = fact.get("expires")
                     await self.knowledge_store.store_fact(
                         category=category,
                         key=key,
                         value=value,
                         confidence=confidence,
                         source="auto",
+                        expires_at=expires,
                     )
 
         except json.JSONDecodeError:

@@ -36,10 +36,22 @@ class Settings(BaseSettings):
     )
     max_facts_in_context: int = 20  # max relevant facts per AI call
 
+    # Google Calendar (service account)
+    google_calendar_credentials_path: str = ""
+    google_calendar_id: str = "primary"
+
+    # Webhook / event-driven reactions
+    webhook_secret: str = ""
+    webhook_cooldown_seconds: int = 60
+    webhook_enabled: bool = True
+
     # Server
     port: int = 8080
 
-    model_config = {"env_file": [".env", "../.env"], "extra": "ignore"}
+    model_config = {
+        "env_file": [".env", "../.env"],
+        "extra": "ignore",
+    }
 
     @property
     def ha_headers(self) -> dict:

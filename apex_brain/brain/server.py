@@ -1,7 +1,8 @@
 """
 Apex Brain - FastAPI Server
-Exposes an OpenAI-compatible API for Home Assistant integration,
-plus a simple /api/chat endpoint for direct testing.
+Exposes an OpenAI-compatible API for Home Assistant
+integration, plus /api/chat for testing and
+/api/webhook for event-driven reactions.
 """
 
 import os
@@ -14,35 +15,51 @@ import litellm
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from memory.context_builder import ContextBuilder
-from memory.conversation_store import ConversationStore
+from memory.conversation_store import (
+    ConversationStore,
+)
 from memory.fact_extractor import FactExtractor
 from memory.knowledge_store import KnowledgeStore
 from pydantic import BaseModel
 from tools import discover_tools
 from tools.base import TOOL_REGISTRY
 from tools.knowledge import set_knowledge_store
+from tools.routines import (
+    set_knowledge_store as set_routines_store,
+)
 
 from brain.config import settings
 from brain.conversation import Conversation
+from brain.event_handler import (
+    EventHandler,
+    WebhookEvent,
+    WebhookResponse,
+)
 from brain.version import __version__
 
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------
 # Globals (initialized on startup)
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------
 conversation: Conversation | None = None
+event_handler: EventHandler | None = None
 startup_time: float = 0
 
 
-async def _check_ha_reachable() -> tuple[bool, str | None]:
-    """
-    Perform one GET to HA Core API from this process (add-on or local).
-    Returns (success, error_message). Uses same URL/headers as smart home tools.
-    Timeout 3s so health/debug endpoints do not block long.
+async def _check_ha_reachable() -> (
+    tuple[bool, str | None]
+):
+    """Perform one GET to HA Core API.
+
+    Returns (success, error_message).
     """
     url = f"{settings.ha_api_url}/config"
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            r = await client.get(url, headers=settings.ha_headers)
+        async with httpx.AsyncClient(
+            timeout=3.0
+        ) as client:
+            r = await client.get(
+                url, headers=settings.ha_headers
+            )
             if r.status_code == 200:
                 return True, None
             return False, f"HTTP {r.status_code}"
@@ -52,8 +69,10 @@ async def _check_ha_reachable() -> tuple[bool, str | None]:
         return False, str(e)[:200]
 
 
-async def _embed_text(text: str) -> list[float] | None:
-    """Generate embedding using LiteLLM. Used by knowledge store."""
+async def _embed_text(
+    text: str,
+) -> list[float] | None:
+    """Generate embedding using LiteLLM."""
     try:
         response = await litellm.aembedding(
             model=settings.embedding_model,
@@ -68,7 +87,7 @@ async def _embed_text(text: str) -> list[float] | None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Startup and shutdown logic."""
-    global conversation, startup_time
+    global conversation, event_handler, startup_time
     startup_time = time.time()
 
     print("=" * 50)
@@ -80,9 +99,13 @@ async def lifespan(_app: FastAPI):
 
     # Set API keys
     if settings.openai_api_key:
-        os.environ["OPENAI_API_KEY"] = settings.openai_api_key
+        os.environ["OPENAI_API_KEY"] = (
+            settings.openai_api_key
+        )
     if settings.anthropic_api_key:
-        os.environ["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
+        os.environ["ANTHROPIC_API_KEY"] = (
+            settings.anthropic_api_key
+        )
 
     # Initialize memory stores
     convo_store = ConversationStore(settings.db_path)
@@ -109,7 +132,11 @@ async def lifespan(_app: FastAPI):
     # Discover and register tools
     discover_tools()
     set_knowledge_store(knowledge_store)
-    print(f"  Tools loaded: {', '.join(TOOL_REGISTRY.keys())}")
+    set_routines_store(knowledge_store)
+    print(
+        "  Tools loaded: "
+        f"{', '.join(TOOL_REGISTRY.keys())}"
+    )
 
     # Create conversation handler
     conversation = Conversation(
@@ -118,6 +145,14 @@ async def lifespan(_app: FastAPI):
         fact_extractor=fact_extractor,
         context_builder=context_builder,
     )
+
+    # Create event handler (webhook reactions)
+    if settings.webhook_enabled:
+        event_handler = EventHandler(
+            conversation=conversation,
+            cooldown=settings.webhook_cooldown_seconds,
+        )
+        print("  Webhook endpoint: enabled")
 
     print("  Apex Brain is online.")
     print("=" * 50)
@@ -130,20 +165,23 @@ async def lifespan(_app: FastAPI):
     print("Apex Brain shut down.")
 
 
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------
 # FastAPI app
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------
 app = FastAPI(
     title="Apex Brain",
-    description="Personal AI assistant with memory and smart home control",
+    description=(
+        "Personal AI assistant with memory "
+        "and smart home control"
+    ),
     version=__version__,
     lifespan=lifespan,
 )
 
 
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------
 # Models
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------
 class ChatRequest(BaseModel):
     message: str
     session_id: str = "default"
@@ -154,15 +192,19 @@ class ChatResponse(BaseModel):
     session_id: str
 
 
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------
 # Endpoints
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------
 
 
 @app.get("/health")
 async def health():
-    """Health check endpoint. Includes HA connectivity when running as add-on."""
-    uptime = time.time() - startup_time if startup_time else 0
+    """Health check with HA connectivity."""
+    uptime = (
+        time.time() - startup_time
+        if startup_time
+        else 0
+    )
     ha_ok, ha_err = await _check_ha_reachable()
     out = {
         "status": "online",
@@ -170,6 +212,7 @@ async def health():
         "uptime_seconds": round(uptime),
         "tools_loaded": list(TOOL_REGISTRY.keys()),
         "ha_reachable": ha_ok,
+        "webhook_enabled": settings.webhook_enabled,
     }
     if ha_err:
         out["ha_error"] = ha_err
@@ -178,10 +221,7 @@ async def health():
 
 @app.get("/api/debug/ha")
 async def debug_ha():
-    """
-    Diagnostic: can this instance reach the Home Assistant Core API?
-    Uses the same URL and token as smart home tools. Useful after "light didn't work".
-    """
+    """Diagnostic: HA Core API reachable?"""
     ha_ok, ha_err = await _check_ha_reachable()
     return {
         "ha_reachable": ha_ok,
@@ -192,30 +232,117 @@ async def debug_ha():
 
 @app.post("/api/chat")
 async def simple_chat(req: ChatRequest):
-    """
-    Simple chat endpoint for testing and direct integrations.
-    POST {"message": "turn off the lights"} -> {"response": "Done."}
-    """
+    """Simple chat for testing."""
     if not conversation:
         return JSONResponse(
-            status_code=503, content={"error": "Not ready"}
+            status_code=503,
+            content={"error": "Not ready"},
         )
 
-    response_text = await conversation.handle(req.message, req.session_id)
-    return ChatResponse(response=response_text, session_id=req.session_id)
+    response_text = await conversation.handle(
+        req.message, req.session_id
+    )
+    return ChatResponse(
+        response=response_text,
+        session_id=req.session_id,
+    )
+
+
+@app.post("/api/webhook")
+async def handle_webhook(event: WebhookEvent):
+    """Receive events from HA automations.
+
+    HA automations call this endpoint to push events
+    like motion, door, temperature thresholds.
+    Apex processes and reacts intelligently.
+    """
+    if not settings.webhook_enabled:
+        return WebhookResponse(
+            status="ignored",
+            message="Webhooks disabled.",
+        )
+
+    if not event_handler:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Not ready"},
+        )
+
+    # Optional shared-secret auth
+    if settings.webhook_secret:
+        secret = event.attributes.get("secret", "")
+        if secret != settings.webhook_secret:
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Invalid secret"},
+            )
+
+    result = await event_handler.process_event(
+        event
+    )
+    return result
+
+
+@app.get("/api/webhook/config")
+async def webhook_config():
+    """Return supported event types and example YAML."""
+    return {
+        "enabled": settings.webhook_enabled,
+        "cooldown_seconds": (
+            settings.webhook_cooldown_seconds
+        ),
+        "supported_event_types": [
+            "motion",
+            "door",
+            "temperature",
+            "state_changed",
+        ],
+        "example_ha_automation": {
+            "alias": "Motion - notify Apex",
+            "trigger": {
+                "platform": "state",
+                "entity_id": (
+                    "binary_sensor.hallway_motion"
+                ),
+                "to": "on",
+            },
+            "action": {
+                "service": "rest_command.apex_webhook",
+                "data": {
+                    "event_type": "motion",
+                    "entity_id": (
+                        "binary_sensor.hallway_motion"
+                    ),
+                    "new_state": "on",
+                },
+            },
+        },
+        "example_rest_command": {
+            "apex_webhook": {
+                "url": "http://localhost:8080"
+                "/api/webhook",
+                "method": "POST",
+                "content_type": "application/json",
+                "payload": (
+                    '{"event_type":"{{ event_type }}",'
+                    '"entity_id":"{{ entity_id }}",'
+                    '"new_state":"{{ new_state }}"}'
+                ),
+            }
+        },
+    }
 
 
 @app.post("/v1/chat/completions")
 async def openai_compatible(request: Request):
-    """
-    OpenAI-compatible chat completions endpoint.
-    This is what HA's Extended OpenAI Conversation integration talks to.
-    We extract the user's message, process it through Apex, and return
-    in OpenAI's expected format.
+    """OpenAI-compatible chat completions.
+
+    Used by HA's Extended OpenAI Conversation.
     """
     if not conversation:
         return JSONResponse(
-            status_code=503, content={"error": "Not ready"}
+            status_code=503,
+            content={"error": "Not ready"},
         )
 
     body = await request.json()
@@ -227,13 +354,15 @@ async def openai_compatible(request: Request):
         if msg.get("role") == "user":
             content = msg.get("content", "")
             if isinstance(content, list):
-                # Handle multimodal format
                 for part in content:
                     if (
                         isinstance(part, dict)
-                        and part.get("type") == "text"
+                        and part.get("type")
+                        == "text"
                     ):
-                        user_message = part.get("text", "")
+                        user_message = part.get(
+                            "text", ""
+                        )
                         break
             else:
                 user_message = content
@@ -242,13 +371,15 @@ async def openai_compatible(request: Request):
     if not user_message:
         return JSONResponse(
             status_code=400,
-            content={"error": "No user message found"},
+            content={
+                "error": "No user message found"
+            },
         )
 
-    # Process through Apex
-    response_text = await conversation.handle(user_message)
+    response_text = await conversation.handle(
+        user_message
+    )
 
-    # Return in OpenAI chat completion format
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
         "object": "chat.completion",
@@ -272,9 +403,9 @@ async def openai_compatible(request: Request):
     }
 
 
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------
 # Run directly: python -m brain.server
-# --------------------------------------------------------------------------
+# ---------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
 
