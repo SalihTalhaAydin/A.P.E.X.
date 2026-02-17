@@ -100,7 +100,6 @@ The add-on exposes an OpenAI-compatible API. To use it with HA's voice system:
 
 ```
 APEX/                           # Git root (github.com/SalihTalhaAydin/A.P.E.X.)
-├── .cursor/rules/              # Cursor AI rules (credentials.mdc is gitignored)
 ├── .env.example                # Environment template for local dev
 ├── .gitignore
 ├── docker-compose.yml          # Local Docker dev (context: apex_brain/)

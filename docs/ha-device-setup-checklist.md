@@ -7,8 +7,6 @@ Use this when adding new smart home devices to Home Assistant. Prefer **Wi‑Fi 
 - **Convention**: [Room] [Fixture/Level] [Description] — see [device-naming.md](device-naming.md).
 - **Friendly name**: Title Case (e.g. "Bedroom Ceiling Left", "Alena Office Plug").
 - **Area**: Assign every device to an area in **Settings → Areas** so room-based commands work.
-- **Bulk apply (optional)**: From repo root, run `python scripts/ha_assign_devices.py --dry-run` to preview area/name updates, then run without `--dry-run` and confirm to apply. Requires `HA_URL` and `REFRESH_TOKEN` (or `HA_TOKEN`) in the environment.
-
 ---
 
 ## Device list (integrations and naming)
