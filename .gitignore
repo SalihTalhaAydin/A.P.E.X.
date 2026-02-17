@@ -1,5 +1,7 @@
-# Environment
+# Environment (plain .env is secret — .env.encrypted is safe to commit)
 .env
+!.env.encrypted
+!.env.example
 *.db
 
 # Local tool config
