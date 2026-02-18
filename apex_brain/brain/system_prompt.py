@@ -56,6 +56,23 @@ disarm. Optional code parameter for armed/disarm transitions.
 Use execute_script to run a script by entity_id, with optional variables dict.
 - Use get_energy_summary for an overview of power consumption and solar generation. \
 Use get_entity_power for current power/energy reading of a specific sensor.
+- Use set_input_helper to control input helpers (input_number, input_select, \
+input_text, input_datetime, input_boolean). Use list_input_helpers to discover them.
+- Use get_history to check past state changes for any entity (e.g. "when did the \
+light turn off?", "temperature history for today"). Use get_logbook for a human-readable \
+event log of what happened recently.
+- Use evaluate_template for complex HA queries using Jinja2 templates (e.g. "how \
+many lights are on?", "list all open doors", "average temperature").
+- Use create_automation to build new HA automations with triggers, conditions, and \
+actions. Use update_automation to modify existing ones. Use delete_automation to remove.
+- Use get_ha_info for system information (HA version, location, timezone).
+- Use list_devices to see all physical devices with manufacturer, model, and area.
+- Use list_integrations to see all loaded integrations/platforms.
+- Use list_services to discover all available service calls by domain.
+- Use reload_config to reload HA configuration after YAML changes (automations, \
+scripts, scenes, input helpers, etc.) without restarting.
+- Use fire_webhook to trigger HA webhooks by ID. Use fire_event to fire custom events \
+on the HA event bus.
 - Use call_service for anything not covered by the tools above.
 - For timed/repeated actions (e.g. "on/off three times with 10s delay"): prefer \
 cycle_light_timed(entity_id, times, seconds_between) once; otherwise you MUST \
@@ -272,53 +289,37 @@ def build_system_prompt(
         season = time_context.get("season", "")
         formatted = time_context.get("formatted", "")
         sections.append(
-            f"TIME & CONTEXT:\n{formatted}. "
-            f"{period.title()}, {season}."
+            f"TIME & CONTEXT:\n{formatted}. {period.title()}, {season}."
         )
     elif current_datetime:
-        sections.append(
-            f"CURRENT TIME:\n{current_datetime}"
-        )
+        sections.append(f"CURRENT TIME:\n{current_datetime}")
 
     # Who's home
     if presence_summary:
-        sections.append(
-            f"WHO'S HOME:\n{presence_summary}"
-        )
+        sections.append(f"WHO'S HOME:\n{presence_summary}")
 
     # Calendar
     if calendar_summary:
-        sections.append(
-            f"TODAY'S SCHEDULE:\n{calendar_summary}"
-        )
+        sections.append(f"TODAY'S SCHEDULE:\n{calendar_summary}")
 
     # Personal knowledge
     if relevant_facts:
         facts_text = "\n".join(
-            f"- {f['key']}: {f['value']}"
-            for f in relevant_facts
+            f"- {f['key']}: {f['value']}" for f in relevant_facts
         )
-        sections.append(
-            f"WHAT YOU KNOW ABOUT THE USER:\n"
-            f"{facts_text}"
-        )
+        sections.append(f"WHAT YOU KNOW ABOUT THE USER:\n{facts_text}")
 
     # Recent conversation
     if recent_turns:
         turns_text = "\n".join(
-            f"{'User' if t['role'] == 'user' else 'Apex'}"
-            f": {t['content']}"
+            f"{'User' if t['role'] == 'user' else 'Apex'}: {t['content']}"
             for t in recent_turns
             if t.get("content")
         )
         if turns_text:
-            sections.append(
-                f"RECENT CONVERSATION:\n{turns_text}"
-            )
+            sections.append(f"RECENT CONVERSATION:\n{turns_text}")
 
-    context_block = (
-        "\n\n".join(sections) if sections else ""
-    )
+    context_block = "\n\n".join(sections) if sections else ""
 
     proactive_block = _build_proactive_hints(
         time_ctx=time_context,
