@@ -110,8 +110,6 @@ class ContextBuilder:
         # 5. Calendar summary
         calendar_summary = ""
         try:
-            from brain.config import settings
-
             if settings.google_calendar_credentials_path:
                 from tools.calendar_tool import (
                     get_today_schedule,
