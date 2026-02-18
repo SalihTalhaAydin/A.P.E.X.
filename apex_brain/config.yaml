@@ -9,7 +9,7 @@
 #   homeassistant_api — grants access to the HA Core API
 
 name: "Apex Brain"
-version: "0.3.3"
+version: "0.4.0"
 slug: "apex_brain"
 description: "Personal AI assistant with memory, smart home control, and semantic knowledge"
 url: "https://github.com/SalihTalhaAydin/A.P.E.X."
@@ -39,7 +39,7 @@ map:
 # Configuration options (shown in HA add-on Configuration tab)
 # These are written to /data/options.json and read by run.sh via jq
 options:
-  litellm_model: "gpt-4o"
+  litellm_model: "claude-sonnet-4-20250514"
   openai_api_key: ""
   anthropic_api_key: ""
   embedding_model: "text-embedding-3-small"
