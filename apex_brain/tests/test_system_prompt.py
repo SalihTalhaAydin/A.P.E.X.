@@ -88,9 +88,8 @@ def test_proactive_hints_calendar():
 
 
 def test_proactive_hints_empty():
-    """No hints when nothing to suggest."""
-    ctx = {"period": "afternoon", "season": "summer"}
-    hints = _build_proactive_hints(time_ctx=ctx)
+    """No hints when no context is provided."""
+    hints = _build_proactive_hints()
     assert hints == ""
 
 

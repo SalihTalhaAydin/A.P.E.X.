@@ -5,6 +5,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.5.0] - 2026-02-17
+
+### Changed
+- **J.A.R.V.I.S.-inspired personality** — Apex now speaks with the polished, composed tone of a brilliant AI butler. Calm confidence, dry wit, understated sarcasm, and elegant brevity replace the generic assistant voice. Signature phrases ("Shall I...", "If I may suggest...", "Very well") used naturally. Key file: `apex_brain/brain/system_prompt.py`.
+- **Refined communication rules** — Greetings now have personality and match the moment. Smart home confirmations are crisper ("Garage door secured.", "The house should be comfortable shortly."). Error handling is composed ("I'm afraid that didn't work — here's why"). Key file: `apex_brain/brain/system_prompt.py`.
+- **Routine report style** — Routine completion messages now read with crisp efficiency: "Morning routine complete — lights on, thermostat at 72, and it's a clear 68°F outside. You're all set." Key file: `apex_brain/brain/system_prompt.py`.
+
+### Fixed
+- **test_proactive_hints_empty** — Test was passing afternoon context but expecting empty hints; fixed to call `_build_proactive_hints()` with no args. Key file: `apex_brain/tests/test_system_prompt.py`.
+
+---
+
+## [0.4.0] - 2026-02-17
+
+### Added
+- **17 new HA tools** — `get_history`, `get_logbook`, `evaluate_template`, `create_automation`, `update_automation`, `delete_automation`, `get_ha_info`, `list_devices`, `list_integrations`, `list_services`, `reload_config`, `fire_webhook`, `fire_event`, `set_input_helper`, `list_input_helpers`, `get_energy_summary`, `get_entity_power`. Key file: `apex_brain/tools/smart_home.py`.
+- **Mandatory execution and testing guidelines** — CLAUDE.md updated with automatic execution rules and two-layer testing requirement (unit tests + live HA validation). Key file: `CLAUDE.md`.
+
+### Changed
+- **Default model** — Switched from GPT-4o to `claude-sonnet-4-20250514`. Key files: `apex_brain/brain/config.py`, `apex_brain/config.yaml`.
+- **Dynamic device discovery** — Removed hardcoded vacuum/notify/todo entity names; all entity discovery is now via `list_entities`. Key file: `apex_brain/tools/smart_home.py`.
+
+### Fixed
+- **`list_devices` tool** — Use `area_devices()` instead of `devices()` to correctly list devices by area. Key file: `apex_brain/tools/smart_home.py`.
+- **Automation tool array parameters** — Added missing `items` schema to array parameters so LLMs generate valid tool calls. Key file: `apex_brain/tools/smart_home.py`.
+- **Context builder `UnboundLocalError`** — Removed shadowed `settings` import. Key file: `apex_brain/memory/context_builder.py`.
+
+---
+
 ## [0.3.0] - 2026-02-17
 
 ### Added

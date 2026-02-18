@@ -2,8 +2,9 @@
 Conversation Store - Saves every conversation turn permanently.
 Never lose context. Every Apex interaction is searchable.
 """
+from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 import aiosqlite
 
@@ -41,7 +42,7 @@ class ConversationStore:
         """Save a conversation turn (user or assistant)."""
         if not content or not content.strip():
             return
-        now = datetime.now(UTC).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         await self._db.execute(
             "INSERT INTO conversations (role, content, timestamp, session_id) VALUES (?, ?, ?, ?)",
             (role, content.strip(), now, session_id),

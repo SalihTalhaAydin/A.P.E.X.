@@ -5,6 +5,8 @@ Security tools for Home Assistant alarm panels and cameras.
 - get_camera_state: returns camera recording/streaming state.
 """
 
+from __future__ import annotations
+
 import httpx
 
 from tools.base import tool

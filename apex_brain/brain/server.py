@@ -5,6 +5,8 @@ integration, plus /api/chat for testing and
 /api/webhook for event-driven reactions.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import time

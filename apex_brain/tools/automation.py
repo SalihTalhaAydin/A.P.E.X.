@@ -4,6 +4,8 @@ List, trigger, enable/disable, create, update, delete automations;
 list and activate scenes.
 """
 
+from __future__ import annotations
+
 import logging
 
 import httpx

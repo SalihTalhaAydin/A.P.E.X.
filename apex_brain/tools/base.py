@@ -3,6 +3,8 @@ Apex Tool System - Decorator-based tool registration.
 Drop a .py file in tools/, add @tool decorator, done. Auto-discovered.
 """
 
+from __future__ import annotations
+
 import inspect
 import logging
 from collections.abc import Callable
@@ -43,7 +45,11 @@ def tool(description: str, parameters: dict | None = None):
 
 def _schema_from_hints(func: Callable) -> dict:
     """Generate an OpenAI-compatible parameter schema from function type hints."""
-    hints = get_type_hints(func)
+    try:
+        hints = get_type_hints(func)
+    except Exception:
+        # Fallback for older Python where PEP 604 unions can't be evaluated
+        hints = {}
     sig = inspect.signature(func)
 
     properties = {}

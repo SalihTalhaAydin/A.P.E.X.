@@ -7,6 +7,8 @@ with an entity_id instead of per-device service names.
 Legacy services (persistent_notification) are kept as fallback.
 """
 
+from __future__ import annotations
+
 import logging
 
 import httpx

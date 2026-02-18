@@ -3,6 +3,8 @@ Vacuum control tool for Home Assistant robot vacuums.
 Supports start, pause, stop, return-to-base, locate, and fan speed.
 """
 
+from __future__ import annotations
+
 import logging
 
 import httpx

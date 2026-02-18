@@ -3,6 +3,8 @@ Shared helpers for Home Assistant API access.
 Used by all smart-home tool modules. No @tool decorators here.
 """
 
+from __future__ import annotations
+
 import logging
 
 import httpx

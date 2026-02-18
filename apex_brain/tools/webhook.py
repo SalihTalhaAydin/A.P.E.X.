@@ -3,6 +3,8 @@ Webhook tools for Home Assistant.
 Fire webhook triggers and list webhook automations.
 """
 
+from __future__ import annotations
+
 import logging
 
 import httpx

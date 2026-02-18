@@ -2,6 +2,7 @@
 History & Logbook tools for Home Assistant.
 Query past state changes and event logs.
 """
+from __future__ import annotations
 
 import logging
 
@@ -44,10 +45,10 @@ logger = logging.getLogger(__name__)
 async def get_history(entity_id: str, hours_back: int = 24) -> str:
     """Get state history for an entity."""
     try:
-        from datetime import UTC, datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
         hours = max(1, min(168, hours_back))
-        start = datetime.now(UTC) - timedelta(hours=hours)
+        start = datetime.now(timezone.utc) - timedelta(hours=hours)
         start_iso = start.strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
         result = await ha_request(
@@ -119,10 +120,10 @@ async def get_history(entity_id: str, hours_back: int = 24) -> str:
 async def get_logbook(entity_id: str = "", hours_back: int = 12) -> str:
     """Get logbook events."""
     try:
-        from datetime import UTC, datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
         hours = max(1, min(72, hours_back))
-        start = datetime.now(UTC) - timedelta(hours=hours)
+        start = datetime.now(timezone.utc) - timedelta(hours=hours)
         start_iso = start.strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
         path = f"/logbook/{start_iso}"

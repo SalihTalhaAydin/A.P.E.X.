@@ -5,9 +5,10 @@ Simple, portable, no extensions needed.
 
 v0.3.0: deduplication, conflict resolution, temporal metadata.
 """
+from __future__ import annotations
 
 import struct
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 import aiosqlite
 import numpy as np
@@ -181,7 +182,7 @@ class KnowledgeStore:
         When force=True, skip confidence comparison
         and always update (used for corrections).
         """
-        now = datetime.now(UTC).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
 
         # Generate embedding
         embedding_blob = None
@@ -296,7 +297,7 @@ class KnowledgeStore:
         """Force-update a fact regardless of existing
         confidence. Used for explicit user corrections.
         """
-        now = datetime.now(UTC).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
 
         # Find existing fact by (category, key)
         cursor = await self._db.execute(
@@ -354,7 +355,7 @@ class KnowledgeStore:
 
     async def touch_fact(self, fact_id: int):
         """Update last_mentioned_at to now."""
-        now = datetime.now(UTC).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         await self._db.execute(
             "UPDATE facts "
             "SET last_mentioned_at = ? "
@@ -379,7 +380,7 @@ class KnowledgeStore:
         source='user' (explicitly stated facts
         don't decay).
         """
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         thirty_days_secs = 30 * 24 * 3600
         decayed_count = 0
 
@@ -401,7 +402,7 @@ class KnowledgeStore:
             # Ensure timezone-aware comparison
             if last_mentioned.tzinfo is None:
                 last_mentioned = (
-                    last_mentioned.replace(tzinfo=UTC)
+                    last_mentioned.replace(tzinfo=timezone.utc)
                 )
 
             age_secs = (
@@ -437,7 +438,7 @@ class KnowledgeStore:
 
     async def cleanup_expired(self) -> int:
         """Delete facts past expires_at."""
-        now = datetime.now(UTC).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         cursor = await self._db.execute(
             "DELETE FROM facts "
             "WHERE expires_at IS NOT NULL "
@@ -472,7 +473,7 @@ class KnowledgeStore:
                 )
 
             # Exclude expired facts
-            now = datetime.now(UTC).isoformat()
+            now = datetime.now(timezone.utc).isoformat()
             cursor = await self._db.execute(
                 "SELECT id, category, key, value, "
                 "confidence, created_at, "
@@ -541,7 +542,7 @@ class KnowledgeStore:
         self, query: str, limit: int = 10
     ) -> list[dict]:
         """Fallback keyword search using LIKE."""
-        now = datetime.now(UTC).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         cursor = await self._db.execute(
             "SELECT id, category, key, value, "
             "confidence, created_at, updated_at "
@@ -584,7 +585,7 @@ class KnowledgeStore:
         limit: int = 100,
     ) -> list[dict]:
         """Get all facts, optionally by category."""
-        now = datetime.now(UTC).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         if category:
             cursor = await self._db.execute(
                 "SELECT id, category, key, value, "

@@ -9,6 +9,8 @@ optional objects. The generic call_service is kept as a fallback for
 domains without a dedicated tool.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 

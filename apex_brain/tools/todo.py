@@ -3,6 +3,8 @@ Todo / Shopping list tool for Home Assistant.
 Supports view, add, complete, remove, and clear-completed actions.
 """
 
+from __future__ import annotations
+
 import logging
 
 import httpx
