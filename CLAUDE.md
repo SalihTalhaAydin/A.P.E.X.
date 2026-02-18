@@ -43,6 +43,43 @@ For a task like "add a new API endpoint":
 
 All 5 launch simultaneously. Agents 2–4 use Agent 1's findings if needed (Agent 1 runs as Explore type which is fast).
 
+## Automatic Execution for Home Assistant Tasks (MANDATORY)
+
+When the user says **"go do it"**, **"do it"**, **"make it happen"**, or any similar short directive for Home Assistant-related work, **act autonomously and completely** without asking which tools or methods to use. This means:
+
+1. **Automatically use the HA API** (REST calls via the existing `HA_TOKEN`) to read state, call services, create automations, configure entities, or perform any needed operations.
+2. **Automatically use browser/web capabilities** when needed to fetch documentation, look up integration details, or verify configurations.
+3. **Do not ask** "should I use the API?" or "should I use the browser?" — just pick the right approach and execute.
+4. **Complete the task end-to-end.** Do not stop halfway and ask for confirmation unless there is a genuinely destructive or irreversible action (e.g., deleting an automation the user didn't mention).
+5. **Assume intent from context.** If the user has been discussing a specific HA entity, automation, or integration, a bare "do it" means execute the most recently discussed action against HA.
+
+## Mandatory Testing on Every Change (CRITICAL)
+
+**No change is considered complete without testing.** This applies to every code change, feature, bug fix, and refactor — no exceptions.
+
+### Two-Layer Testing Requirement
+Every change MUST pass both layers before it is marked done:
+
+1. **Unit Tests (Layer 1)**
+   - Write or update unit tests for every code change.
+   - Tests live alongside the code they test (e.g., `tests/` directory mirroring `apex_brain/`).
+   - Run the full test suite after every change: `pytest tests/` (or the project's test command).
+   - All tests must pass. If any test fails, fix the code or the test before moving on.
+   - New features require new test cases. Bug fixes require a regression test that would have caught the bug.
+
+2. **Live Home Assistant Validation (Layer 2)**
+   - After unit tests pass, validate the change against the running Home Assistant instance.
+   - For API/service changes: make real API calls to HA and verify the response.
+   - For automation/entity changes: confirm the entity/automation exists and behaves correctly in HA.
+   - For tool/capability changes: invoke the tool against HA and verify the output.
+   - Log or report the validation result so the user can see proof it works.
+
+### Testing Rules
+- **A test agent must be part of every parallel decomposition.** Never skip the test agent.
+- **Tests run automatically** — do not ask the user "should I run tests?" Just run them.
+- **If tests fail, fix and re-run.** Do not report a task as complete with failing tests.
+- **Test results must be visible.** Always show the user test output (pass/fail counts, any errors).
+
 ## Coding Conventions
 - No hardcoded secrets or tokens anywhere in source code — only read from environment via `config.py`.
 - See `.env.example` for the full list of configuration variables.
