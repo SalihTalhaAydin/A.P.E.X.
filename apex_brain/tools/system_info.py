@@ -214,15 +214,24 @@ async def list_integrations(
 async def list_devices(search: str = "") -> str:
     """List registered HA devices via template."""
     try:
-        # Use template API to get device info
+        # Use area_devices() to enumerate devices per area,
+        # plus device_attr() for metadata.  The top-level
+        # devices() function is not available in all HA versions.
         template = (
-            "{% for device in devices() %}"
-            "{{ device_attr(device, 'name') or '?' }}"
-            " | {{ device_attr(device, 'manufacturer') or '?' }}"
-            " | {{ device_attr(device, 'model') or '?' }}"
-            " | {{ area_name(device_attr(device, 'area_id')) or 'No area' }}"
-            " | {{ device }}"
-            "\n{% endfor %}"
+            "{% set ns = namespace(devs=[]) %}"
+            "{% for area in areas() %}"
+            "{% for device in area_devices(area) %}"
+            "{% set info = device_attr(device, 'name') or '?' %}"
+            "{% set info = info ~ ' | ' ~ "
+            "(device_attr(device, 'manufacturer') or '?') %}"
+            "{% set info = info ~ ' | ' ~ "
+            "(device_attr(device, 'model') or '?') %}"
+            "{% set info = info ~ ' | ' ~ "
+            "(area_name(area) or 'No area') %}"
+            "{% set ns.devs = ns.devs + [info] %}"
+            "{% endfor %}"
+            "{% endfor %}"
+            "{{ ns.devs | join('\\n') }}"
         )
         result = await ha_request(
             "POST",
