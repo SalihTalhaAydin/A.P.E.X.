@@ -278,6 +278,149 @@ async def test_get_battery_level_none_when_unavailable():
 
 
 # ---------------------------------------------------
+# Dock error / water sensor tests
+# ---------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_verify_vacuum_dock_water_empty():
+    """Water-empty warning shown when dock_dock_error=water_empty."""
+    from tools.vacuum import _verify_vacuum
+
+    vac_state = {
+        "state": "docked",
+        "attributes": {"friendly_name": "Dusty"},
+    }
+    dock_err_state = {"state": "water_empty", "attributes": {}}
+    unavailable = {"state": "unavailable", "attributes": {}}
+
+    async def _mock_read(eid):
+        if eid == "vacuum.dusty":
+            return vac_state
+        if eid == "sensor.dusty_dock_dock_error":
+            return dock_err_state
+        return unavailable
+
+    with patch(
+        "tools.vacuum.read_state",
+        side_effect=_mock_read,
+    ), patch(
+        "tools.vacuum.get_battery_level",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        result = await _verify_vacuum("vacuum.dusty")
+    assert "water" in result.lower()
+    assert "empty" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_verify_vacuum_dock_status_ok_no_warning():
+    """No dock warning when dock_dock_error=ok."""
+    from tools.vacuum import _verify_vacuum
+
+    vac_state = {
+        "state": "docked",
+        "attributes": {"friendly_name": "Dusty"},
+    }
+    dock_ok_state = {"state": "ok", "attributes": {}}
+    unavailable = {"state": "unavailable", "attributes": {}}
+
+    async def _mock_read(eid):
+        if eid == "vacuum.dusty":
+            return vac_state
+        if eid == "sensor.dusty_dock_dock_error":
+            return dock_ok_state
+        return unavailable
+
+    with patch(
+        "tools.vacuum.read_state",
+        side_effect=_mock_read,
+    ), patch(
+        "tools.vacuum.get_battery_level",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        result = await _verify_vacuum("vacuum.dusty")
+    assert "empty" not in result.lower()
+    assert "Dusty: docked" in result
+
+
+@pytest.mark.asyncio
+async def test_verify_vacuum_dock_sensor_unavailable_no_crash():
+    """_verify_vacuum does not crash when dock sensor missing."""
+    from tools.vacuum import _verify_vacuum
+
+    vac_state = {
+        "state": "docked",
+        "attributes": {"friendly_name": "Dusty"},
+    }
+
+    async def _mock_read(eid):
+        if eid == "vacuum.dusty":
+            return vac_state
+        raise Exception("sensor not found")
+
+    with patch(
+        "tools.vacuum.read_state",
+        side_effect=_mock_read,
+    ), patch(
+        "tools.vacuum.get_battery_level",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        result = await _verify_vacuum("vacuum.dusty")
+    assert "Dusty" in result
+    assert "docked" in result
+
+
+@pytest.mark.asyncio
+async def test_verify_vacuum_maintenance_overdue():
+    """Overdue maintenance components are listed."""
+    from tools.vacuum import _verify_vacuum
+
+    vac_state = {
+        "state": "docked",
+        "attributes": {"friendly_name": "Dusty"},
+    }
+    overdue = {"state": "-200", "attributes": {}}
+    unavailable = {"state": "unavailable", "attributes": {}}
+
+    async def _mock_read(eid):
+        if eid == "vacuum.dusty":
+            return vac_state
+        if "dock_dock_error" in eid:
+            return {"state": "ok", "attributes": {}}
+        if "filter_time_left" in eid:
+            return overdue
+        if "main_brush_time_left" in eid:
+            return overdue
+        return unavailable
+
+    with patch(
+        "tools.vacuum.read_state",
+        side_effect=_mock_read,
+    ), patch(
+        "tools.vacuum.get_battery_level",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        result = await _verify_vacuum("vacuum.dusty")
+    assert "maintenance overdue" in result.lower()
+    assert "filter" in result.lower()
+    assert "main brush" in result.lower()
+
+
+def test_get_vacuum_status_registered():
+    """get_vacuum_status is registered as a tool."""
+    info = TOOL_REGISTRY.get("get_vacuum_status")
+    assert info is not None
+    props = info["parameters"]["properties"]
+    assert "entity_id" in props
+    assert info["parameters"]["required"] == ["entity_id"]
+
+
+# ---------------------------------------------------
 # clean_rooms tool tests
 # ---------------------------------------------------
 

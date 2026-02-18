@@ -23,13 +23,79 @@ from tools.ha_helpers import (
 logger = logging.getLogger(__name__)
 
 
+async def _get_dock_status(name: str) -> dict:
+    """Read dock/maintenance sensor data for a vacuum.
+
+    ``name`` is the entity name part, e.g. 'dusty' for
+    vacuum.dusty.  Returns a dict with keys:
+      water_status  – 'water_empty' | 'ok' | None
+      status        – e.g. 'charging' | 'cleaning' | None
+      overdue       – list of overdue component names
+    """
+    result: dict = {
+        "water_status": None,
+        "status": None,
+        "overdue": [],
+    }
+
+    _MAINTENANCE = {
+        f"sensor.{name}_filter_time_left": "filter",
+        f"sensor.{name}_main_brush_time_left": "main brush",
+        f"sensor.{name}_side_brush_time_left": "side brush",
+        f"sensor.{name}_sensor_time_left": "sensors/wipes",
+        f"sensor.{name}_dock_strainer_time_left": "dock strainer",
+    }
+
+    # Dock water / error status
+    try:
+        dock = await read_state(
+            f"sensor.{name}_dock_dock_error"
+        )
+        val = dock.get("state", "")
+        if val not in ("unavailable", "unknown", ""):
+            result["water_status"] = val
+    except Exception:
+        pass
+
+    # Cleaning / charging status
+    try:
+        status_s = await read_state(
+            f"sensor.{name}_status"
+        )
+        val = status_s.get("state", "")
+        if val not in ("unavailable", "unknown", ""):
+            result["status"] = val
+    except Exception:
+        pass
+
+    # Maintenance — flag anything negative (overdue)
+    for sensor_id, label in _MAINTENANCE.items():
+        try:
+            s = await read_state(sensor_id)
+            val = s.get("state", "")
+            if val in ("unavailable", "unknown", ""):
+                continue
+            if float(val) < 0:
+                result["overdue"].append(label)
+        except Exception:
+            pass
+
+    return result
+
+
 async def _verify_vacuum(entity_id: str) -> str:
-    """Read back a vacuum's state + battery + fan speed.
+    """Read back a vacuum's state + battery + fan speed
+    + dock water status + overdue maintenance.
 
     Battery level is fetched via ``get_battery_level``
     which falls back to ``sensor.<name>_battery`` when
     the vacuum entity itself no longer exposes the
     attribute (common after HA integration updates).
+
+    Water and maintenance data come from dock companion
+    sensors (e.g. sensor.dusty_dock_dock_error) since
+    the Roborock HA integration no longer exposes these
+    as vacuum entity attributes.
     """
     try:
         state = await read_state(entity_id)
@@ -37,15 +103,21 @@ async def _verify_vacuum(entity_id: str) -> str:
         fn = attrs.get(
             "friendly_name", friendly_name(entity_id)
         )
-        parts = [f"{fn}: {state.get('state', 'unknown')}"]
+        vac_state = state.get("state", "unknown")
+        parts = [f"{fn}: {vac_state}"]
+
         battery = await get_battery_level(entity_id)
         if battery is not None:
             parts.append(f"battery {battery}%")
+
         if "fan_speed" in attrs:
             parts.append(
                 f"fan speed: {attrs['fan_speed']}"
             )
-        # Water level / mop mode (Roborock and similar)
+
+        # Water level / mop mode — try entity attrs first,
+        # then fall back to dock sensor (Roborock 2024+)
+        water_shown = False
         for _wattr in (
             "water_box_mode",
             "water_level",
@@ -56,7 +128,32 @@ async def _verify_vacuum(entity_id: str) -> str:
                 parts.append(
                     f"{label}: {attrs[_wattr]}"
                 )
+                water_shown = True
                 break
+
+        # Dock sensor data (covers Roborock integration
+        # where attrs above are absent)
+        name = entity_id.split(".", 1)[-1]
+        dock = await _get_dock_status(name)
+
+        if not water_shown and dock["water_status"]:
+            ws = dock["water_status"]
+            if ws == "water_empty":
+                parts.append("dock water: EMPTY — needs refill")
+            elif ws != "ok":
+                parts.append(f"dock status: {ws}")
+
+        if dock["status"] and vac_state == "docked":
+            # Only show sensor status when entity says docked
+            # (avoids redundancy when state is 'cleaning' etc.)
+            parts.append(f"status: {dock['status']}")
+
+        if dock["overdue"]:
+            parts.append(
+                "maintenance overdue: "
+                + ", ".join(dock["overdue"])
+            )
+
         return ", ".join(parts)
     except Exception:
         return (
@@ -143,6 +240,37 @@ async def control_vacuum(
         return format_ha_error(entity_id, "vacuum", e)
     except Exception as e:
         return f"Error controlling vacuum: {e}"
+
+
+@tool(
+    description=(
+        "Get the full status of a robot vacuum: state, "
+        "battery, fan speed, dock water level, and "
+        "maintenance overdue alerts. Use this when the "
+        "user asks 'how is the vacuum?' or 'which vacuum "
+        "needs water?' without issuing a control command."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "entity_id": {
+                "type": "string",
+                "description": (
+                    "Vacuum entity ID, e.g. 'vacuum.dusty'. "
+                    "Use list_entities(domain='vacuum') to "
+                    "discover available vacuums."
+                ),
+            },
+        },
+        "required": ["entity_id"],
+    },
+)
+async def get_vacuum_status(entity_id: str) -> str:
+    """Return a detailed status string for a vacuum."""
+    try:
+        return await _verify_vacuum(entity_id)
+    except Exception as e:
+        return f"Error reading vacuum status: {e}"
 
 
 # ---------------------------------------------------------------------------
