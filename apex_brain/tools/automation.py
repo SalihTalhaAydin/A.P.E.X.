@@ -21,6 +21,45 @@ from tools.ha_helpers import (
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Key-normalization helpers
+# ---------------------------------------------------------------------------
+# HA's REST API requires singular keys inside trigger/condition/action
+# objects: "trigger" (not "triggers"), "condition" (not "conditions"),
+# "action" (not "actions").  LLMs sometimes use the plural form because
+# the tool parameter names are plural.  These helpers silently normalize
+# the inner keys so the payload sent to HA is always correct.
+
+_PLURAL_TO_SINGULAR: dict[str, str] = {
+    "triggers": "trigger",
+    "conditions": "condition",
+    "actions": "action",
+}
+
+
+def _normalize_keys(items: list) -> list:
+    """Rename plural inner keys to the singular forms HA expects.
+
+    For each dict in *items*, if a key is in the plural-to-singular map
+    AND the singular key is not already present, the plural key is renamed.
+    Non-dict items are passed through unchanged.
+    """
+    normalized = []
+    for item in items:
+        if not isinstance(item, dict):
+            normalized.append(item)
+            continue
+        new_item = {}
+        for k, v in item.items():
+            singular = _PLURAL_TO_SINGULAR.get(k)
+            if singular and singular not in item:
+                new_item[singular] = v
+            else:
+                new_item[k] = v
+        normalized.append(new_item)
+    return normalized
+
+
 @tool(
     description=(
         "List all Home Assistant automations with their "
@@ -195,8 +234,10 @@ async def toggle_automation(entity_id: str, action: str) -> str:
                 "description": (
                     "List of trigger objects. Each "
                     "must have 'trigger' (platform "
-                    "type) plus platform-specific "
-                    "fields. Examples:\n"
+                    "type, singular key as required "
+                    "by the HA REST API) plus "
+                    "platform-specific fields. "
+                    "Examples:\n"
                     '- {"trigger": "state", '
                     '"entity_id": "binary_sensor.'
                     'motion", "to": "on"}\n'
@@ -210,23 +251,29 @@ async def toggle_automation(entity_id: str, action: str) -> str:
                 "type": "array",
                 "items": {"type": "object"},
                 "description": (
-                    "Optional list of conditions. "
-                    'Example: [{"condition": '
-                    '"state", "entity_id": '
-                    '"person.salih", "state": '
-                    '"home"}]'
+                    "Optional list of condition objects. "
+                    "Each must have 'condition' "
+                    "(singular key as required by the "
+                    "HA REST API) plus condition-specific "
+                    "fields. Example:\n"
+                    '[{"condition": "state", '
+                    '"entity_id": "person.salih", '
+                    '"state": "home"}]'
                 ),
             },
             "actions": {
                 "type": "array",
                 "items": {"type": "object"},
                 "description": (
-                    "List of actions. Examples:\n"
-                    '- {"action": "light.turn_on'
-                    '", "target": {"entity_id": '
+                    "List of action objects. Each must "
+                    "have 'action' (singular key as "
+                    "required by the HA REST API) plus "
+                    "action-specific fields. Examples:\n"
+                    '- {"action": "light.turn_on", '
+                    '"target": {"entity_id": '
                     '"light.porch"}}\n'
-                    '- {"action": "notify.mobile'
-                    '", "data": {"message": '
+                    '- {"action": "notify.mobile_app", '
+                    '"data": {"message": '
                     '"Motion detected!"}}'
                 ),
             },
@@ -250,7 +297,15 @@ async def create_automation(
     description: str = "",
     mode: str = "single",
 ) -> str:
-    """Create a new HA automation via the config API."""
+    """Create a new HA automation via the config API.
+
+    The HA REST API requires singular keys in the top-level payload
+    (``trigger``, ``condition``, ``action``) and also inside each
+    trigger/condition/action object (e.g. ``{"trigger": "state", ...}``
+    not ``{"triggers": "state", ...}``).  This function accepts the
+    plural parameter names for LLM convenience and normalizes both the
+    top-level mapping and any plural inner keys before sending to HA.
+    """
     try:
         import secrets
 
@@ -260,9 +315,12 @@ async def create_automation(
             "id": auto_id,
             "alias": alias,
             "description": description,
-            "trigger": triggers,
-            "condition": conditions or [],
-            "action": actions,
+            # Top-level keys must be singular for the HA REST API.
+            # _normalize_keys also fixes any plural inner keys within
+            # the individual trigger/condition/action objects.
+            "trigger": _normalize_keys(triggers),
+            "condition": _normalize_keys(conditions or []),
+            "action": _normalize_keys(actions),
             "mode": mode,
         }
 
@@ -348,15 +406,16 @@ async def update_automation(
         if not isinstance(current, dict):
             return f"Automation '{automation_id}' not found."
 
-        # Merge updates
+        # Merge updates, normalizing plural param names to the singular
+        # keys the HA REST API requires (trigger/condition/action).
         if alias is not None:
             current["alias"] = alias
         if triggers is not None:
-            current["trigger"] = triggers
+            current["trigger"] = _normalize_keys(triggers)
         if conditions is not None:
-            current["condition"] = conditions
+            current["condition"] = _normalize_keys(conditions)
         if actions is not None:
-            current["action"] = actions
+            current["action"] = _normalize_keys(actions)
         if description is not None:
             current["description"] = description
 

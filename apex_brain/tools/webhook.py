@@ -7,9 +7,6 @@ from __future__ import annotations
 
 import logging
 
-import httpx
-from brain.config import settings
-
 from tools.base import tool
 from tools.ha_helpers import ha_request
 
@@ -50,17 +47,12 @@ logger = logging.getLogger(__name__)
 async def fire_webhook(webhook_id: str, data: dict | None = None) -> str:
     """Fire an HA webhook."""
     try:
-        url = f"{settings.ha_url}/api/webhook/{webhook_id}"
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(url, json=data or {})
-            # Webhooks return 200 on success
-            if response.status_code == 200:
-                return f"Done. Webhook '{webhook_id}' fired successfully."
-            return (
-                f"Webhook returned status "
-                f"{response.status_code}: "
-                f"{response.text[:200]}"
-            )
+        await ha_request(
+            "POST",
+            f"/webhook/{webhook_id}",
+            json_data=data or {},
+        )
+        return f"Done. Webhook '{webhook_id}' fired successfully."
     except Exception as e:
         return f"Error firing webhook: {e}"
 
@@ -87,13 +79,44 @@ async def list_webhook_automations() -> str:
         webhook_autos = []
         for a in automations:
             attrs = a.get("attributes", {})
-            # Check if "webhook" appears in the
-            # automation's friendly name or id
             eid = a["entity_id"]
             fn = attrs.get("friendly_name", eid)
-            if "webhook" in fn.lower() or "webhook" in eid.lower():
+
+            # Check trigger list for webhook platform entries
+            triggers = attrs.get("trigger", [])
+            if not isinstance(triggers, list):
+                triggers = [triggers]
+            webhook_trigger_ids = [
+                t.get("webhook_id", "")
+                for t in triggers
+                if isinstance(t, dict)
+                and t.get("platform") == "webhook"
+            ]
+            has_webhook_trigger = bool(webhook_trigger_ids)
+
+            # Also match by name/entity_id substring
+            name_match = (
+                "webhook" in fn.lower()
+                or "webhook" in eid.lower()
+            )
+
+            if has_webhook_trigger or name_match:
                 state = a.get("state", "unknown")
-                webhook_autos.append(f"- {fn} ({eid}): {state}")
+                if webhook_trigger_ids:
+                    ids_str = ", ".join(
+                        i for i in webhook_trigger_ids if i
+                    )
+                    entry = (
+                        f"- {fn} ({eid}): {state}"
+                        + (
+                            f" [webhook_id: {ids_str}]"
+                            if ids_str
+                            else ""
+                        )
+                    )
+                else:
+                    entry = f"- {fn} ({eid}): {state}"
+                webhook_autos.append(entry)
 
         if not webhook_autos:
             return (

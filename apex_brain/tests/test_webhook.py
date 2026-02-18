@@ -1,6 +1,8 @@
 """Tests for webhook / event handler."""
 
-import time
+from unittest.mock import AsyncMock
+
+import pytest
 
 from brain.event_handler import (
     EventHandler,
@@ -118,3 +120,107 @@ def test_event_message_generic():
     msg = handler._build_event_message(event)
     assert "custom_alert" in msg
     assert "Smoke" in msg
+
+
+# ---------------------------------------------------
+# Redundant / noisy state filtering  (Issue #7)
+# ---------------------------------------------------
+
+
+def test_filter_same_state_redundant():
+    """Events where old == new state are redundant."""
+    event = WebhookEvent(
+        event_type="state_changed",
+        entity_id="light.kasa_plug",
+        old_state="on",
+        new_state="on",
+    )
+    reason = EventHandler._is_redundant(event)
+    assert reason  # non-empty = should be filtered
+    assert "redundant" in reason.lower()
+
+
+def test_filter_unavailable_new_state():
+    """Transitioning TO unavailable is noise."""
+    event = WebhookEvent(
+        event_type="state_changed",
+        entity_id="light.kasa_plug",
+        old_state="on",
+        new_state="unavailable",
+    )
+    reason = EventHandler._is_redundant(event)
+    assert reason
+    assert "unavailable" in reason.lower()
+
+
+def test_filter_unavailable_recovery():
+    """Recovering FROM unavailable is noise."""
+    event = WebhookEvent(
+        event_type="state_changed",
+        entity_id="light.kasa_plug",
+        old_state="unavailable",
+        new_state="on",
+    )
+    reason = EventHandler._is_redundant(event)
+    assert reason
+    assert "recovery" in reason.lower()
+
+
+def test_allow_real_state_change():
+    """Genuine state changes are not filtered."""
+    event = WebhookEvent(
+        event_type="state_changed",
+        entity_id="light.kasa_plug",
+        old_state="off",
+        new_state="on",
+    )
+    reason = EventHandler._is_redundant(event)
+    assert reason == ""
+
+
+def test_allow_event_without_old_state():
+    """Events without old_state (e.g. motion) pass."""
+    event = WebhookEvent(
+        event_type="motion",
+        entity_id="binary_sensor.hallway",
+        new_state="on",
+    )
+    reason = EventHandler._is_redundant(event)
+    assert reason == ""
+
+
+@pytest.mark.asyncio
+async def test_process_event_filters_redundant():
+    """process_event returns ignored for redundant."""
+    handler = EventHandler(
+        conversation=None, cooldown=60
+    )
+    event = WebhookEvent(
+        event_type="state_changed",
+        entity_id="light.kasa_plug",
+        old_state="on",
+        new_state="on",
+    )
+    result = await handler.process_event(event)
+    assert result.status == "ignored"
+    assert "Filtered" in result.message
+
+
+@pytest.mark.asyncio
+async def test_process_event_processes_real_change():
+    """process_event passes genuine changes to conversation."""
+    mock_convo = AsyncMock()
+    mock_convo.handle.return_value = "Turning on the lights."
+    handler = EventHandler(
+        conversation=mock_convo, cooldown=0
+    )
+    event = WebhookEvent(
+        event_type="motion",
+        entity_id="binary_sensor.hallway_motion",
+        new_state="on",
+        old_state="off",
+    )
+    result = await handler.process_event(event)
+    assert result.status == "processed"
+    assert "Turning on the lights." in result.message
+    mock_convo.handle.assert_called_once()

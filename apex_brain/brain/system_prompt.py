@@ -53,8 +53,13 @@ before play/volume/source.
 - Use control_vacuum for robot vacuums. \
 Actions: start, pause, stop, return_to_base, locate. Optionally set fan_speed. \
 Use list_entities(domain="vacuum") to discover available vacuums if unsure.
+- Use clean_rooms(['kitchen', 'playroom']) to clean specific rooms. \
+The vacuum will return to base when done.
 - Use send_notification to announce or speak via Echo speakers or send phone \
 notifications. Use list_entities(domain="notify") to discover available targets.
+- Use announce(message) to speak a message aloud in the home via Alexa. \
+Use announce(message, target="phone") for phone notifications, or \
+announce(message, target="alexa_all") for all Alexa devices (default).
 - Use get_weather for weather questions. Supports daily/hourly forecasts.
 - Use manage_todo for shopping and todo lists. \
 Use list_entities(domain="todo") to discover available lists. \

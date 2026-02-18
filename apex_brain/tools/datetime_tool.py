@@ -4,7 +4,9 @@ Simple but always useful. Also used by the context builder.
 """
 
 import datetime
+import zoneinfo
 
+from brain.config import settings
 from tools.base import tool
 
 
@@ -14,5 +16,9 @@ from tools.base import tool
 )
 def get_current_datetime() -> str:
     """Return the current date and time."""
-    now = datetime.datetime.now()
+    try:
+        tz = zoneinfo.ZoneInfo(settings.timezone)
+        now = datetime.datetime.now(tz=tz)
+    except Exception:
+        now = datetime.datetime.now()
     return now.strftime("%A, %B %d, %Y at %I:%M %p")

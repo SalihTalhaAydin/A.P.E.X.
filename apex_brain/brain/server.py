@@ -7,6 +7,7 @@ integration, plus /api/chat for testing and
 
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 import time
@@ -361,10 +362,11 @@ async def handle_webhook(event: WebhookEvent):
             content={"error": "Not ready"},
         )
 
-    # Optional shared-secret auth
+    # Optional shared-secret auth (timing-safe comparison)
     if settings.webhook_secret:
-        secret = event.attributes.get("secret", "")
-        if secret != settings.webhook_secret:
+        provided = event.attributes.get("secret", "") or ""
+        expected = settings.webhook_secret
+        if not hmac.compare_digest(expected, provided):
             return JSONResponse(
                 status_code=403,
                 content={"error": "Invalid secret"},

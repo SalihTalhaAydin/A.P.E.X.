@@ -1,101 +1,194 @@
 """
-Calendar Tool - Google Calendar integration.
-Uses a service account for headless auth (no interactive OAuth).
+Calendar Tool - Home Assistant calendar integration.
+
+Reads calendar entities from HA (Google Calendar, Local Calendar, etc.)
+via the HA REST API.  No Google service account needed — HA handles auth.
 
 To enable:
-1. Create a Google Cloud project
-2. Enable Google Calendar API
-3. Create a service account + download JSON key
-4. Share your calendar with the service account email
-5. Set GOOGLE_CALENDAR_CREDENTIALS_PATH in config
+1. Add a calendar integration in HA (Google Calendar, Local Calendar, etc.)
+2. Entities will appear as calendar.* in HA states.
 """
 
-import asyncio
+from __future__ import annotations
+
 import datetime as _dt
 import logging
 
-from brain.config import settings
 from tools.base import tool
+from tools.ha_helpers import ha_request
 
 logger = logging.getLogger(__name__)
 
-# Lazy-init: built once on first use
-_calendar_service = None
-_calendar_id = "primary"
+# ──────────────────────────────────────────────────────────────────────────────
+# Internal helpers
+# ──────────────────────────────────────────────────────────────────────────────
+
+_NO_CALENDAR_MSG = (
+    "No calendar configured. "
+    "Add a calendar integration in HA "
+    "(Google Calendar, Local Calendar, etc.)"
+)
 
 
-def _get_calendar_service():
-    """Build and cache the Google Calendar API client."""
-    global _calendar_service, _calendar_id
+async def _get_calendar_entity_ids() -> list[str]:
+    """Return all calendar.* entity IDs from HA states."""
+    states = await ha_request("GET", "/states")
+    if not isinstance(states, list):
+        return []
+    return [
+        s["entity_id"]
+        for s in states
+        if isinstance(s, dict)
+        and s.get("entity_id", "").startswith("calendar.")
+    ]
 
-    if _calendar_service is not None:
-        return _calendar_service
 
-    from brain.config import settings
+def _parse_event_dt(dt_str: str | None) -> _dt.datetime | None:
+    """Parse an ISO datetime string into a naive local datetime.
 
-    creds_path = settings.google_calendar_credentials_path
-    if not creds_path:
+    HA calendar API returns strings like '2026-02-17T09:00:00+00:00'
+    or '2026-02-17T09:00:00'.  We strip tz info so callers can compare
+    dates without worrying about tz-aware vs naive arithmetic.
+    """
+    if not dt_str:
         return None
-
     try:
-        from google.oauth2.service_account import (
-            Credentials,
-        )
-        from googleapiclient.discovery import build
-    except ImportError:
-        logger.warning(
-            "google-api-python-client or "
-            "google-auth not installed."
-        )
-        return None
-
-    try:
-        creds = Credentials.from_service_account_file(
-            creds_path,
-            scopes=[
-                "https://www.googleapis.com/"
-                "auth/calendar"
-            ],
-        )
-        _calendar_service = build(
-            "calendar", "v3", credentials=creds
-        )
-        _calendar_id = settings.google_calendar_id
-        logger.info("Calendar service initialized.")
-        return _calendar_service
-    except Exception as e:
-        logger.error("Calendar init error: %s", e)
+        dt = _dt.datetime.fromisoformat(dt_str)
+        # Convert to naive by stripping tzinfo (treat as local-ish)
+        return dt.replace(tzinfo=None)
+    except (ValueError, TypeError):
         return None
 
 
-def _format_event(event: dict) -> str:
-    """Format a single event into readable text."""
-    summary = event.get("summary", "(no title)")
-    start = event.get("start", {})
-    location = event.get("location", "")
+def _format_time(dt: _dt.datetime | None, all_day: bool = False) -> str:
+    """Format a datetime as a human-readable time string."""
+    if all_day or dt is None:
+        return "All day"
+    return dt.strftime("%I:%M %p").lstrip("0") or dt.strftime("%I:%M %p")
 
-    # All-day vs timed events
-    if "date" in start:
-        time_str = start["date"]
-    else:
-        dt_str = start.get("dateTime", "")
-        try:
-            dt = _dt.datetime.fromisoformat(dt_str)
-            time_str = dt.strftime("%I:%M %p")
-        except (ValueError, TypeError):
-            time_str = dt_str
 
-    parts = [f"{time_str}: {summary}"]
-    if location:
-        parts.append(f"@ {location}")
-    return " ".join(parts)
+def _format_event_line(
+    summary: str,
+    start_dt: _dt.datetime | None,
+    end_dt: _dt.datetime | None,
+    all_day: bool,
+    entity_id: str,
+) -> str:
+    """Format a single event as a human-readable line."""
+    if all_day:
+        return f"- All day: {summary} ({entity_id})"
+    start_str = _format_time(start_dt)
+    end_str = _format_time(end_dt)
+    if end_dt and start_dt:
+        return f"- {start_str} - {end_str}: {summary} ({entity_id})"
+    return f"- {start_str}: {summary} ({entity_id})"
+
+
+def _today_date() -> _dt.date:
+    return _dt.datetime.now().date()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Public tools
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 @tool(
     description=(
-        "Get upcoming calendar events for the "
-        "next N days. Returns event titles, times, "
-        "and locations."
+        "Get today's calendar events as a concise summary. "
+        "Reads all calendar.* entities from Home Assistant."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {},
+        "required": [],
+    },
+)
+async def get_today_schedule() -> str:
+    """Get today's calendar events from HA calendars."""
+    try:
+        entity_ids = await _get_calendar_entity_ids()
+    except Exception as exc:
+        logger.warning("Failed to fetch HA states: %s", exc)
+        return f"Unable to reach Home Assistant: {exc}"
+
+    if not entity_ids:
+        return _NO_CALENDAR_MSG
+
+    today = _today_date()
+    today_start = _dt.datetime.combine(today, _dt.time.min)
+    today_end = _dt.datetime.combine(today, _dt.time.max)
+
+    start_str = today_start.strftime("%Y-%m-%dT%H:%M:%S")
+    end_str = today_end.strftime("%Y-%m-%dT%H:%M:%S")
+
+    all_events: list[tuple[_dt.datetime | None, str]] = []  # (sort_key, line)
+
+    for eid in entity_ids:
+        try:
+            path = (
+                f"/calendars/{eid}"
+                f"?start={start_str}&end={end_str}"
+            )
+            events = await ha_request("GET", path)
+        except Exception as exc:
+            logger.warning("Failed to fetch calendar %s: %s", eid, exc)
+            continue
+
+        if not isinstance(events, list):
+            continue
+
+        for evt in events:
+            if not isinstance(evt, dict):
+                continue
+
+            summary = evt.get("summary", "(no title)")
+            all_day = evt.get("all_day", False)
+
+            # HA calendar API uses 'start'/'end' as dicts with 'dateTime'
+            # or 'date' keys, similar to Google Calendar format.
+            start_info = evt.get("start", {})
+            end_info = evt.get("end", {})
+
+            if isinstance(start_info, dict):
+                start_dt = _parse_event_dt(
+                    start_info.get("dateTime") or start_info.get("date")
+                )
+                all_day = all_day or ("dateTime" not in start_info)
+            else:
+                # Flat string
+                start_dt = _parse_event_dt(str(start_info) if start_info else None)
+
+            if isinstance(end_info, dict):
+                end_dt = _parse_event_dt(
+                    end_info.get("dateTime") or end_info.get("date")
+                )
+            else:
+                end_dt = _parse_event_dt(str(end_info) if end_info else None)
+
+            # Filter: must overlap today
+            if start_dt is not None:
+                if not (today_start <= start_dt <= today_end):
+                    continue
+            elif not all_day:
+                continue
+
+            line = _format_event_line(summary, start_dt, end_dt, all_day, eid)
+            all_events.append((start_dt, line))
+
+    if not all_events:
+        return "No events scheduled for today."
+
+    # Sort by start time (None → end of list)
+    all_events.sort(key=lambda x: x[0] or _dt.datetime.max)
+    return "\n".join(line for _, line in all_events)
+
+
+@tool(
+    description=(
+        "Get upcoming calendar events for the next N days. "
+        "Reads all calendar.* entities from Home Assistant. "
+        "Results are grouped by day."
     ),
     parameters={
         "type": "object",
@@ -103,8 +196,7 @@ def _format_event(event: dict) -> str:
             "days_ahead": {
                 "type": "integer",
                 "description": (
-                    "Number of days to look ahead "
-                    "(default: 7)."
+                    "Number of days to look ahead (default: 7)."
                 ),
             },
         },
@@ -112,43 +204,110 @@ def _format_event(event: dict) -> str:
     },
 )
 async def get_events(days_ahead: int = 7) -> str:
-    """Get upcoming calendar events."""
-    svc = _get_calendar_service()
-    if not svc:
-        return "Calendar not configured yet."
-
-    now = _dt.datetime.utcnow()
-    end = now + _dt.timedelta(days=days_ahead)
-
+    """Get upcoming calendar events from HA calendars."""
     try:
-        result = await asyncio.to_thread(
-            lambda: svc.events()
-            .list(
-                calendarId=_calendar_id,
-                timeMin=now.isoformat() + "Z",
-                timeMax=end.isoformat() + "Z",
-                maxResults=25,
-                singleEvents=True,
-                orderBy="startTime",
-            )
-            .execute()
-        )
-    except Exception as e:
-        return f"Error fetching events: {e}"
+        entity_ids = await _get_calendar_entity_ids()
+    except Exception as exc:
+        logger.warning("Failed to fetch HA states: %s", exc)
+        return f"Unable to reach Home Assistant: {exc}"
 
-    events = result.get("items", [])
-    if not events:
-        return (
-            f"No events in the next "
-            f"{days_ahead} day(s)."
-        )
+    if not entity_ids:
+        return _NO_CALENDAR_MSG
 
-    lines = [_format_event(e) for e in events]
-    return (
-        f"{len(events)} event(s) in the "
-        f"next {days_ahead} day(s):\n"
-        + "\n".join(f"- {ln}" for ln in lines)
+    today = _today_date()
+    range_start = _dt.datetime.combine(today, _dt.time.min)
+    range_end = _dt.datetime.combine(
+        today + _dt.timedelta(days=days_ahead), _dt.time.max
     )
+
+    start_str = range_start.strftime("%Y-%m-%dT%H:%M:%S")
+    end_str = range_end.strftime("%Y-%m-%dT%H:%M:%S")
+
+    # Collect (sort_key_dt, day_date, line_str) tuples
+    collected: list[tuple[_dt.datetime, _dt.date, str]] = []
+
+    for eid in entity_ids:
+        try:
+            path = (
+                f"/calendars/{eid}"
+                f"?start={start_str}&end={end_str}"
+            )
+            events = await ha_request("GET", path)
+        except Exception as exc:
+            logger.warning("Failed to fetch calendar %s: %s", eid, exc)
+            continue
+
+        if not isinstance(events, list):
+            continue
+
+        for evt in events:
+            if not isinstance(evt, dict):
+                continue
+
+            summary = evt.get("summary", "(no title)")
+            all_day = evt.get("all_day", False)
+
+            start_info = evt.get("start", {})
+            end_info = evt.get("end", {})
+
+            if isinstance(start_info, dict):
+                start_dt = _parse_event_dt(
+                    start_info.get("dateTime") or start_info.get("date")
+                )
+                all_day = all_day or ("dateTime" not in start_info)
+            else:
+                start_dt = _parse_event_dt(str(start_info) if start_info else None)
+
+            if isinstance(end_info, dict):
+                end_dt = _parse_event_dt(
+                    end_info.get("dateTime") or end_info.get("date")
+                )
+            else:
+                end_dt = _parse_event_dt(str(end_info) if end_info else None)
+
+            # Determine the day this event belongs to
+            if start_dt is not None:
+                event_day = start_dt.date()
+                sort_key = start_dt
+            elif all_day:
+                event_day = today
+                sort_key = range_start
+            else:
+                continue
+
+            # Build line
+            if all_day:
+                line = f"  - All day: {summary}"
+            else:
+                time_str = _format_time(start_dt)
+                line = f"  - {time_str}: {summary}"
+
+            collected.append((sort_key, event_day, line))
+
+    if not collected:
+        return f"No events in the next {days_ahead} day(s)."
+
+    # Sort by datetime
+    collected.sort(key=lambda x: x[0])
+
+    # Group by day
+    day_groups: dict[_dt.date, list[str]] = {}
+    for _, day, line in collected:
+        day_groups.setdefault(day, []).append(line)
+
+    output_lines: list[str] = []
+    for day in sorted(day_groups):
+        day_label = day.strftime("%A, %b %d")
+        output_lines.append(f"{day_label}:")
+        output_lines.extend(day_groups[day])
+
+    return "\n".join(output_lines)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Legacy Google Calendar stubs (kept for tool-registry compatibility)
+# These are no-ops — HA integration is the preferred path.
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 @tool(
@@ -180,9 +339,7 @@ async def get_events(days_ahead: int = 7) -> str:
             },
             "description": {
                 "type": "string",
-                "description": (
-                    "Optional event description."
-                ),
+                "description": "Optional event description.",
             },
             "location": {
                 "type": "string",
@@ -199,90 +356,33 @@ async def create_event(
     description: str = "",
     location: str = "",
 ) -> str:
-    """Create a calendar event."""
-    svc = _get_calendar_service()
-    if not svc:
-        return "Calendar not configured yet."
+    """Create a calendar event via HA calendar service."""
+    entity_ids = await _get_calendar_entity_ids()
+    if not entity_ids:
+        return _NO_CALENDAR_MSG
 
-    tz = settings.timezone
-    body = {
+    # Use the first available calendar entity
+    eid = entity_ids[0]
+    event_body: dict = {
+        "entity_id": eid,
         "summary": title,
-        "start": {
-            "dateTime": start,
-            "timeZone": tz,
-        },
-        "end": {
-            "dateTime": end,
-            "timeZone": tz,
-        },
+        "start_date_time": start,
+        "end_date_time": end,
     }
     if description:
-        body["description"] = description
+        event_body["description"] = description
     if location:
-        body["location"] = location
+        event_body["location"] = location
 
     try:
-        event = await asyncio.to_thread(
-            lambda: svc.events()
-            .insert(
-                calendarId=_calendar_id, body=body
-            )
-            .execute()
+        await ha_request(
+            "POST",
+            "/services/calendar/create_event",
+            json_data=event_body,
         )
-        link = event.get("htmlLink", "")
-        return f"Done. Created '{title}'. {link}"
-    except Exception as e:
-        return f"Error creating event: {e}"
-
-
-@tool(
-    description=(
-        "Get today's schedule as a concise summary."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {},
-        "required": [],
-    },
-)
-async def get_today_schedule() -> str:
-    """Get today's calendar events."""
-    svc = _get_calendar_service()
-    if not svc:
-        return ""
-
-    now = _dt.datetime.utcnow()
-    start_of_day = now.replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
-    end_of_day = start_of_day + _dt.timedelta(days=1)
-
-    try:
-        result = await asyncio.to_thread(
-            lambda: svc.events()
-            .list(
-                calendarId=_calendar_id,
-                timeMin=(
-                    start_of_day.isoformat() + "Z"
-                ),
-                timeMax=(
-                    end_of_day.isoformat() + "Z"
-                ),
-                maxResults=20,
-                singleEvents=True,
-                orderBy="startTime",
-            )
-            .execute()
-        )
-    except Exception:
-        return ""
-
-    events = result.get("items", [])
-    if not events:
-        return "No events today."
-
-    lines = [_format_event(e) for e in events]
-    return "\n".join(f"- {ln}" for ln in lines)
+        return f"Done. Created '{title}' on {eid}."
+    except Exception as exc:
+        return f"Error creating event: {exc}"
 
 
 @tool(
@@ -295,29 +395,15 @@ async def get_today_schedule() -> str:
         "properties": {
             "event_id": {
                 "type": "string",
-                "description": (
-                    "Google Calendar event ID."
-                ),
+                "description": "Calendar event ID or summary to delete.",
             },
         },
         "required": ["event_id"],
     },
 )
 async def delete_event(event_id: str) -> str:
-    """Delete a calendar event."""
-    svc = _get_calendar_service()
-    if not svc:
-        return "Calendar not configured yet."
-
-    try:
-        await asyncio.to_thread(
-            lambda: svc.events()
-            .delete(
-                calendarId=_calendar_id,
-                eventId=event_id,
-            )
-            .execute()
-        )
-        return f"Done. Deleted event {event_id}."
-    except Exception as e:
-        return f"Error deleting event: {e}"
+    """Delete a calendar event via HA."""
+    return (
+        "Event deletion via HA calendar integration is not yet supported. "
+        "Please delete the event directly in your calendar app."
+    )

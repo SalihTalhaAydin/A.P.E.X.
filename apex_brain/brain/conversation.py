@@ -50,8 +50,11 @@ class Conversation:
         self.fact_extractor = fact_extractor
         self.context_builder = context_builder
 
-        # Explainability: track last action trace
-        self._last_action_trace: str = ""
+        # Explainability: track action trace per session
+        self._action_traces: dict[str, str] = {}
+
+        # Background tasks: keep references so GC doesn't collect them
+        self._background_tasks: set = set()
 
         # Set API keys for LiteLLM
         if settings.openai_api_key:
@@ -80,11 +83,12 @@ class Conversation:
         )
 
         # 2.5. Inject last action trace for explainability
-        if self._last_action_trace:
+        last_trace = self._action_traces.get(session_id, "")
+        if last_trace:
             system_prompt += (
                 "\n\nLAST ACTION TRACE (reference if the user "
                 "asks why you did something):\n"
-                f"{self._last_action_trace}"
+                f"{last_trace}"
             )
 
         # 3. Prepare messages for the AI
@@ -98,7 +102,7 @@ class Conversation:
 
         # 5. Call AI with tool loop
         response_text = await self._ai_tool_loop(
-            messages, tool_defs
+            messages, tool_defs, session_id=session_id
         )
 
         # 6. Save assistant response
@@ -110,7 +114,9 @@ class Conversation:
         recent = await self.conversation_store.get_recent(
             n=4, session_id=session_id
         )
-        asyncio.create_task(self._safe_extract_facts(recent))
+        task = asyncio.create_task(self._safe_extract_facts(recent))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
         return response_text
 
@@ -119,6 +125,7 @@ class Conversation:
         messages: list[dict],
         tool_defs: list[dict],
         max_iterations: int = 15,
+        session_id: str = "default",
     ) -> str:
         """Call AI, handle tool calls, repeat until text."""
         retry_nudge_done = False
@@ -137,6 +144,7 @@ class Conversation:
 
                 response = await litellm.acompletion(**kwargs)
             except Exception as e:
+                logger.exception("AI call failed: %s", e)
                 return f"Error reaching AI: {e}"
 
             msg = response.choices[0].message
@@ -178,12 +186,12 @@ class Conversation:
 
                 # Build and store action trace for explainability
                 facts_used = self._extract_facts_from_system(messages)
-                self._last_action_trace = self._build_action_trace(
+                self._action_traces[session_id] = self._build_action_trace(
                     tools_called, facts_used
                 )
-                if self._last_action_trace:
+                if self._action_traces[session_id]:
                     logger.debug(
-                        "Action trace: %s", self._last_action_trace
+                        "Action trace: %s", self._action_traces[session_id]
                     )
                 return text
 

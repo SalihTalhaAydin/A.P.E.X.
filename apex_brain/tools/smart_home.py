@@ -21,6 +21,7 @@ from tools.ha_helpers import (
     call_ha_service,
     format_ha_error,
     friendly_name,
+    get_battery_level,
     ha_request,
     read_state,
     verify_generic,
@@ -255,7 +256,7 @@ async def get_entity_state(entity_id: str) -> str:
 
         info = [f"{fn} ({entity_id}): {current}"]
 
-        if "brightness" in attrs:
+        if "brightness" in attrs and attrs["brightness"] is not None:
             info.append(
                 "  Brightness: "
                 f"{round(attrs['brightness'] / 255 * 100)}%"
@@ -289,12 +290,12 @@ async def get_entity_state(entity_id: str) -> str:
             info.append(
                 f"  Playing: {attrs['media_title']}"
             )
-        if "volume_level" in attrs:
+        if "volume_level" in attrs and attrs["volume_level"] is not None:
             info.append(
                 f"  Volume: "
                 f"{round(attrs['volume_level'] * 100)}%"
             )
-        if "current_position" in attrs:
+        if "current_position" in attrs and attrs["current_position"] is not None:
             info.append(
                 f"  Position: "
                 f"{attrs['current_position']}%"
@@ -303,6 +304,24 @@ async def get_entity_state(entity_id: str) -> str:
             info.append(
                 f"  Battery: {attrs['battery_level']}%"
             )
+        elif entity_id.startswith("vacuum."):
+            battery = await get_battery_level(entity_id)
+            if battery is not None:
+                info.append(f"  Battery: {battery}%")
+
+        if entity_id.startswith("vacuum."):
+            for _wattr in (
+                "water_box_mode",
+                "water_level",
+                "mop_mode",
+            ):
+                if _wattr in attrs:
+                    label = _wattr.replace("_", " ")
+                    info.append(
+                        f"  Water ({label}): "
+                        f"{attrs[_wattr]}"
+                    )
+                    break
 
         return "\n".join(info)
     except httpx.HTTPStatusError as e:
@@ -969,7 +988,22 @@ async def control_cover(
     position: int | None = None,
     tilt_position: int | None = None,
 ) -> str:
-    """Control a cover / blind / garage door."""
+    """Control a cover / blind / garage door.
+
+    Behaviour when both ``position`` and ``action`` are supplied:
+    - ``position`` takes precedence: the cover is moved to the exact
+      percentage position via ``set_cover_position``.
+    - ``action`` is ignored when ``position`` is set (setting a precise
+      position is more specific than a directional command).
+
+    When only ``action`` is supplied (no ``position``), the named action
+    service is called:
+    - "open"  -> cover.open_cover
+    - "close" -> cover.close_cover
+    - "stop"  -> cover.stop_cover
+
+    At least one of ``position`` or a valid ``action`` must be provided.
+    """
     try:
         if position is not None:
             pos = max(0, min(100, position))
@@ -979,7 +1013,7 @@ async def control_cover(
                 entity_id,
                 {"position": pos},
             )
-        else:
+        elif action:
             service_map = {
                 "open": "open_cover",
                 "close": "close_cover",
@@ -990,6 +1024,11 @@ async def control_cover(
                 return f"Unknown cover action: {action}"
             await call_ha_service(
                 "cover", service, entity_id
+            )
+        else:
+            return (
+                "No action taken: provide 'position' (0-100) "
+                "or a valid 'action' (open/close/stop)."
             )
 
         if tilt_position is not None:
@@ -1092,6 +1131,185 @@ async def control_fan(
         return format_ha_error(entity_id, "fan", e)
     except Exception as e:
         return f"Error controlling fan: {e}"
+
+
+# --------------------------------------------------
+# Area-based control
+# --------------------------------------------------
+
+
+@tool(
+    description=(
+        "Control all devices of a given domain in an "
+        "area/room by name. Use for 'turn off all lights "
+        "in the basement', 'dim kitchen lights to 50%', "
+        "'turn on bedroom lights'. Resolves the area name "
+        "to an area_id automatically."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "area_name": {
+                "type": "string",
+                "description": (
+                    "Human area/room name, e.g. "
+                    "'basement', 'kitchen', 'bedroom'. "
+                    "Case-insensitive, partial match OK."
+                ),
+            },
+            "domain": {
+                "type": "string",
+                "description": (
+                    "HA domain to control: 'light', "
+                    "'switch', 'fan'. Default: 'light'."
+                ),
+            },
+            "action": {
+                "type": "string",
+                "enum": ["on", "off", "toggle"],
+                "description": (
+                    "Action: 'on', 'off', or 'toggle'."
+                ),
+            },
+            "brightness_pct": {
+                "type": "integer",
+                "description": (
+                    "Brightness 0-100. Only for "
+                    "action='on' with domain='light'. "
+                    "Optional."
+                ),
+            },
+            "color_temp_kelvin": {
+                "type": "integer",
+                "description": (
+                    "Color temperature in Kelvin "
+                    "(2000=warm, 6500=cool). Only for "
+                    "action='on' with domain='light'. "
+                    "Optional."
+                ),
+            },
+        },
+        "required": ["area_name", "action"],
+    },
+)
+async def control_area(
+    area_name: str,
+    action: str,
+    domain: str = "light",
+    brightness_pct: int | None = None,
+    color_temp_kelvin: int | None = None,
+) -> str:
+    """Control all devices of a domain in a named area."""
+    try:
+        # Step 1: Fetch all areas via template
+        raw = await ha_request(
+            "POST",
+            "/template",
+            json_data={
+                "template": (
+                    "{% for area in areas() %}"
+                    "{{ area }}|{{ area_name(area) }}\n"
+                    "{% endfor %}"
+                )
+            },
+        )
+        # raw may come back as {} (non-JSON) or a string
+        if isinstance(raw, dict):
+            return (
+                "Could not retrieve area list from "
+                "Home Assistant."
+            )
+        area_lines = [
+            line.strip()
+            for line in str(raw).splitlines()
+            if line.strip() and "|" in line
+        ]
+
+        # Step 2: Find matching area_id (case-insensitive,
+        #         substring match on the human name part)
+        search = area_name.lower()
+        matched_id: str | None = None
+        known_names: list[str] = []
+        for line in area_lines:
+            area_id, _, human = line.partition("|")
+            area_id = area_id.strip()
+            human = human.strip()
+            known_names.append(human)
+            if search in human.lower():
+                matched_id = area_id
+                break  # first match wins
+
+        if matched_id is None:
+            names_list = ", ".join(known_names) or "none"
+            return (
+                f"No area matching '{area_name}' found. "
+                f"Known areas: {names_list}."
+            )
+
+        # Step 3: Build service + service_data
+        svc_map = {
+            "on": "turn_on",
+            "off": "turn_off",
+            "toggle": "toggle",
+        }
+        service = svc_map.get(action)
+        if service is None:
+            return (
+                f"Unknown action '{action}'. "
+                "Use 'on', 'off', or 'toggle'."
+            )
+
+        service_data: dict = {"area_id": matched_id}
+        if action in ("on", "toggle"):
+            if brightness_pct is not None:
+                service_data["brightness_pct"] = max(
+                    0, min(100, brightness_pct)
+                )
+            if color_temp_kelvin is not None:
+                service_data["color_temp_kelvin"] = (
+                    color_temp_kelvin
+                )
+
+        logger.debug(
+            "control_area: domain=%s service=%s "
+            "area_id=%s data=%s",
+            domain, service, matched_id, service_data,
+        )
+
+        # Step 4: Call the service
+        await ha_request(
+            "POST",
+            f"/services/{domain}/{service}",
+            json_data=service_data,
+        )
+
+        # Step 5: Return confirmation
+        extras = []
+        if brightness_pct is not None:
+            extras.append(f"{brightness_pct}% brightness")
+        if color_temp_kelvin is not None:
+            extras.append(f"{color_temp_kelvin}K")
+        extra_str = (
+            f" ({', '.join(extras)})" if extras else ""
+        )
+        human_name = next(
+            (
+                line.partition("|")[2].strip()
+                for line in area_lines
+                if line.partition("|")[0].strip()
+                == matched_id
+            ),
+            area_name,
+        )
+        return (
+            f"Done — {domain} {action} in "
+            f"{human_name}{extra_str}."
+        )
+
+    except httpx.HTTPStatusError as e:
+        return format_ha_error(area_name, domain, e)
+    except Exception as e:
+        return f"Error controlling area: {e}"
 
 
 # --------------------------------------------------

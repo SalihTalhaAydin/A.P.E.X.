@@ -3,7 +3,12 @@ Apex Brain - Configuration
 All settings loaded from environment variables or HA add-on options.
 """
 
+import logging
+
+from pydantic import PrivateAttr
 from pydantic_settings import BaseSettings
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -48,8 +53,14 @@ class Settings(BaseSettings):
     webhook_cooldown_seconds: int = 60
     webhook_enabled: bool = True
 
+    # Proactive TTS / Alexa announcements on high-priority events
+    announce_on_events: bool = True
+    announce_target: str = "alexa_all"
+
     # Server
     port: int = 8080
+
+    _ha_headers_cache: dict | None = PrivateAttr(default=None)
 
     model_config = {
         "env_file": [".env", "../.env"],
@@ -58,17 +69,25 @@ class Settings(BaseSettings):
 
     @property
     def ha_headers(self) -> dict:
-        """Build auth headers for HA API calls."""
+        """Build auth headers for HA API calls (cached)."""
+        if self._ha_headers_cache is not None:
+            return self._ha_headers_cache
+
         import os
 
-        # Inside add-on: use SUPERVISOR_TOKEN (injected by HA Supervisor via S6)
-        token = os.environ.get("SUPERVISOR_TOKEN", "") or self.ha_token
+        # Inside add-on: SUPERVISOR_TOKEN injected by HA Supervisor
+        token = (
+            os.environ.get("SUPERVISOR_TOKEN", "")
+            or self.ha_token
+        )
 
         # Fallback: try reading from S6 container environment file
         if not token:
             for path in [
-                "/run/s6/container_environment/SUPERVISOR_TOKEN",
-                "/var/run/s6/container_environment/SUPERVISOR_TOKEN",
+                "/run/s6/container_environment"
+                "/SUPERVISOR_TOKEN",
+                "/var/run/s6/container_environment"
+                "/SUPERVISOR_TOKEN",
             ]:
                 try:
                     with open(path) as f:
@@ -78,10 +97,16 @@ class Settings(BaseSettings):
                 except (FileNotFoundError, PermissionError):
                     continue
 
-        return {
+        if not token:
+            logger.warning(
+                "HA_TOKEN is not set — API calls will fail."
+            )
+
+        self._ha_headers_cache = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         }
+        return self._ha_headers_cache
 
     @property
     def ha_api_url(self) -> str:

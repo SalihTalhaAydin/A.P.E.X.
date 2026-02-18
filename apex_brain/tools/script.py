@@ -6,8 +6,11 @@ that can accept input variables and be triggered on demand.
 """
 
 import json
+import logging
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from tools.base import tool
 from tools.ha_helpers import (
@@ -143,10 +146,7 @@ async def execute_script(
                     "leave empty."
                 )
 
-        print(
-            f"  [script] Executing {entity_id} "
-            f"payload={payload}"
-        )
+        logger.debug("Executing %s payload=%s", entity_id, payload)
         await ha_request(
             "POST",
             "/services/script/turn_on",

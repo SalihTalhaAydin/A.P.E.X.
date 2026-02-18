@@ -93,7 +93,10 @@ class FactExtractor:
                 max_tokens=1000,
             )
 
-            raw = response.choices[0].message.content.strip()
+            content = response.choices[0].message.content
+            if not content:
+                return []
+            raw = content.strip()
 
             # Clean up common AI response quirks
             if raw.startswith("```"):

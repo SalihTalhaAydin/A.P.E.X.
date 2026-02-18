@@ -6,7 +6,10 @@ actually knows you.
 """
 
 import datetime
+import logging
 from zoneinfo import ZoneInfo
+
+logger = logging.getLogger(__name__)
 
 from brain.config import settings
 from brain.system_prompt import (
@@ -94,7 +97,7 @@ class ContextBuilder:
                 await get_presence_summary()
             )
         except Exception:
-            pass
+            logger.warning("context_builder: Failed to fetch presence", exc_info=True)
 
         # 4.6. Device discovery: current entity names
         device_summary = ""
@@ -105,7 +108,7 @@ class ContextBuilder:
 
             device_summary = await get_device_summary()
         except Exception:
-            pass
+            logger.warning("context_builder: Failed to fetch device summary", exc_info=True)
 
         # 5. Calendar summary
         calendar_summary = ""
@@ -119,7 +122,7 @@ class ContextBuilder:
                     await get_today_schedule()
                 )
         except Exception:
-            pass
+            logger.warning("context_builder: Failed to fetch calendar", exc_info=True)
 
         # 6. Build the system prompt
         return build_system_prompt(

@@ -72,12 +72,17 @@ class ConversationStore:
             for r in reversed(rows)
         ]
 
+    @staticmethod
+    def _escape_like(s: str) -> str:
+        return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
     async def search(self, query: str, limit: int = 20) -> list[dict]:
         """Search conversation history by keyword."""
+        escaped = self._escape_like(query)
         cursor = await self._db.execute(
             "SELECT role, content, timestamp FROM conversations "
-            "WHERE content LIKE ? ORDER BY timestamp DESC LIMIT ?",
-            (f"%{query}%", limit),
+            "WHERE content LIKE ? ESCAPE '\\' ORDER BY timestamp DESC LIMIT ?",
+            (f"%{escaped}%", limit),
         )
         rows = await cursor.fetchall()
         return [
@@ -87,11 +92,14 @@ class ConversationStore:
 
     async def get_turns_since(self, since_hours: int = 24) -> list[dict]:
         """Get all conversation turns from the last N hours."""
-        # SQLite ISO string comparison works for this
+        from datetime import timedelta
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(hours=since_hours)
+        ).isoformat()
         cursor = await self._db.execute(
             "SELECT role, content, timestamp FROM conversations "
-            "WHERE timestamp >= datetime('now', ?) ORDER BY timestamp ASC",
-            (f"-{since_hours} hours",),
+            "WHERE timestamp >= ? ORDER BY timestamp ASC",
+            (cutoff,),
         )
         rows = await cursor.fetchall()
         return [

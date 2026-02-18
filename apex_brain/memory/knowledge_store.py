@@ -7,11 +7,14 @@ v0.3.0: deduplication, conflict resolution, temporal metadata.
 """
 from __future__ import annotations
 
+import logging
 import struct
 from datetime import datetime, timezone
 
 import aiosqlite
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 def _serialize_embedding(
@@ -118,15 +121,29 @@ class KnowledgeStore:
         if not self._embed_fn:
             return None
         try:
-            emb = await self._embed_fn(text)
-            if emb:
-                return np.array(
-                    emb, dtype=np.float32
+            response = await self._embed_fn(text)
+            if response:
+                # Support both object-style (response.data) and
+                # dict-style (response["data"]) LiteLLM responses.
+                data = (
+                    getattr(response, "data", None)
+                    or response.get("data")
+                    if not hasattr(response, "data")
+                    else response.data
                 )
+                if not data:
+                    # _embed_fn may return the embedding list directly
+                    return np.array(response, dtype=np.float32)
+                item = data[0]
+                emb = (
+                    getattr(item, "embedding", None)
+                    or item.get("embedding")
+                )
+                if emb is not None:
+                    return np.array(emb, dtype=np.float32)
         except Exception as e:
-            print(
-                "[KnowledgeStore] "
-                f"Embedding error: {e}"
+            logger.error(
+                "[KnowledgeStore] Embedding error: %s", e
             )
         return None
 
@@ -530,9 +547,9 @@ class KnowledgeStore:
             return results
 
         except Exception as e:
-            print(
-                "[KnowledgeStore] Semantic search "
-                f"error ({e}), falling back."
+            logger.warning(
+                "[KnowledgeStore] Semantic search error (%s), falling back.",
+                e,
             )
             return await self.search_keyword(
                 query, limit
@@ -621,11 +638,11 @@ class KnowledgeStore:
         ]
 
     async def delete_fact(self, key: str) -> bool:
-        """Delete a fact by key."""
+        """Delete a fact by key (exact match only)."""
         cursor = await self._db.execute(
             "SELECT id FROM facts "
-            "WHERE key LIKE ?",
-            (f"%{key}%",),
+            "WHERE key = ?",
+            (key,),
         )
         row = await cursor.fetchone()
         if not row:

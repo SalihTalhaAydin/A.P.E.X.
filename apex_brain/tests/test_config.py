@@ -4,9 +4,9 @@ from brain.config import Settings
 
 
 def test_settings_defaults():
-    """Settings have expected default values."""
-    s = Settings()
-    assert s.litellm_model == "gpt-4o"
+    """Settings have expected default values (isolated from .env)."""
+    s = Settings(_env_file=None)
+    assert s.litellm_model == "claude-sonnet-4-20250514"
     assert s.embedding_model == "text-embedding-3-small"
     assert s.recent_turns == 10
     assert s.max_facts_in_context == 20
