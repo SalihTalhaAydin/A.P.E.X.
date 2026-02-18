@@ -189,6 +189,7 @@ async def toggle_automation(entity_id: str, action: str) -> str:
             },
             "triggers": {
                 "type": "array",
+                "items": {"type": "object"},
                 "description": (
                     "List of trigger objects. Each "
                     "must have 'trigger' (platform "
@@ -205,6 +206,7 @@ async def toggle_automation(entity_id: str, action: str) -> str:
             },
             "conditions": {
                 "type": "array",
+                "items": {"type": "object"},
                 "description": (
                     "Optional list of conditions. "
                     'Example: [{"condition": '
@@ -215,6 +217,7 @@ async def toggle_automation(entity_id: str, action: str) -> str:
             },
             "actions": {
                 "type": "array",
+                "items": {"type": "object"},
                 "description": (
                     "List of actions. Examples:\n"
                     '- {"action": "light.turn_on'
@@ -304,14 +307,17 @@ async def create_automation(
             },
             "triggers": {
                 "type": "array",
+                "items": {"type": "object"},
                 "description": ("Replacement triggers. Optional."),
             },
             "conditions": {
                 "type": "array",
+                "items": {"type": "object"},
                 "description": ("Replacement conditions. Optional."),
             },
             "actions": {
                 "type": "array",
+                "items": {"type": "object"},
                 "description": ("Replacement actions. Optional."),
             },
             "description": {
