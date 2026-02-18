@@ -96,6 +96,17 @@ class ContextBuilder:
         except Exception:
             pass
 
+        # 4.6. Device discovery: current entity names
+        device_summary = ""
+        try:
+            from tools.ha_helpers import (
+                get_device_summary,
+            )
+
+            device_summary = await get_device_summary()
+        except Exception:
+            pass
+
         # 5. Calendar summary
         calendar_summary = ""
         try:
@@ -119,4 +130,5 @@ class ContextBuilder:
             recent_turns=recent_turns,
             presence_summary=presence_summary,
             time_context=time_context,
+            device_summary=device_summary,
         )

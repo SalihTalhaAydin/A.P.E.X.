@@ -28,17 +28,16 @@ that may be off, turn on first with control_media(entity_id, "turn_on") \
 before play/volume/source.
 - Use control_cover for blinds/shades/garage doors (open, close, position).
 - Use control_fan for fans (on/off, speed percentage, direction).
-- Use control_vacuum for robot vacuums: Roborock Qrevo S \
-(vacuum.roborock_qrevo_s), Dusty (vacuum.dusty), Hairy (vacuum.hairy). \
-Actions: start, pause, stop, return_to_base, locate. Optionally set fan_speed.
-- Use send_notification to announce or speak via Echo speakers. \
-Use 'notify.everywhere_announce' to broadcast everywhere, or room-specific \
-entities like 'notify.bedroom_echo_dot_speak'. For phone: \
-'notify.mobile_app_salih_iphone'.
+- Use control_vacuum for robot vacuums. \
+Actions: start, pause, stop, return_to_base, locate. Optionally set fan_speed. \
+Use list_entities(domain="vacuum") to discover available vacuums if unsure.
+- Use send_notification to announce or speak via Echo speakers or send phone \
+notifications. Use list_entities(domain="notify") to discover available targets.
 - Use get_weather for weather questions. Supports daily/hourly forecasts.
-- Use manage_todo for shopping and todo lists. Lists: \
-'todo.shopping_list', 'todo.todo_salih', 'todo.todo_alona'. \
+- Use manage_todo for shopping and todo lists. \
+Use list_entities(domain="todo") to discover available lists. \
 Always view the list first before modifying.
+{devices_block}
 - Use query_sensors for temperature, humidity, battery, power, or motion \
 questions. Filter by sensor_type or area (room name).
 - Use list_automations to see HA automations and their on/off status. \
@@ -262,6 +261,7 @@ def build_system_prompt(
     recent_turns: list[dict] | None = None,
     presence_summary: str = "",
     time_context: dict | None = None,
+    device_summary: str = "",
 ) -> str:
     """Build the full system prompt with injected context."""
     sections = []
@@ -326,7 +326,17 @@ def build_system_prompt(
         calendar=calendar_summary,
     )
 
+    # Build the devices block for the prompt
+    devices_block = ""
+    if device_summary:
+        devices_block = (
+            "\nAVAILABLE DEVICES (current names and IDs "
+            "— always use these, not outdated names):\n"
+            f"{device_summary}"
+        )
+
     return SYSTEM_PROMPT_TEMPLATE.format(
         context_block=context_block,
         proactive_block=proactive_block,
+        devices_block=devices_block,
     )

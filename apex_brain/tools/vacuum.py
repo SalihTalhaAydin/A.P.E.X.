@@ -47,9 +47,8 @@ async def _verify_vacuum(entity_id: str) -> str:
     description=(
         "Control a robot vacuum: start cleaning, pause, "
         "stop, return to base, or locate. Optionally set "
-        "fan speed. Vacuums: Roborock Qrevo S "
-        "(vacuum.roborock_qrevo_s), Dusty "
-        "(vacuum.dusty), Hairy (vacuum.hairy)."
+        "fan speed. Use list_entities(domain='vacuum') "
+        "to discover available vacuums."
     ),
     parameters={
         "type": "object",
@@ -57,9 +56,8 @@ async def _verify_vacuum(entity_id: str) -> str:
             "entity_id": {
                 "type": "string",
                 "description": (
-                    "Vacuum entity ID, e.g. "
-                    "'vacuum.roborock_qrevo_s', "
-                    "'vacuum.dusty', 'vacuum.hairy'."
+                    "Vacuum entity ID (use "
+                    "list_entities to discover)."
                 ),
             },
             "action": {

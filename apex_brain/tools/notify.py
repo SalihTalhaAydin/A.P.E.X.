@@ -25,10 +25,10 @@ _LEGACY_SERVICES = frozenset(
 @tool(
     description=(
         "Send a notification or announcement. For Echo "
-        "speakers use announce entities (e.g. "
-        "'notify.everywhere_announce') to broadcast, or "
+        "speakers use announce entities to broadcast, or "
         "speak entities for a single speaker. For phone "
-        "use 'notify.mobile_app_salih_iphone'."
+        "use mobile_app notify entities. Use "
+        "list_entities(domain='notify') to discover targets."
     ),
     parameters={
         "type": "object",
@@ -36,10 +36,8 @@ _LEGACY_SERVICES = frozenset(
             "entity_id": {
                 "type": "string",
                 "description": (
-                    "Notify entity ID, e.g. "
-                    "'notify.everywhere_announce', "
-                    "'notify.bedroom_echo_dot_speak', "
-                    "'notify.mobile_app_salih_iphone'."
+                    "Notify entity ID (use "
+                    "list_entities to discover)."
                 ),
             },
             "message": {

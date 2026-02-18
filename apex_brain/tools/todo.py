@@ -50,8 +50,8 @@ def _format_items(items: list[dict]) -> str:
     description=(
         "Manage a todo or shopping list: view items, "
         "add, complete, remove, or clear completed. "
-        "Lists: 'todo.shopping_list', "
-        "'todo.todo_salih', 'todo.todo_alona'."
+        "Use list_entities(domain='todo') to discover "
+        "available lists."
     ),
     parameters={
         "type": "object",
@@ -59,9 +59,8 @@ def _format_items(items: list[dict]) -> str:
             "entity_id": {
                 "type": "string",
                 "description": (
-                    "Todo list entity ID, e.g. "
-                    "'todo.shopping_list', "
-                    "'todo.todo_salih'."
+                    "Todo list entity ID (use "
+                    "list_entities to discover)."
                 ),
             },
             "action": {

@@ -119,6 +119,51 @@ async def read_state(entity_id: str) -> dict:
     return await ha_request("GET", f"/states/{entity_id}")
 
 
+# Domains whose entities are injected into the system prompt so
+# the AI always knows the current devices without hardcoding.
+_DISCOVERY_DOMAINS = (
+    "vacuum",
+    "notify",
+    "todo",
+)
+
+
+async def get_device_summary() -> str:
+    """Fetch key device entities from HA for the system prompt.
+
+    Returns a short summary string the AI can reference
+    to know exact entity IDs and friendly names.  Called once
+    per conversation turn by the context builder.
+    """
+    try:
+        states = await ha_request("GET", "/states")
+    except Exception:
+        return ""
+
+    sections: list[str] = []
+    for domain in _DISCOVERY_DOMAINS:
+        entities = [
+            s
+            for s in states
+            if s["entity_id"].startswith(f"{domain}.")
+        ]
+        if not entities:
+            continue
+        lines: list[str] = []
+        for s in entities:
+            eid = s["entity_id"]
+            fn = s.get("attributes", {}).get(
+                "friendly_name", friendly_name(eid)
+            )
+            st = s.get("state", "unknown")
+            lines.append(f"  - {fn} ({eid}): {st}")
+        sections.append(
+            f"{domain.upper()} devices:\n" + "\n".join(lines)
+        )
+
+    return "\n".join(sections)
+
+
 async def verify_generic(entity_id: str) -> str:
     """Read back any entity's basic state."""
     try:
