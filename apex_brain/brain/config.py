@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # AI model -- change this one string to swap providers
     # Examples: gpt-4o, gpt-4o-mini, claude-sonnet-4-20250514, gemini/gemini-2.0-flash
-    litellm_model: str = "gpt-4o"
+    litellm_model: str = "claude-sonnet-4-20250514"
 
     # API keys (only need the one matching your model)
     openai_api_key: str = ""
