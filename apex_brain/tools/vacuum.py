@@ -3,6 +3,8 @@ Vacuum control tool for Home Assistant robot vacuums.
 Supports start, pause, stop, return-to-base, locate, and fan speed.
 """
 
+import logging
+
 import httpx
 
 from tools.base import tool
@@ -12,6 +14,8 @@ from tools.ha_helpers import (
     friendly_name,
     read_state,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def _verify_vacuum(entity_id: str) -> str:

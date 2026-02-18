@@ -5,9 +5,11 @@ Uses a cheap/fast model to keep costs low.
 """
 
 import json
-import traceback
+import logging
 
 from memory.knowledge_store import KnowledgeStore
+
+logger = logging.getLogger(__name__)
 
 EXTRACTION_PROMPT = """\
 Analyze this conversation and extract any NEW facts about the user. \
@@ -26,13 +28,21 @@ If a fact has a time limit (e.g. "visiting next week", "sale ends Friday"), \
 include "expires": "YYYY-MM-DD" in the JSON object. Only include expires \
 for truly temporary facts, not permanent preferences.
 
+CORRECTIONS: Watch for the user correcting or updating a previous fact. \
+Look for phrases like "actually", "no, I meant", "I changed my mind", \
+"not X, Y instead", "correction:", or any explicit override of earlier info. \
+When a correction is detected, set "correction": true in the JSON object. \
+Corrections should have high confidence (0.95-1.0) since the user is being \
+explicit.
+
 Return ONLY a JSON array. If nothing new to extract, return [].
 
 Example output:
 [
   {{"category": "preference", "key": "favorite cuisine", "value": "loves sushi", "confidence": 0.9}},
   {{"category": "person", "key": "Sarah", "value": "friend, birthday March 15", "confidence": 0.8}},
-  {{"category": "event", "key": "dentist appointment", "value": "Thursday at 2pm", "confidence": 0.95, "expires": "2026-02-20"}}
+  {{"category": "event", "key": "dentist appointment", "value": "Thursday at 2pm", "confidence": 0.95, "expires": "2026-02-20"}},
+  {{"category": "preference", "key": "thermostat preference", "value": "prefers 70 degrees", "confidence": 1.0, "correction": true}}
 ]
 
 Conversation:
@@ -99,6 +109,7 @@ class FactExtractor:
             if not isinstance(facts, list):
                 return
 
+            stored_count = 0
             for fact in facts:
                 if not isinstance(fact, dict):
                     continue
@@ -106,20 +117,50 @@ class FactExtractor:
                 key = fact.get("key", "")
                 value = fact.get("value", "")
                 confidence = fact.get("confidence", 0.7)
+                is_correction = fact.get(
+                    "correction", False
+                )
 
                 if key and value:
-                    expires = fact.get("expires")
-                    await self.knowledge_store.store_fact(
-                        category=category,
-                        key=key,
-                        value=value,
-                        confidence=confidence,
-                        source="auto",
-                        expires_at=expires,
-                    )
+                    if is_correction:
+                        await self.knowledge_store.correct_fact(
+                            category=category,
+                            key=key,
+                            new_value=value,
+                            confidence=confidence,
+                        )
+                        logger.debug(
+                            "Corrected fact: %s = %s "
+                            "(confidence=%.2f)",
+                            key,
+                            value,
+                            confidence,
+                        )
+                    else:
+                        expires = fact.get("expires")
+                        await self.knowledge_store.store_fact(
+                            category=category,
+                            key=key,
+                            value=value,
+                            confidence=confidence,
+                            source="auto",
+                            expires_at=expires,
+                        )
+                        logger.debug(
+                            "Extracted fact: %s = %s "
+                            "(confidence=%.2f)",
+                            key,
+                            value,
+                            confidence,
+                        )
+                    stored_count += 1
+
+            logger.info("Extracted %d facts from conversation", stored_count)
 
         except json.JSONDecodeError:
-            pass  # AI returned non-JSON, skip silently
+            logger.warning(
+                "Failed to parse fact extraction response as JSON: %s",
+                raw,
+            )
         except Exception as e:
-            print(f"[FactExtractor] Error: {e}")
-            traceback.print_exc()
+            logger.error("Fact extraction error: %s", e, exc_info=True)

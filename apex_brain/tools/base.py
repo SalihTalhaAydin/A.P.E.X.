@@ -4,8 +4,11 @@ Drop a .py file in tools/, add @tool decorator, done. Auto-discovered.
 """
 
 import inspect
+import logging
 from collections.abc import Callable
 from typing import Any, get_type_hints
+
+logger = logging.getLogger(__name__)
 
 # Global registry of all tools
 TOOL_REGISTRY: dict[str, dict] = {}

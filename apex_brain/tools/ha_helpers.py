@@ -3,8 +3,12 @@ Shared helpers for Home Assistant API access.
 Used by all smart-home tool modules. No @tool decorators here.
 """
 
+import logging
+
 import httpx
 from brain.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def format_ha_error(
@@ -52,7 +56,7 @@ async def ha_request(
     headers = settings.ha_headers
     token = headers.get("Authorization", "")
     tok = "set" if len(token) > 10 else "MISSING"
-    print(f"  [HA API] {method} {url} (token: {tok})")
+    logger.debug("HA API %s %s (token: %s)", method, url, tok)
     async with httpx.AsyncClient(timeout=15.0) as client:
         response = await client.request(
             method=method,
@@ -61,11 +65,11 @@ async def ha_request(
             json=json_data,
         )
         if response.status_code != 200:
-            err = (
-                f"  [HA API] ERROR: {response.status_code} "
-                f"{response.text[:300]}"
+            logger.error(
+                "HA API error: %s %s",
+                response.status_code,
+                response.text[:300],
             )
-            print(err)
         response.raise_for_status()
         content_type = response.headers.get(
             "content-type", ""
@@ -99,9 +103,9 @@ async def call_ha_service(
     payload = {"entity_id": entity_id}
     if data:
         payload.update(data)
-    print(
-        f"  [HA SVC] {domain}.{service} -> "
-        f"{entity_id} data={data}"
+    logger.debug(
+        "HA service call: %s.%s -> %s data=%s",
+        domain, service, entity_id, data,
     )
     await ha_request(
         "POST",

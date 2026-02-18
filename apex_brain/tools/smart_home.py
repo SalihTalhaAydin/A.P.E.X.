@@ -10,6 +10,7 @@ domains without a dedicated tool.
 """
 
 import asyncio
+import logging
 
 import httpx
 
@@ -22,6 +23,8 @@ from tools.ha_helpers import (
     read_state,
     verify_generic,
 )
+
+logger = logging.getLogger(__name__)
 
 # --------------------------------------------------
 # Domain-specific verify helpers
@@ -206,9 +209,9 @@ async def list_entities(domain: str = "") -> str:
                 f"\n(Showing first {len(shown)} "
                 f"of {total} entities)"
             )
-        print(
-            f"  [list_entities] domain={domain!r} "
-            f"total={total} showing={len(shown)}"
+        logger.debug(
+            "list_entities domain=%r total=%d showing=%d",
+            domain, total, len(shown),
         )
         return result
     except Exception as e:
@@ -1097,10 +1100,11 @@ async def control_fan(
 @tool(
     description=(
         "Generic HA service call. Only for domains "
-        "without a dedicated tool: lock, switch, siren, "
-        "input_boolean, etc. Prefer control_light, "
-        "control_climate, control_media, control_cover, "
-        "control_fan, control_vacuum, manage_todo, "
+        "without a dedicated tool: siren, etc. "
+        "Prefer control_light, control_climate, "
+        "control_media, control_cover, control_fan, "
+        "control_vacuum, control_lock, control_switch, "
+        "control_alarm, manage_todo, "
         "send_notification when applicable."
     ),
     parameters={

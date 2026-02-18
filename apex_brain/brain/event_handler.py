@@ -5,9 +5,12 @@ conversation pipeline, and returns actions taken.
 Includes cooldown to prevent reaction storms.
 """
 
+import logging
 import time
 
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 
 class WebhookEvent(BaseModel):
@@ -37,6 +40,18 @@ class EventHandler:
         self.conversation = conversation
         self._cooldown_sec = cooldown
         self._cooldowns: dict[str, float] = {}
+
+    def _cleanup_cooldowns(self) -> None:
+        """Remove stale cooldown entries (older than 2x cooldown period)."""
+        now = time.time()
+        max_age = self._cooldown_sec * 2
+        stale = [
+            k
+            for k, ts in self._cooldowns.items()
+            if now - ts > max_age
+        ]
+        for k in stale:
+            del self._cooldowns[k]
 
     def _check_cooldown(self, key: str) -> bool:
         """True if cooldown elapsed (ok to act)."""
@@ -100,6 +115,7 @@ class EventHandler:
         self, event: WebhookEvent
     ) -> WebhookResponse:
         """Process an incoming event."""
+        self._cleanup_cooldowns()
         cooldown_key = (
             f"{event.event_type}:{event.entity_id}"
         )

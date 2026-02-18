@@ -7,10 +7,14 @@ with an entity_id instead of per-device service names.
 Legacy services (persistent_notification) are kept as fallback.
 """
 
+import logging
+
 import httpx
 
 from tools.base import tool
 from tools.ha_helpers import format_ha_error, ha_request
+
+logger = logging.getLogger(__name__)
 
 # Legacy services that still use the old calling convention
 _LEGACY_SERVICES = frozenset(

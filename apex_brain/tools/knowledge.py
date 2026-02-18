@@ -4,7 +4,11 @@ For when you DO want to say "remember this" or "what do you know about X".
 Backed by Apex's memory system (same store as auto-extracted facts).
 """
 
+import logging
+
 from tools.base import tool
+
+logger = logging.getLogger(__name__)
 
 # These will be set during server startup (avoids circular imports)
 _knowledge_store = None

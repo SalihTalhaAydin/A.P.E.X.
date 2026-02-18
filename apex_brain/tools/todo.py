@@ -3,6 +3,8 @@ Todo / Shopping list tool for Home Assistant.
 Supports view, add, complete, remove, and clear-completed actions.
 """
 
+import logging
+
 import httpx
 
 from tools.base import tool
@@ -10,6 +12,8 @@ from tools.ha_helpers import (
     format_ha_error,
     ha_request,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def _get_items(entity_id: str) -> list[dict]:

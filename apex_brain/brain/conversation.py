@@ -6,9 +6,11 @@ Triggers background fact extraction after each conversation.
 
 import asyncio
 import json
-import traceback
+import logging
 
 import litellm
+
+logger = logging.getLogger(__name__)
 from memory.context_builder import ContextBuilder
 from memory.conversation_store import ConversationStore
 from memory.fact_extractor import FactExtractor
@@ -19,7 +21,7 @@ from brain.config import settings
 
 
 def _looks_like_device_action_claim(content: str) -> bool:
-    """True if the text reads like the AI claiming it performed a device action."""
+    """Check if text claims a device action was performed."""
     if not content or not isinstance(content, str):
         return False
     lower = content.lower()
@@ -48,6 +50,9 @@ class Conversation:
         self.fact_extractor = fact_extractor
         self.context_builder = context_builder
 
+        # Explainability: track last action trace
+        self._last_action_trace: str = ""
+
         # Set API keys for LiteLLM
         if settings.openai_api_key:
             litellm.openai_key = settings.openai_api_key
@@ -70,7 +75,17 @@ class Conversation:
         )
 
         # 2. Build rich context (recent history + relevant facts + time)
-        system_prompt = await self.context_builder.build(user_message)
+        system_prompt = await self.context_builder.build(
+            user_message
+        )
+
+        # 2.5. Inject last action trace for explainability
+        if self._last_action_trace:
+            system_prompt += (
+                "\n\nLAST ACTION TRACE (reference if the user "
+                "asks why you did something):\n"
+                f"{self._last_action_trace}"
+            )
 
         # 3. Prepare messages for the AI
         messages = [
@@ -82,7 +97,9 @@ class Conversation:
         tool_defs = get_openai_tool_definitions()
 
         # 5. Call AI with tool loop
-        response_text = await self._ai_tool_loop(messages, tool_defs)
+        response_text = await self._ai_tool_loop(
+            messages, tool_defs
+        )
 
         # 6. Save assistant response
         await self.conversation_store.save_turn(
@@ -103,8 +120,9 @@ class Conversation:
         tool_defs: list[dict],
         max_iterations: int = 15,
     ) -> str:
-        """Call the AI, handle tool calls, repeat until we get a text response."""
+        """Call AI, handle tool calls, repeat until text."""
         retry_nudge_done = False
+        tools_called: list[str] = []
         for _iteration in range(max_iterations):
             try:
                 kwargs = {
@@ -122,19 +140,20 @@ class Conversation:
                 return f"Error reaching AI: {e}"
 
             msg = response.choices[0].message
-            is_first_response = len(messages) == 2  # only system + user
+            # only system + user so far?
+            is_first_response = len(messages) == 2
 
             # If no tool calls, we have our answer (or a confabulation)
             if not msg.tool_calls:
                 text = msg.content or "Done."
-                print(
-                    f"  [AI] Text response (no tools called): {text[:150]}"
+                logger.debug(
+                    "Text response (no tools called): %s", text[:150]
                 )
                 if is_first_response:
-                    print("  [AI] First response had 0 tool calls.")
+                    logger.debug("First response had 0 tool calls.")
                 if _looks_like_device_action_claim(text):
-                    print(
-                        "  [AI] WARNING: Responded with text only (no tool calls); "
+                    logger.warning(
+                        "Responded with text only (no tool calls); "
                         "possible confabulation."
                     )
                     # One retry: nudge the model to use tools
@@ -149,18 +168,30 @@ class Conversation:
                             {
                                 "role": "user",
                                 "content": (
-                                    "You must use the tools to perform the action. "
-                                    "Do not reply with a summary only."
+                                    "You must use the tools to "
+                                    "perform the action. Do not "
+                                    "reply with a summary only."
                                 ),
                             },
                         )
                         continue
+
+                # Build and store action trace for explainability
+                facts_used = self._extract_facts_from_system(messages)
+                self._last_action_trace = self._build_action_trace(
+                    tools_called, facts_used
+                )
+                if self._last_action_trace:
+                    logger.debug(
+                        "Action trace: %s", self._last_action_trace
+                    )
                 return text
 
             # Process tool calls
             if is_first_response:
-                print(
-                    f"  [AI] First response had {len(msg.tool_calls)} tool calls."
+                logger.debug(
+                    "First response had %d tool calls.",
+                    len(msg.tool_calls),
                 )
             messages.append(msg.model_dump())
 
@@ -171,12 +202,21 @@ class Conversation:
                 except json.JSONDecodeError:
                     args = {}
 
-                print(
-                    f"  [Tool] {fn_name}({json.dumps(args, default=str)[:500]})"
+                logger.debug(
+                    "Tool call: %s(%s)",
+                    fn_name,
+                    json.dumps(args, default=str)[:500],
                 )
 
                 result = await execute_tool(fn_name, args)
-                print(f"  [Tool Result] {fn_name} -> {str(result)[:300]}")
+                logger.debug(
+                    "Tool result: %s -> %s",
+                    fn_name,
+                    str(result)[:300],
+                )
+
+                # Track for explainability
+                tools_called.append(fn_name)
 
                 messages.append(
                     {
@@ -186,7 +226,10 @@ class Conversation:
                     }
                 )
 
-        return "I ran into a loop processing your request. Could you rephrase?"
+        return (
+            "I ran into a loop processing your request. "
+            "Could you rephrase?"
+        )
 
     async def _safe_extract_facts(self, recent_turns: list[dict]):
         """Safely run fact extraction in the background."""
@@ -196,5 +239,55 @@ class Conversation:
                 litellm_completion=litellm.acompletion,
             )
         except Exception as e:
-            print(f"[FactExtractor] Background error: {e}")
-            traceback.print_exc()
+            logger.error(
+                "FactExtractor background error: %s",
+                e,
+                exc_info=True,
+            )
+
+    # ------------------------------------------------------------------
+    # Explainability helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_action_trace(
+        tools_called: list[str],
+        facts_used: list[str],
+    ) -> str:
+        """Build a human-readable trace of why actions were taken."""
+        trace_parts: list[str] = []
+        if tools_called:
+            unique = list(dict.fromkeys(tools_called))
+            trace_parts.append(
+                f"Actions taken: {', '.join(unique)}"
+            )
+        if facts_used:
+            trace_parts.append(
+                f"Based on: {', '.join(facts_used)}"
+            )
+        return " | ".join(trace_parts) if trace_parts else ""
+
+    @staticmethod
+    def _extract_facts_from_system(
+        messages: list[dict],
+    ) -> list[str]:
+        """Pull fact keys from the WHAT YOU KNOW section."""
+        facts: list[str] = []
+        for m in messages:
+            if m.get("role") != "system":
+                continue
+            content = m.get("content", "")
+            in_section = False
+            for line in content.splitlines():
+                if line.startswith("WHAT YOU KNOW"):
+                    in_section = True
+                    continue
+                if in_section:
+                    if line.startswith("- "):
+                        key = line.split(":")[0].lstrip("- ").strip()
+                        if key:
+                            facts.append(key)
+                    elif line and not line.startswith(" "):
+                        break
+            break  # only first system message
+        return facts

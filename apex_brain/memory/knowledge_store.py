@@ -170,6 +170,7 @@ class KnowledgeStore:
         confidence: float = 1.0,
         source: str = "auto",
         expires_at: str | None = None,
+        force: bool = False,
     ) -> int:
         """Store a fact with dedup + conflict
         resolution.
@@ -177,6 +178,8 @@ class KnowledgeStore:
         If same (category, key) exists: update if
         new confidence >= old. If semantically
         duplicate value exists: skip (just touch).
+        When force=True, skip confidence comparison
+        and always update (used for corrections).
         """
         now = datetime.now(UTC).isoformat()
 
@@ -217,7 +220,8 @@ class KnowledgeStore:
                 return fact_id
 
             # Different value → higher conf wins
-            if confidence >= old_conf:
+            # (force=True skips comparison)
+            if force or confidence >= old_conf:
                 await self._db.execute(
                     "UPDATE facts SET value = ?, "
                     "confidence = ?, "
@@ -282,6 +286,72 @@ class KnowledgeStore:
         await self._db.commit()
         return fact_id
 
+    async def correct_fact(
+        self,
+        category: str,
+        key: str,
+        new_value: str,
+        confidence: float = 1.0,
+    ) -> str:
+        """Force-update a fact regardless of existing
+        confidence. Used for explicit user corrections.
+        """
+        now = datetime.now(UTC).isoformat()
+
+        # Find existing fact by (category, key)
+        cursor = await self._db.execute(
+            "SELECT id FROM facts "
+            "WHERE category = ? AND key = ?",
+            (category, key),
+        )
+        existing = await cursor.fetchone()
+
+        if existing:
+            fact_id = existing[0]
+
+            # Re-embed the new value
+            embedding_blob = None
+            embedding_vec = await self._embed_text(
+                f"{key}: {new_value}"
+            )
+            if embedding_vec is not None:
+                embedding_blob = (
+                    _serialize_embedding(
+                        embedding_vec.tolist()
+                    )
+                )
+
+            await self._db.execute(
+                "UPDATE facts SET value = ?, "
+                "confidence = ?, "
+                "embedding = ?, "
+                "updated_at = ?, "
+                "last_mentioned_at = ? "
+                "WHERE id = ?",
+                (
+                    new_value,
+                    confidence,
+                    embedding_blob,
+                    now,
+                    now,
+                    fact_id,
+                ),
+            )
+            await self._db.commit()
+            return (
+                f"Updated: {key} → {new_value}"
+            )
+
+        # No existing fact found → store as new
+        await self.store_fact(
+            category=category,
+            key=key,
+            value=new_value,
+            confidence=confidence,
+            source="user",
+        )
+        return f"Updated: {key} → {new_value}"
+
     async def touch_fact(self, fact_id: int):
         """Update last_mentioned_at to now."""
         now = datetime.now(UTC).isoformat()
@@ -292,6 +362,78 @@ class KnowledgeStore:
             (now, fact_id),
         )
         await self._db.commit()
+
+    async def decay_confidence(
+        self,
+        decay_rate: float = 0.01,
+        min_confidence: float = 0.3,
+    ) -> int:
+        """Reduce confidence of facts not mentioned
+        recently. Returns count of decayed facts.
+
+        For each fact where last_mentioned_at is
+        older than 30 days: multiply confidence by
+        (1 - decay_rate) for each 30-day period
+        since last mention. Don't go below
+        min_confidence. Skip facts with
+        source='user' (explicitly stated facts
+        don't decay).
+        """
+        now = datetime.now(UTC)
+        thirty_days_secs = 30 * 24 * 3600
+        decayed_count = 0
+
+        cursor = await self._db.execute(
+            "SELECT id, confidence, "
+            "last_mentioned_at FROM facts "
+            "WHERE source != 'user' "
+            "AND last_mentioned_at IS NOT NULL"
+        )
+        rows = await cursor.fetchall()
+
+        for row in rows:
+            fact_id = row[0]
+            confidence = row[1]
+            last_mentioned = datetime.fromisoformat(
+                row[2]
+            )
+
+            # Ensure timezone-aware comparison
+            if last_mentioned.tzinfo is None:
+                last_mentioned = (
+                    last_mentioned.replace(tzinfo=UTC)
+                )
+
+            age_secs = (
+                now - last_mentioned
+            ).total_seconds()
+
+            if age_secs < thirty_days_secs:
+                continue  # Not old enough to decay
+
+            # Number of 30-day periods elapsed
+            periods = int(
+                age_secs // thirty_days_secs
+            )
+
+            new_conf = confidence * (
+                (1 - decay_rate) ** periods
+            )
+            new_conf = max(new_conf, min_confidence)
+
+            if new_conf < confidence:
+                await self._db.execute(
+                    "UPDATE facts "
+                    "SET confidence = ? "
+                    "WHERE id = ?",
+                    (new_conf, fact_id),
+                )
+                decayed_count += 1
+
+        if decayed_count > 0:
+            await self._db.commit()
+
+        return decayed_count
 
     async def cleanup_expired(self) -> int:
         """Delete facts past expires_at."""
@@ -378,6 +520,12 @@ class KnowledgeStore:
                         ),
                     }
                 )
+
+            # Touch returned facts so they
+            # don't decay while still relevant
+            for r in results:
+                await self.touch_fact(r["id"])
+
             return results
 
         except Exception as e:
@@ -410,7 +558,7 @@ class KnowledgeStore:
             ),
         )
         rows = await cursor.fetchall()
-        return [
+        results = [
             {
                 "id": r[0],
                 "category": r[1],
@@ -422,6 +570,13 @@ class KnowledgeStore:
             }
             for r in rows
         ]
+
+        # Touch returned facts so they
+        # don't decay while still relevant
+        for r in results:
+            await self.touch_fact(r["id"])
+
+        return results
 
     async def get_all_facts(
         self,

@@ -12,9 +12,12 @@ To enable:
 
 import asyncio
 import datetime as _dt
+import logging
 
 from brain.config import settings
 from tools.base import tool
+
+logger = logging.getLogger(__name__)
 
 # Lazy-init: built once on first use
 _calendar_service = None
@@ -40,8 +43,8 @@ def _get_calendar_service():
         )
         from googleapiclient.discovery import build
     except ImportError:
-        print(
-            "[Calendar] google-api-python-client or "
+        logger.warning(
+            "google-api-python-client or "
             "google-auth not installed."
         )
         return None
@@ -58,10 +61,10 @@ def _get_calendar_service():
             "calendar", "v3", credentials=creds
         )
         _calendar_id = settings.google_calendar_id
-        print("[Calendar] Service initialized.")
+        logger.info("Calendar service initialized.")
         return _calendar_service
     except Exception as e:
-        print(f"[Calendar] Init error: {e}")
+        logger.error("Calendar init error: %s", e)
         return None
 
 

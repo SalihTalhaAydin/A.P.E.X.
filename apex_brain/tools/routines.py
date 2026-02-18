@@ -4,7 +4,11 @@ Stores routine definitions in the knowledge store and
 lets the AI execute them by chaining tool calls naturally.
 """
 
+import logging
+
 from tools.base import tool
+
+logger = logging.getLogger(__name__)
 
 # Set during server startup (same pattern as knowledge.py)
 _knowledge_store = None

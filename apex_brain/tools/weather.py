@@ -3,6 +3,8 @@ Weather tool for Home Assistant.
 Returns current conditions and optional daily/hourly forecasts.
 """
 
+import logging
+
 import httpx
 
 from tools.base import tool
@@ -11,6 +13,8 @@ from tools.ha_helpers import (
     ha_request,
     read_state,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @tool(

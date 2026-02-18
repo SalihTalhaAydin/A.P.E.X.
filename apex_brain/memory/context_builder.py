@@ -6,7 +6,9 @@ actually knows you.
 """
 
 import datetime
+from zoneinfo import ZoneInfo
 
+from brain.config import settings
 from brain.system_prompt import (
     _build_time_context,
     build_system_prompt,
@@ -35,7 +37,9 @@ class ContextBuilder:
         Returns the complete system prompt string.
         """
         # 1. Current date/time + time context
-        now = datetime.datetime.now()
+        now = datetime.datetime.now(
+            tz=ZoneInfo(settings.timezone)
+        )
         time_context = _build_time_context(now)
 
         # 2. Recent conversation turns (for continuity)

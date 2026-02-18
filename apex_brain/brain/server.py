@@ -5,9 +5,11 @@ integration, plus /api/chat for testing and
 /api/webhook for event-driven reactions.
 """
 
+import logging
 import os
 import time
 import uuid
+from collections import defaultdict
 from contextlib import asynccontextmanager
 
 import httpx
@@ -36,6 +38,8 @@ from brain.event_handler import (
     WebhookResponse,
 )
 from brain.version import __version__
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------
 # Globals (initialized on startup)
@@ -80,7 +84,7 @@ async def _embed_text(
         )
         return response.data[0]["embedding"]
     except Exception as e:
-        print(f"[Embedding] Error: {e}")
+        logger.error("Embedding error: %s", e)
         return None
 
 
@@ -90,12 +94,18 @@ async def lifespan(_app: FastAPI):
     global conversation, event_handler, startup_time
     startup_time = time.time()
 
-    print("=" * 50)
-    print("  Apex Brain starting up...")
-    print(f"  AI Model: {settings.litellm_model}")
-    print(f"  Database: {settings.db_path}")
-    print(f"  HA URL: {settings.ha_url}")
-    print("=" * 50)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    logger.info("=" * 50)
+    logger.info("  Apex Brain starting up...")
+    logger.info("  AI Model: %s", settings.litellm_model)
+    logger.info("  Database: %s", settings.db_path)
+    logger.info("  HA URL: %s", settings.ha_url)
+    logger.info("=" * 50)
 
     # Set API keys
     if settings.openai_api_key:
@@ -133,9 +143,9 @@ async def lifespan(_app: FastAPI):
     discover_tools()
     set_knowledge_store(knowledge_store)
     set_routines_store(knowledge_store)
-    print(
-        "  Tools loaded: "
-        f"{', '.join(TOOL_REGISTRY.keys())}"
+    logger.info(
+        "  Tools loaded: %s",
+        ", ".join(TOOL_REGISTRY.keys()),
     )
 
     # Create conversation handler
@@ -152,17 +162,17 @@ async def lifespan(_app: FastAPI):
             conversation=conversation,
             cooldown=settings.webhook_cooldown_seconds,
         )
-        print("  Webhook endpoint: enabled")
+        logger.info("  Webhook endpoint: enabled")
 
-    print("  Apex Brain is online.")
-    print("=" * 50)
+    logger.info("  Apex Brain is online.")
+    logger.info("=" * 50)
 
     yield
 
     # Shutdown
     await convo_store.close()
     await knowledge_store.close()
-    print("Apex Brain shut down.")
+    logger.info("Apex Brain shut down.")
 
 
 # ---------------------------------------------------------
@@ -177,6 +187,87 @@ app = FastAPI(
     version=__version__,
     lifespan=lifespan,
 )
+
+
+# ---------------------------------------------------------
+# Rate Limiter
+# ---------------------------------------------------------
+
+
+class RateLimiter:
+    """Simple in-memory rate limiter using a dict of timestamps."""
+
+    def __init__(self):
+        self._requests: dict[str, list[float]] = defaultdict(list)
+        self._last_cleanup: float = time.time()
+        self._cleanup_interval: float = 60.0  # seconds
+
+    def is_allowed(
+        self, key: str, max_requests: int, window_seconds: int = 60
+    ) -> bool:
+        """Check if a request is allowed under the rate limit.
+
+        Returns True if allowed, False if rate-limited.
+        """
+        now = time.time()
+        self._maybe_cleanup(now)
+
+        cutoff = now - window_seconds
+        # Prune old timestamps for this key
+        self._requests[key] = [
+            t for t in self._requests[key] if t > cutoff
+        ]
+
+        if len(self._requests[key]) >= max_requests:
+            return False
+
+        self._requests[key].append(now)
+        return True
+
+    def _maybe_cleanup(self, now: float) -> None:
+        """Periodically remove stale keys to prevent memory growth."""
+        if now - self._last_cleanup < self._cleanup_interval:
+            return
+        self._last_cleanup = now
+        stale_keys = [
+            k for k, v in self._requests.items() if not v
+        ]
+        for k in stale_keys:
+            del self._requests[k]
+
+
+rate_limiter = RateLimiter()
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """Apply rate limiting to /api/chat and /api/webhook."""
+    path = request.url.path
+
+    if path == "/api/chat":
+        # Rate limit by session_id (from body) — but we can't
+        # easily read the body in middleware without consuming it,
+        # so we use the client IP as a proxy for session.
+        client_ip = request.client.host if request.client else "unknown"
+        key = f"chat:{client_ip}"
+        if not rate_limiter.is_allowed(key, max_requests=30, window_seconds=60):
+            logger.warning("Rate limit exceeded for /api/chat from %s", client_ip)
+            return JSONResponse(
+                status_code=429,
+                content={"error": "Too many requests. Limit: 30/min for /api/chat."},
+            )
+
+    elif path == "/api/webhook":
+        client_ip = request.client.host if request.client else "unknown"
+        key = f"webhook:{client_ip}"
+        if not rate_limiter.is_allowed(key, max_requests=60, window_seconds=60):
+            logger.warning("Rate limit exceeded for /api/webhook from %s", client_ip)
+            return JSONResponse(
+                status_code=429,
+                content={"error": "Too many requests. Limit: 60/min for /api/webhook."},
+            )
+
+    return await call_next(request)
 
 
 # ---------------------------------------------------------
@@ -376,8 +467,19 @@ async def openai_compatible(request: Request):
             },
         )
 
+    # Extract session identifier from the request.
+    # The HA Extended OpenAI Conversation integration may send
+    # a 'user' field or conversation_id in the body.
+    session_id = (
+        body.get("user")
+        or body.get("conversation_id")
+        or request.headers.get("x-session-id")
+        or request.headers.get("x-conversation-id")
+        or "default"
+    )
+
     response_text = await conversation.handle(
-        user_message
+        user_message, session_id
     )
 
     return {

@@ -3,6 +3,8 @@ Automation & Scene tools for Home Assistant.
 List, trigger, enable/disable automations; list and activate scenes.
 """
 
+import logging
+
 import httpx
 
 from tools.base import tool
@@ -12,6 +14,8 @@ from tools.ha_helpers import (
     ha_request,
     verify_generic,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @tool(
