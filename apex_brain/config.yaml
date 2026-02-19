@@ -42,7 +42,7 @@ options:
   litellm_model: "gemini/gemini-2.5-pro"
   openai_api_key: ""
   anthropic_api_key: ""
-  google_api_key: ""
+  gemini_api_key: ""
   embedding_model: "text-embedding-3-small"
   fact_extraction_model: "gpt-4o-mini"
   recent_turns: 10
@@ -52,7 +52,7 @@ schema:
   litellm_model: str
   openai_api_key: password
   anthropic_api_key: password
-  google_api_key: password
+  gemini_api_key: password
   embedding_model: str
   fact_extraction_model: str
   recent_turns: int

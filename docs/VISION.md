@@ -46,36 +46,54 @@ This scorecard defines what "Jarvis-level" means in concrete, measurable terms. 
 
 | Category | Current | Target | Gap |
 |---|---|---|---|
-| Personality and Persona | 9.5 / 10 | 10 / 10 | Minor polish -- tone consistency across edge cases |
-| Persistent Memory | 9.5 / 10 | 10 / 10 | Fact aging, confidence decay, per-user memory isolation |
-| Smart Home Control | 9 / 10 | 10 / 10 | Migrate to fully generic service-call tools, remove hardcoded tool wrappers |
-| Context Awareness | 9 / 10 | 10 / 10 | Activity mode detection, room occupancy awareness, time-of-day behavioral shifts |
-| Proactive Behavior | 5 / 10 | 9 / 10 | Event-driven scheduler, anomaly alerts, morning/evening briefings, unsolicited suggestions |
-| Voice Pipeline | 3 / 10 | 9 / 10 | Full Wyoming protocol integration, local STT/TTS, wake word, speaker zones |
-| Scheduled Actions | 2 / 10 | 9 / 10 | Natural-language reminders, timed actions, recurring tasks, countdown timers |
+| Personality and Persona | 9 / 10 | 10 / 10 | System prompt is strong; needs live conversation testing to validate tone across real scenarios |
+| Persistent Memory | 8 / 10 | 10 / 10 | Code is solid; never tested with real fact extraction cycle. Needs per-user isolation. |
+| Smart Home Control | 6 / 10 | 10 / 10 | Generic tools (do, query, discover, history) pass 75 mocked tests. **Never controlled a real device.** Phase 1.5 live testing required. |
+| Context Awareness | 5 / 10 | 10 / 10 | Context builder works in mocked tests. Never assembled a real prompt with live HA data. No activity mode detection, no room occupancy. |
+| Proactive Behavior | 1 / 10 | 9 / 10 | **Biggest gap.** Webhook handler exists but 0 HA automations push events to it. No scheduler. No self-initiated actions. Apex does nothing unless talked to. |
+| Voice Pipeline | 0 / 10 | 9 / 10 | OpenAI-compatible endpoint exists. Nothing else: no STT, no TTS, no wake word, no Wyoming satellites. |
+| Scheduled Actions | 0 / 10 | 9 / 10 | No scheduler infrastructure at all. No reminders, no timed actions, no recurring tasks. |
 | Multi-User Support | 3 / 10 | 8 / 10 | Per-person fact stores, voice identification, personalized responses and preferences |
-| System Management | 0 / 10 | 9 / 10 | Backups, updates, device organization, integration health monitoring, diagnostics, self-healing |
-| Test Coverage | 40% (209 tests) | 80% | Integration tests, HA API mocking, end-to-end conversation tests |
-| **Overall Jarvis Score** | **7.5 / 10** | **9.5 / 10** | |
+| System Management | 7 / 10 | 9 / 10 | manage() and configure() tools built with 102 tests. Supervisor API only works inside add-on (not testable locally). Tiered confirmation and audit logging in place. |
+| Test Coverage | 423 tests (0 failing) | 80% + live tests | Strong mocked coverage. **Zero live integration tests.** Phase 1.5 adds a live test suite. |
+| **Overall Jarvis Score** | **4.5 / 10** | **9.5 / 10** | |
+
+> **Scoring methodology (updated 2026-02-19):** These scores reflect what has been **verified against reality**, not what passes mocked tests. A tool that works in a test with a fake HA response but has never made a real API call gets partial credit for architecture — not full credit for functionality. The previous scores (7.5 overall) reflected code completeness. The updated scores reflect real-world validation. The architecture is excellent; the deployment gap is what separates 4.5 from 7.5. Phase 1.5 (Live Deployment & Battlefield Testing) closes this gap.
 
 The overall score is not an average. It is a holistic assessment of how close the system feels to a real Jarvis experience. A perfect 10 in memory means nothing if the assistant never speaks unless spoken to. The categories are interdependent -- proactive behavior requires context awareness, which requires memory, which requires multi-user support to be truly personal. System management is a new dimension: a true Jarvis does not just operate within the house, it maintains the house. The infrastructure should be as invisible and well-kept as the experience it enables.
 
 ---
 
-## Current State (v0.5.0)
+## Current State (v0.7.0 — Post-Phase 1)
 
-Apex Brain today is a working, deployed system with real capability:
+Apex Brain has a strong architecture and comprehensive mocked test coverage. What it lacks is live battlefield validation.
 
-- **Home Assistant integration**: 347 entities, 64 service domains, 263 services under active management
-- **Tool surface**: 26+ tools exposing 40+ functions covering lights, climate, locks, media, vacuums, calendars, notifications, scripts, automations, and more
-- **Test suite**: 112 tests (111 passing, 1 failing), 34% code coverage
-- **Persistent memory**: Semantic vector search over stored facts, preferences, and conversation history
-- **Dynamic system prompt**: Rebuilt every turn with current entity states, user facts, time context, and conversation history
-- **Anti-confabulation detection**: Validates claims against actual HA state to prevent hallucinated device status
-- **OpenAI-compatible API**: Drop-in replacement endpoint enabling native integration with Home Assistant voice pipelines
-- **Supervisor API access**: `SUPERVISOR_TOKEN` is injected automatically by the HA Supervisor at runtime, granting full access to add-on management, host operations, snapshots, updates, and system health endpoints. This access is available but not yet utilized -- no system management tools have been built against it.
+**What is built and tested (mocked):**
+- **6 generic power tools**: `do()`, `query()`, `discover()`, `history()`, `manage()`, `configure()` — replacing 60+ legacy tools
+- **Test suite**: 423 tests, 0 failing. Covers conversation orchestrator (39 tests), generic tools (75), manage (53), configure (49), fact extractor (25), context builder (17), audit store (9), and more.
+- **Persistent memory**: Dual-layer (conversation history + semantic knowledge store with embeddings, deduplication, confidence decay, temporal facts)
+- **Dynamic system prompt**: Rebuilt every turn with time context, presence, calendar, facts, device summary, and service schemas (top-5 domains injected, hourly cache)
+- **Security**: Tiered confirmation (Tier 0/1/2) for sensitive operations, audit logging, session-based escalation (webhooks restricted to Tier 0), protected domain gates for locks/alarms/cameras/covers
+- **Anti-confabulation detection**: Catches LLM claiming device actions without tool calls, forces retry
+- **Explainability**: Action traces track which tools were called and which memory facts were used per turn
+- **OpenAI-compatible API**: `/v1/chat/completions` endpoint ready for Extended OpenAI Conversation integration
 
-The foundation is solid. The architecture is right. What remains is filling the gaps identified in the Jarvis Standard -- primarily proactive behavior, voice pipeline, scheduled actions, multi-user support, and the entirely new system management dimension.
+**What has been verified against live Home Assistant (2026-02-19):**
+- HA v2026.2.2 is running: 347 entities, 64 service domains, 263 services, 250 components, 21 areas
+- REST API responds correctly (states, config, template evaluation, history)
+- Template API evaluates Jinja2 correctly
+- 22 lights, 2 climate units, 3 vacuums, 3 media players, 2 cameras confirmed reachable
+- Person tracking active (presence detection working)
+
+**What has NEVER been tested live:**
+- Apex server making real HA API calls (HA_TOKEN is empty in `.env`)
+- Any tool (`do()`, `query()`, `discover()`) executing against real entities
+- Full conversation pipeline with real device data in the system prompt
+- Webhook event processing from real HA automations (only 1 automation exists in HA, and it does not push to Apex)
+- Background fact extraction running against real conversations
+- Service schema injection from real HA `/api/services` endpoint
+
+**The gap is deployment, not code.** The architecture is excellent. The test coverage is strong. Phase 1.5 (Live Deployment & Battlefield Testing) bridges the gap between passing mocked tests and controlling a real home.
 
 ---
 

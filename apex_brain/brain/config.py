@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # API keys (only need the one matching your model)
     openai_api_key: str = ""
     anthropic_api_key: str = ""
-    google_api_key: str = ""
+    gemini_api_key: str = ""
 
     # Embedding model for semantic memory search
     embedding_model: str = "text-embedding-3-small"

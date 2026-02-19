@@ -80,7 +80,7 @@ curl -X POST http://localhost:8080/api/chat \
 1. Find **Apex Brain** in the store list (refresh if needed)
 2. Click it, then **Install** (builds the Docker image, ~1-2 minutes)
 3. Go to the **Configuration** tab
-4. Set your API key (`openai_api_key`, `anthropic_api_key`, or `google_api_key` depending on model)
+4. Set your API key (`openai_api_key`, `anthropic_api_key`, or `gemini_api_key` depending on model)
 5. Adjust `litellm_model` if desired (default: `gemini/gemini-2.5-pro`)
 6. Click **Save**, then go to **Info** tab and click **Start**
 7. Check the **Log** tab — you should see:

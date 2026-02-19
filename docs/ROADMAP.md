@@ -38,7 +38,56 @@ The most important architectural change. Replace 40+ hardcoded tools with ~5 gen
 
 ---
 
-## Phase 1.5: System Intelligence
+## Phase 1.5: Live Deployment & Battlefield Testing (NEXT — CRITICAL)
+
+**Why this phase exists:** Phases 0 and 1 built a well-architected system with 423 passing tests — but every single test uses mocks. Apex has never made a real API call to Home Assistant, never turned on a real light, never assembled a real system prompt with live device data. The system was built in a clean room. This phase takes it to the battlefield. Nothing else on the roadmap matters until Apex proves it works against reality.
+
+**Current state (verified 2026-02-19):** HA v2026.2.2 is running with 347 entities, 64 service domains, 263 services, 21 areas. The HA REST API, Template API, and History API all respond correctly. The `HA_TOKEN` in `.env` is empty — Apex cannot authenticate to HA in local dev mode. There is 1 automation in HA (Kasa refresh). No webhook automations exist to feed events to Apex.
+
+### Authentication & First Boot
+- [ ] Generate a long-lived access token in HA (Profile > Security > Long-Lived Access Tokens) and configure `HA_TOKEN` in `.env` — this unblocks all local dev testing
+- [ ] Start the Apex server locally (`python -m brain.server`) and verify `/health` endpoint returns `ha_reachable: true`
+- [ ] Verify `/api/debug/ha` confirms successful HA Core API connectivity
+
+### Live Conversation Testing
+- [ ] Send a real message via `/api/chat` and verify the full pipeline: context build (with real devices, real presence, real time) → LLM call → tool call → HA API → response
+- [ ] Verify `discover(what="entities")` returns real entity list (expect 347 entities)
+- [ ] Verify `discover(what="areas")` returns the 21 real areas
+- [ ] Verify `discover(what="services")` returns 64 real service domains
+- [ ] Verify `query("climate.thermostat")` returns real thermostat state (current temp, target, mode)
+- [ ] Verify `query("person.asm_home")` returns real presence status
+- [ ] Verify `history("climate.thermostat", hours=24)` returns real state changes
+
+### Live Device Control (safe, reversible actions only)
+- [ ] Test `do("light", "turn_on", targets={"entity_id": "light.salih_s_left_table_floor_lamp"})` — verify the light actually turns on, then turn it off
+- [ ] Verify post-action state readback (`verify_generic`) reports correct state after a real service call
+- [ ] Test `do()` with a protected domain (e.g., `lock`) — verify the confirmation gate fires and does NOT execute without explicit confirmation
+- [ ] Test area-level targeting: `do("light", "turn_off", targets={"area_id": "salih_s_office"})` — verify correct entity resolution
+
+### Live Context Builder Validation
+- [ ] Verify the system prompt assembled for a real conversation includes: current time context, real presence data, real device summary, real service schemas (top-5 domains from live HA)
+- [ ] Verify semantic fact search works end-to-end: have a conversation, wait for background fact extraction, then verify the fact appears in the next turn's context
+- [ ] Verify service schema injection is pulling real schemas from HA `/api/services` (not stale or empty)
+
+### Webhook & Event Pipeline
+- [ ] Create at least 3 HA automations that POST to Apex's `/api/webhook` endpoint: one for motion, one for door/window, one for temperature threshold
+- [ ] Trigger a real webhook event and verify Apex processes it through the full conversation pipeline
+- [ ] Verify cooldown logic works in practice (same event within 60s is suppressed)
+- [ ] Verify redundancy filter works (unavailable bounces, same-state transitions are dropped)
+- [ ] Verify high-priority detection works for late-night motion or door events
+
+### Live Integration Test Suite
+- [ ] Write a `tests/test_live.py` integration test suite that runs against real HA (skipped in CI, run manually with `--live` flag) — covers: entity query, service call, template evaluation, history fetch, area discovery
+- [ ] Document the live test procedure in CONTRIBUTING.md so future sessions know how to run it
+
+### Documentation & Score Update
+- [ ] Update VISION.md Jarvis Standard scorecard with honest, evidence-based scores after live validation
+- [ ] Update ARCHITECTURE.md deployment section with verified local dev setup instructions
+- [ ] Record the first live validation results (what worked, what broke, what was fixed)
+
+---
+
+## Phase 2: System Intelligence
 
 Apex becomes the caretaker of the Home Assistant instance — not just a device controller, but a system manager that organizes, maintains, and heals the environment it lives in. Phase 1 infrastructure (`manage()` and `configure()` tools) provides the foundation for these items.
 
@@ -51,7 +100,7 @@ Apex becomes the caretaker of the Home Assistant instance — not just a device 
 
 ---
 
-## Phase 2: Proactive Intelligence
+## Phase 3: Proactive Intelligence
 
 Move from reactive (user asks, Apex answers) to proactive (Apex notices things and acts or alerts).
 
@@ -64,7 +113,7 @@ Move from reactive (user asks, Apex answers) to proactive (Apex notices things a
 
 ---
 
-## Phase 3: Voice Pipeline
+## Phase 4: Voice Pipeline
 
 Full local voice assistant: wake word --> STT --> Apex Brain --> TTS --> speaker. No cloud dependency for the voice path.
 
@@ -78,7 +127,7 @@ Full local voice assistant: wake word --> STT --> Apex Brain --> TTS --> speaker
 
 ---
 
-## Phase 4: Multi-User & Personalization
+## Phase 5: Multi-User & Personalization
 
 Apex should know who it's talking to and tailor responses, routines, and knowledge per person.
 
@@ -90,7 +139,7 @@ Apex should know who it's talking to and tailor responses, routines, and knowled
 
 ---
 
-## Phase 5: Advanced Intelligence
+## Phase 6: Advanced Intelligence
 
 Deeper contextual awareness, energy intelligence, and long-running conversation management.
 
@@ -147,4 +196,4 @@ Shipped milestones for historical reference.
 
 ---
 
-*Last updated: 2026-02-18 (Phase 1 complete — generic tools (do, query, discover, history, manage, configure) fully implemented with 423 tests passing; service schema injection active; legacy tools delegate to generic tools with deprecation warnings; audit store enabled)*
+*Last updated: 2026-02-19 (Phase 1 complete — 423 tests passing. Phase 1.5 added: Live Deployment & Battlefield Testing. Full audit revealed all tests are mocked; Apex has never made a live HA API call. HA_TOKEN is empty in .env. Phase numbers bumped: old 1.5→2, old 2→3, old 3→4, old 4→5, old 5→6.)*

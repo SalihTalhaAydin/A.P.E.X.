@@ -528,7 +528,7 @@ Uses Pydantic Settings for type-safe configuration from environment variables:
 | `LITELLM_MODEL` | `gemini/gemini-2.5-pro` | AI model for conversation |
 | `OPENAI_API_KEY` | (empty) | OpenAI API key |
 | `ANTHROPIC_API_KEY` | (empty) | Anthropic API key |
-| `GOOGLE_API_KEY` | (empty) | Google/Gemini API key |
+| `GEMINI_API_KEY` | (empty) | Gemini API key |
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | Model for semantic embeddings |
 | `FACT_EXTRACTION_MODEL` | `gpt-4o-mini` | Cheap model for background extraction |
 | `HA_URL` | `http://supervisor/core` | HA Core URL |
