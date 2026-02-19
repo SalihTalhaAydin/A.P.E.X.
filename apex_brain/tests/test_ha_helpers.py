@@ -7,6 +7,8 @@ Covers:
 - Domains with no entities produce no section in the output
 """
 
+from __future__ import annotations
+
 from unittest.mock import AsyncMock, patch
 
 import pytest

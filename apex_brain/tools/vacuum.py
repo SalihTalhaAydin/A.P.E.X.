@@ -23,11 +23,31 @@ from tools.ha_helpers import (
 logger = logging.getLogger(__name__)
 
 
-async def _get_dock_status(name: str) -> dict:
+# Known sensor suffixes for dynamic companion-sensor discovery.
+# These are matched against all sensor entities from HA rather than
+# hardcoding entity IDs, so the tool works when vacuums are renamed
+# or re-paired.
+_DOCK_ERROR_SUFFIX = "_dock_dock_error"
+_STATUS_SUFFIX = "_status"
+_MAINTENANCE_SUFFIXES: dict[str, str] = {
+    "_filter_time_left": "filter",
+    "_main_brush_time_left": "main brush",
+    "_side_brush_time_left": "side brush",
+    "_sensor_time_left": "sensors/wipes",
+    "_dock_strainer_time_left": "dock strainer",
+}
+
+
+async def _get_dock_status(entity_id: str) -> dict:
     """Read dock/maintenance sensor data for a vacuum.
 
-    ``name`` is the entity name part, e.g. 'dusty' for
-    vacuum.dusty.  Returns a dict with keys:
+    Discovers companion sensors dynamically by querying HA for
+    all sensor entities that share the vacuum's name prefix and
+    match known suffixes.  This replaces the old approach of
+    constructing hardcoded sensor entity IDs from the vacuum
+    name, which broke when vacuums were renamed or re-paired.
+
+    Returns a dict with keys:
       water_status  – 'water_empty' | 'ok' | None
       status        – e.g. 'charging' | 'cleaning' | None
       overdue       – list of overdue component names
@@ -38,47 +58,52 @@ async def _get_dock_status(name: str) -> dict:
         "overdue": [],
     }
 
-    _MAINTENANCE = {
-        f"sensor.{name}_filter_time_left": "filter",
-        f"sensor.{name}_main_brush_time_left": "main brush",
-        f"sensor.{name}_side_brush_time_left": "side brush",
-        f"sensor.{name}_sensor_time_left": "sensors/wipes",
-        f"sensor.{name}_dock_strainer_time_left": "dock strainer",
-    }
+    name = entity_id.split(".", 1)[-1]
+    prefix = f"sensor.{name}_"
+
+    try:
+        all_states = await ha_request("GET", "/states")
+    except Exception:
+        return result
+
+    # Index matching sensors by entity_id
+    sensor_states: dict[str, dict] = {}
+    for s in all_states:
+        if not isinstance(s, dict):
+            continue
+        eid = s.get("entity_id", "")
+        if eid.startswith(prefix):
+            sensor_states[eid] = s
 
     # Dock water / error status
-    try:
-        dock = await read_state(
-            f"sensor.{name}_dock_dock_error"
-        )
-        val = dock.get("state", "")
-        if val not in ("unavailable", "unknown", ""):
-            result["water_status"] = val
-    except Exception:
-        pass
+    for eid, state in sensor_states.items():
+        if eid.endswith(_DOCK_ERROR_SUFFIX):
+            val = state.get("state", "")
+            if val not in ("unavailable", "unknown", ""):
+                result["water_status"] = val
+            break
 
-    # Cleaning / charging status
-    try:
-        status_s = await read_state(
-            f"sensor.{name}_status"
-        )
-        val = status_s.get("state", "")
+    # Cleaning / charging status — use exact match to
+    # avoid false positives (many sensors end in _status)
+    status_eid = f"sensor.{name}{_STATUS_SUFFIX}"
+    if status_eid in sensor_states:
+        val = sensor_states[status_eid].get("state", "")
         if val not in ("unavailable", "unknown", ""):
             result["status"] = val
-    except Exception:
-        pass
 
     # Maintenance — flag anything negative (overdue)
-    for sensor_id, label in _MAINTENANCE.items():
-        try:
-            s = await read_state(sensor_id)
-            val = s.get("state", "")
-            if val in ("unavailable", "unknown", ""):
-                continue
-            if float(val) < 0:
-                result["overdue"].append(label)
-        except Exception:
-            pass
+    for suffix, label in _MAINTENANCE_SUFFIXES.items():
+        for eid, state in sensor_states.items():
+            if eid.endswith(suffix):
+                val = state.get("state", "")
+                if val in ("unavailable", "unknown", ""):
+                    break
+                try:
+                    if float(val) < 0:
+                        result["overdue"].append(label)
+                except (ValueError, TypeError):
+                    pass
+                break
 
     return result
 
@@ -132,9 +157,9 @@ async def _verify_vacuum(entity_id: str) -> str:
                 break
 
         # Dock sensor data (covers Roborock integration
-        # where attrs above are absent)
-        name = entity_id.split(".", 1)[-1]
-        dock = await _get_dock_status(name)
+        # where attrs above are absent) — discovered
+        # dynamically from HA rather than hardcoded
+        dock = await _get_dock_status(entity_id)
 
         if not water_shown and dock["water_status"]:
             ws = dock["water_status"]

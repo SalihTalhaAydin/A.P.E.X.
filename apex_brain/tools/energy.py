@@ -4,6 +4,8 @@ Query power (W/kW) and energy (Wh/kWh) sensors to provide
 summaries of household energy consumption, solar generation, etc.
 """
 
+from __future__ import annotations
+
 import httpx
 
 from tools.base import tool

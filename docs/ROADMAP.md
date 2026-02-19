@@ -14,7 +14,7 @@ Critical fixes and test coverage gaps that must be resolved before any new featu
 - [x] Sync `config.yaml` default model with `config.py` default -- already aligned at `claude-sonnet-4-20250514` (no change needed)
 - [x] Bump test coverage to 50%+ on critical paths -- `conversation.py` 100%, `context_builder.py` 96%, `fact_extractor.py` 100% (209 tests, 0 failing)
 - [x] Enable WAL mode + busy_timeout on both SQLite stores (`conversation_store.py`, `knowledge_store.py`)
-- [ ] Vacuum tool: read entity names from HA dynamically; fix context/name confusion when vacuums are renamed or re-paired
+- [x] Vacuum tool: read entity names from HA dynamically; fix context/name confusion when vacuums are renamed or re-paired
 
 ---
 
@@ -22,18 +22,19 @@ Critical fixes and test coverage gaps that must be resolved before any new featu
 
 The most important architectural change. Replace 40+ hardcoded tools with ~5 generic power tools that let the LLM call any HA service, query any state, and discover any entity -- without needing a bespoke tool per domain.
 
-- [ ] Implement `do()` -- generic service caller with auto-verification (call any `domain.service`, then re-read state to confirm it worked)
-- [ ] Implement `query()` -- unified state reader + template evaluator (replace per-domain get_* tools with one flexible reader)
-- [ ] Implement `discover()` -- unified entity/service/area/device discovery (merge list_entities, list_devices, list_areas, list_services into one tool)
+- [x] Implement `do()` -- generic service caller with auto-verification, security gate for protected domains (lock, alarm, camera, cover), confirmation flow — `tools/generic.py`
+- [x] Implement `query()` -- unified state reader + Jinja2 template evaluator, domain-aware attribute formatting, smart 404 fallback — `tools/generic.py`
+- [x] Implement `discover()` -- unified entity/service/area/device/integration/info discovery, service schema display with field types — `tools/generic.py`
+- [x] Implement `history()` -- state change history + logbook entries, deduplication, timestamp formatting — `tools/generic.py`, 75 tests in `test_generic.py`
 - [ ] Inject HA service schemas into system prompt for AI guidance (so the model knows valid services, fields, and enums without hardcoding)
 - [ ] Keep old tools as deprecated aliases during migration (backward compat -- old tool names forward to new generic tools)
 - [ ] Update all tests for new tool architecture
 - [ ] End-to-end integration tests (call `do()` / `query()` / `discover()` against a live HA instance and verify results)
-- [ ] Implement `manage()` — Supervisor API operations: backups (create/list/restore/delete), add-on lifecycle (install/update/restart/configure), system updates (core/OS), health checks (CPU/memory/disk)
-- [ ] Implement `configure()` — Registry operations via WebSocket API: entity rename, area CRUD (create/rename/delete rooms), device-to-area assignment, disable/enable entities, stale entity cleanup
-- [ ] WebSocket API helper — transient WS connections for config/registry operations (entity_registry, device_registry, area_registry, config_entries)
-- [ ] Tiered confirmation system — safe operations (query, backup create, health check) run freely; destructive operations (update, restore, disable, delete) require explicit user confirmation before executing
-- [ ] Audit logging for all `manage()` and `configure()` calls — timestamp, action, target, result, originating session
+- [x] Implement `manage()` — Supervisor API operations: backups (create/list/restore/delete), add-on lifecycle (install/update/restart/configure), system updates (core/OS), health checks (CPU/memory/disk) — `tools/manage.py`, 53 tests
+- [x] Implement `configure()` — Registry operations via WebSocket API: entity rename, area CRUD (create/rename/delete rooms), device-to-area assignment, disable/enable entities, stale entity cleanup — `tools/configure.py`, 49 tests
+- [x] WebSocket API helper — transient WS connections for config/registry operations (entity_registry, device_registry, area_registry, config_entries) — `tools/ws_helpers.py`
+- [x] Tiered confirmation system — Tier 0 (safe) executes immediately, Tier 1 (disruptive) requires confirmation, Tier 2 (destructive) requires confirmation + impact summary; webhook sessions restricted to Tier 0
+- [x] Audit logging for all `manage()` and `configure()` calls — `memory/audit_store.py`, system_audit_log table with timestamp, tool, action, target, config_json, result, session_id, user_approved; 9 tests
 
 ---
 
@@ -146,4 +147,4 @@ Shipped milestones for historical reference.
 
 ---
 
-*Last updated: 2026-02-18 (expanded Phase 1 with ops/management tools — manage(), configure(), WebSocket helper, tiered confirmation, audit logging; added Phase 1.5: System Intelligence — Apex as full sysadmin/caretaker of the HA instance)*
+*Last updated: 2026-02-18 (Phase 1 core generic tools complete — do(), query(), discover(), history() implemented in tools/generic.py with 75 tests; manage(), configure(), ws_helpers, audit_store with 111 tests; tiered confirmation, security gate for protected domains; 398 total tests passing)*

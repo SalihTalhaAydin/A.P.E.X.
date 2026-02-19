@@ -1,8 +1,8 @@
 # Apex Brain -- Architecture Document
 
-> **Version:** 0.5.2
+> **Version:** 0.6.0
 > **Last updated:** 2026-02-18
-> **Scope:** Current architecture AND proposed Generic Tools redesign
+> **Scope:** Current architecture + Phase 1 Generic Tools (do, query, discover, history implemented)
 
 ---
 
@@ -53,9 +53,10 @@ APEX/                               # Git root
     │   ├── fact_extractor.py       # Background AI fact extraction
     │   └── context_builder.py      # Assembles system prompt context
     │
-    ├── tools/                      # Auto-discovered tool modules (60+ tools)
+    ├── tools/                      # Auto-discovered tool modules (70+ tools)
     │   ├── __init__.py             # discover_tools() via pkgutil
     │   ├── base.py                 # @tool decorator + TOOL_REGISTRY
+    │   ├── generic.py              # Phase 1 generic tools: do(), query(), discover(), history()
     │   ├── smart_home.py           # Entity control (light, climate, media, cover, fan, area)
     │   ├── ha_helpers.py           # Shared HA API client + helpers (no @tool)
     │   ├── automation.py           # Automation CRUD, scenes
@@ -79,17 +80,31 @@ APEX/                               # Git root
     │   ├── script.py               # HA script listing + execution
     │   ├── config_reload.py        # HA config reload
     │   ├── webhook.py              # Fire webhooks + custom events
-    │   └── wait_tool.py            # Timed delays between tool calls
+    │   ├── wait_tool.py            # Timed delays between tool calls
+    │   ├── manage.py               # System management via Supervisor API (@tool)
+    │   ├── configure.py            # Registry ops via WebSocket API (@tool)
+    │   └── ws_helpers.py           # WebSocket helper (transient connections, no @tool)
     │
-    └── tests/                      # 21 test files
+    ├── memory/
+    │   ├── conversation_store.py   # Conversation history management
+    │   ├── knowledge_store.py      # Facts + embeddings + cosine similarity
+    │   ├── fact_extractor.py       # Background AI fact extraction
+    │   ├── context_builder.py      # Assembles system prompt context
+    │   └── audit_store.py          # System audit log (manage/configure calls)
+    │
+    └── tests/                      # 25 test files, 398 tests
         ├── test_config.py
         ├── test_conversation.py      # 39 tests — orchestrator coverage
         ├── test_context_builder.py   # 17 tests — context assembly coverage
         ├── test_fact_extractor.py    # 25 tests — background extraction coverage
+        ├── test_generic.py           # 75 tests — do(), query(), discover(), history()
         ├── test_smart_home.py
         ├── test_vacuum.py
         ├── test_webhook.py
         ├── test_ha_helpers.py
+        ├── test_manage.py            # 53 tests — manage() + tiered confirmation
+        ├── test_configure.py         # 49 tests — configure() + dry-run + WS mocks
+        ├── test_audit_store.py       # 9 tests — audit logging
         └── ...
 ```
 
@@ -526,7 +541,7 @@ Auth token resolution order:
 
 ---
 
-## 3. Proposed Redesign: Generic Tools Architecture
+## 3. Generic Tools Architecture (Phase 1)
 
 ### 3.1 The Problem
 
@@ -578,18 +593,22 @@ Replace all domain-specific tools with a small set of generic tools that give th
                               ▼
 
 ┌────────────────────────────────────────────────────────────────────┐
-│                     PROPOSED (~9 tools)                             │
+│              GENERIC TOOLS (~9 tools)                               │
 │                                                                    │
-│      do()      query()    discover()    history()                  │
-│      automate()   notify()   manage()   configure()               │
-│      remember()/recall()/forget()                                  │
+│  ✅ do()      ✅ query()    ✅ discover()    ✅ history()          │
+│     automate()   notify()   ✅ manage()     ✅ configure()        │
+│     remember()/recall()/forget()                                   │
 │                                                                    │
+│  ✅ = implemented in tools/generic.py, tools/manage.py,           │
+│       tools/configure.py                                           │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 3.3 Tool Specifications
 
-#### `do(domain, service, targets, data)` -- Universal Service Caller
+#### `do(domain, service, targets, data)` -- Universal Service Caller ✅ IMPLEMENTED
+
+> **File:** `tools/generic.py` | **Tests:** `tests/test_generic.py` (75 tests total for all generic tools)
 
 **Replaces:** `control_light`, `control_climate`, `control_fan`, `control_cover`, `control_lock`, `control_switch`, `control_alarm`, `control_vacuum`, `control_media`, `control_area`, `call_service`, `set_input_helper`, `activate_scene`, `trigger_automation`, `toggle_automation`, `execute_script`, `reload_config`
 
@@ -629,7 +648,9 @@ Giving the LLM unrestricted access to call any HA service is powerful but danger
 3. **Allowlist/denylist config**: Add `PROTECTED_DOMAINS` and `BLOCKED_SERVICES` to `config.py` so the user can customize which actions require confirmation or are outright forbidden (e.g., `lock.unlock` from voice commands while away).
 4. **Audit log**: Every `do()` call should be logged with timestamp, domain, service, targets, and the originating session (voice vs. chat vs. webhook). This enables post-incident review.
 
-#### `query(target)` -- Universal State Reader
+#### `query(target)` -- Universal State Reader ✅ IMPLEMENTED
+
+> **File:** `tools/generic.py` | Auto-detects entity_id vs Jinja2; domain-aware attribute formatting; smart 404 fallback
 
 **Replaces:** `get_entity_state`, `query_sensors`, `get_weather`, `get_presence`, `get_energy_summary`, `get_entity_power`, `evaluate_template`
 
@@ -657,7 +678,9 @@ async def query(
 - `query("{{ states.weather.home.attributes.forecast[:3] | to_json }}")` -- weather forecast
 - `query("{% for e in states.light if e.state == 'on' %}{{ e.name }}\n{% endfor %}")` -- all lights that are on
 
-#### `discover(what, filter)` -- Universal Discovery
+#### `discover(what, filter)` -- Universal Discovery ✅ IMPLEMENTED
+
+> **File:** `tools/generic.py` | Supports: entities, services (with full schemas), areas, devices, integrations, info
 
 **Replaces:** `list_entities`, `list_services`, `get_areas`, `list_devices`, `list_integrations`, `get_ha_info`, `list_input_helpers`, `list_automations`, `list_scenes`, `list_scripts`
 
@@ -681,7 +704,9 @@ async def discover(
 
 **Critical for the redesign**: When `what="services"`, the response includes full service schemas (field names, types, required/optional). This is how the AI learns what parameters `do()` accepts for any given service.
 
-#### `history(entity_id, hours)` -- State History + Logbook
+#### `history(entity_id, hours, mode)` -- State History + Logbook ✅ IMPLEMENTED
+
+> **File:** `tools/generic.py` | Two modes: "changes" (state transitions) and "logbook" (human-readable events); deduplication; caps at 50 entries
 
 **Replaces:** `get_history`, `get_logbook`
 
@@ -1345,7 +1370,7 @@ Known risks, technical debt, and unresolved design decisions that should be addr
 
 ### 7.1 Test Coverage (Critical -- Phase 0 Blocker)
 
-Overall coverage is **40%** (209 tests, 0 failing). The critical modules now have strong coverage:
+Overall coverage is expanding (**324 tests, 0 failing**). The critical modules now have strong coverage:
 
 | Module | Risk Level | Coverage | Target | Status |
 |--------|-----------|----------|--------|--------|
@@ -1450,7 +1475,7 @@ Phase 0 (Stabilize)
 
 The one exception: **Phase 0 quick-wins that don't touch core modules** (e.g., enabling WAL mode, fixing the `notify.py` hardcoded target) can be done at any time since they carry no regression risk.
 
-**Status update:** Phase 0 is nearly complete. WAL mode is enabled, `notify.py` target is configurable, test coverage targets are exceeded, and the `test_settings_defaults` flake is fixed. The remaining Phase 0 item is the vacuum tool entity name dynamic resolution.
+**Status update:** Phase 0 is complete. Phase 1 system management layer (manage, configure, ws_helpers, audit_store) is implemented with 111 tests. Total test count: 324 passing.
 
 ### 7.7 Operational Risk: System-Level Access via manage() and configure()
 
@@ -1466,7 +1491,7 @@ Giving the LLM system-level access to the HA instance (beyond device control) in
 | **Device removal** | Hallucinated `configure("remove", device_id)` | Permanently removes a device and all its entities. Re-adding requires reconfiguration and may break automations that referenced those entities. |
 | **Add-on misconfiguration** | `manage("install", "addon:some_slug", config={...})` with wrong config | Installs or reconfigures an add-on with incorrect settings. Could expose ports, change network settings, or break other add-ons. |
 
-**Mitigations (all required for Phase 1):**
+**Mitigations (all implemented in Phase 1):**
 
 1. **Tiered confirmation system.** Operations are classified into three tiers:
 
@@ -1511,6 +1536,12 @@ Giving the LLM system-level access to the HA instance (beyond device control) in
 3. **Dry-run mode for configure().** All `configure()` operations support a `dry_run` flag (via `data={"dry_run": true}`) that returns what *would* change without applying it. The LLM should always call dry-run first for Tier 1+ operations and present the preview to the user.
 
 4. **Session-based escalation.** Webhook-triggered sessions (`session_id="apex_events"`) are restricted to Tier 0 operations only. The rationale: a state-change event should never autonomously trigger a system update or entity disable. Only direct user conversations (voice or chat) can escalate to Tier 1 and Tier 2.
+
+**Status: IMPLEMENTED.** All four mitigations are in place:
+- Tiered confirmation in `tools/manage.py` and `tools/configure.py` (53 + 49 tests)
+- Audit logging via `memory/audit_store.py` with `system_audit_log` table (9 tests)
+- Dry-run mode for `configure()` Tier 1+ operations (disable, delete_area, remove)
+- Session-based escalation blocks `apex_events` from Tier 1/2 in both tools
 
 ---
 
@@ -1624,4 +1655,20 @@ Complete list of all registered `@tool` functions as of v0.5.2, organized by mod
 | `webhook.py` | `fire_webhook` + `fire_event` + `fire_custom_event` | Trigger webhooks and custom events |
 | `wait_tool.py` | `wait_seconds` | Timed delay between tool calls |
 
-**Total: ~60+ registered tools across 20 modules**
+### manage.py (1 tool — Phase 1)
+| Tool | Description |
+|------|-------------|
+| `manage` | System management via Supervisor API: backups (create/list/restore/delete), updates (core/OS/addon), restarts, health, logs. Tiered confirmation system (Tier 0 safe, Tier 1 disruptive, Tier 2 destructive). |
+
+### configure.py (1 tool — Phase 1)
+| Tool | Description |
+|------|-------------|
+| `configure` | Registry operations via WebSocket API: rename entities, assign areas, disable/enable entities, create/delete areas, remove devices, list stale entities. Dry-run mode for destructive ops. |
+
+### Support modules (no @tool)
+| Module | Description |
+|--------|-------------|
+| `ws_helpers.py` | Transient WebSocket connections for HA registry operations (auth, send command, receive result, close) |
+| `audit_store.py` | SQLite audit log for all manage/configure calls (timestamp, tool, action, target, result, session) |
+
+**Total: ~62+ registered tools across 22 modules**

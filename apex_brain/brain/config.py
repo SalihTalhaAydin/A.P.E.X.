@@ -3,6 +3,8 @@ Apex Brain - Configuration
 All settings loaded from environment variables or HA add-on options.
 """
 
+from __future__ import annotations
+
 import logging
 
 from pydantic import PrivateAttr
