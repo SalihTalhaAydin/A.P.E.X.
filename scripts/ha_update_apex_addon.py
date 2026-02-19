@@ -114,7 +114,8 @@ async def main():
             )
         )
         r2 = json.loads(await ws.recv())
-        data = (r2.get("result") or {}).get("data") or {}
+        _res = r2.get("result") or {}
+        data = _res.get("data") if isinstance(_res.get("data"), dict) else _res
         version = data.get("version", "?")
         version_latest = data.get("version_latest", "?")
         update_available = data.get("update_available", False)

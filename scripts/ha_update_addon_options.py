@@ -63,7 +63,8 @@ async def main():
             print("GET addon info failed:", r1.get("error", r1))
             return
 
-        data = (r1.get("result") or {}).get("data") or {}
+        _res = r1.get("result") or {}
+        data = _res.get("data") if isinstance(_res.get("data"), dict) else _res
         options = dict(data.get("options") or {})
 
         # Schema defaults (from config.yaml) if options empty (e.g. addon not yet configured)
@@ -118,7 +119,9 @@ async def main():
             })
         )
         r3 = json.loads(await ws.recv())
-        state = (r3.get("result") or {}).get("data", {}).get("state", "")
+        _res3 = r3.get("result") or {}
+        _data3 = _res3.get("data") if isinstance(_res3.get("data"), dict) else _res3
+        state = _data3.get("state", "")
 
         if state in ("started", "started, watchdog"):
             await ws.send(
