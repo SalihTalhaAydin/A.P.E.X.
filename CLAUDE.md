@@ -80,6 +80,22 @@ Every change MUST pass both layers before it is marked done:
 - **If tests fail, fix and re-run.** Do not report a task as complete with failing tests.
 - **Test results must be visible.** Always show the user test output (pass/fail counts, any errors).
 
+## Required Reading (MANDATORY — First Action of Every Session)
+
+Before writing any code, you MUST read and internalize these documents:
+
+1. **This file** (`CLAUDE.md`) — You're reading it now. Contains all behavioral rules.
+2. **`CONTRIBUTING.md`** — Universal contributor rules (applies to all agents and humans).
+3. **`docs/WORKFLOW.md`** — The 3-phase process: Evaluate → Implement → Validate. No phase may be skipped.
+4. **`docs/ROADMAP.md`** — Single source of truth for priorities. Do not work outside the current phase.
+5. **`docs/ARCHITECTURE.md`** — System design. Understand the structure before modifying it.
+
+### Available Commands
+Run these with `/project:command-name` at any time:
+- `/project:preflight` — Run the full preflight checklist before starting work.
+- `/project:validate` — Run lint, format, tests, and secret scanning.
+- `/project:review-rules` — Audit the codebase for rule violations.
+
 ## Coding Conventions
 - No hardcoded secrets or tokens anywhere in source code — only read from environment via `config.py`.
 - See `.env.example` for the full list of configuration variables.

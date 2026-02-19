@@ -9,7 +9,8 @@
       "Bash(npx:*)",
       "Bash(git -C /Users/alsal/Documents/GitHub/A.P.E.X. worktree list)",
       "Bash(git -C /Users/alsal/Documents/GitHub/A.P.E.X. branch -a)",
-      "Bash(git -C /Users/alsal/Documents/GitHub/A.P.E.X. log main..claude/kind-jepsen --oneline)"
+      "Bash(git -C /Users/alsal/Documents/GitHub/A.P.E.X. log main..claude/kind-jepsen --oneline)",
+      "Bash(python -c:*)"
     ]
   }
 }

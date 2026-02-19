@@ -32,3 +32,10 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# Ad-hoc HA exports / debug output (do not commit)
+ha_states*.json
+states_*.json
+services_test.json
+calendars_test.json
+ha_test_output.txt

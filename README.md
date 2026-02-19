@@ -6,6 +6,18 @@
 
 Personal AI assistant with persistent memory, smart home control, and semantic knowledge. Runs as a Home Assistant **App** (formerly "add-on") on a dedicated HAOS mini PC.
 
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [VISION.md](docs/VISION.md) | Product vision, Jarvis Standard scorecard, what success looks like |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture, data flows, proposed Generic Tools redesign |
+| [ROADMAP.md](docs/ROADMAP.md) | Prioritized backlog — Phase 0 through Phase 5 + unscheduled ideas |
+| [WORKFLOW.md](docs/WORKFLOW.md) | 3-phase development process: Evaluate → Implement → Validate |
+| [VOICE_PIPELINE.md](docs/VOICE_PIPELINE.md) | Voice pipeline research — hardware, STT/TTS options, latency, costs |
+
+**New to the project?** Start with [VISION.md](docs/VISION.md) to understand the goal, then [WORKFLOW.md](docs/WORKFLOW.md) to learn how we develop.
+
 ## Quick Start (Local Development)
 
 ```bash
@@ -65,7 +77,7 @@ curl -X POST http://localhost:8080/api/chat \
 7. Check the **Log** tab — you should see:
    ```
    Apex Brain Add-on Starting...
-   Model: gpt-4o
+   Model: claude-sonnet-4-20250514
    Uvicorn running on http://0.0.0.0:8080
    ```
 
