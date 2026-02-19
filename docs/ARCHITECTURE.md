@@ -525,9 +525,10 @@ Uses Pydantic Settings for type-safe configuration from environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LITELLM_MODEL` | `claude-sonnet-4-20250514` | AI model for conversation |
+| `LITELLM_MODEL` | `gemini/gemini-2.5-pro` | AI model for conversation |
 | `OPENAI_API_KEY` | (empty) | OpenAI API key |
 | `ANTHROPIC_API_KEY` | (empty) | Anthropic API key |
+| `GOOGLE_API_KEY` | (empty) | Google/Gemini API key |
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | Model for semantic embeddings |
 | `FACT_EXTRACTION_MODEL` | `gpt-4o-mini` | Cheap model for background extraction |
 | `HA_URL` | `http://supervisor/core` | HA Core URL |
@@ -1353,9 +1354,9 @@ Turn N+5: User says "What's happening this week?"
 
 | Provider | Models | Use Case |
 |----------|--------|----------|
-| **Anthropic** | claude-sonnet-4, claude-opus-4 | Primary conversation |
+| **Google** | gemini-2.5-pro, gemini-2.0-flash | Primary conversation |
+| **Anthropic** | claude-sonnet-4, claude-opus-4 | Alternative |
 | **OpenAI** | gpt-4o, gpt-4o-mini | Conversation + fact extraction |
-| **Google** | gemini-2.0-flash | Alternative conversation |
 | **OpenAI** | text-embedding-3-small | Semantic embeddings (knowledge store) |
 
 ### Voice Pipeline

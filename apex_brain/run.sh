@@ -11,6 +11,7 @@ echo "========================================"
 export LITELLM_MODEL=$(jq -r '.litellm_model' /data/options.json)
 export OPENAI_API_KEY=$(jq -r '.openai_api_key' /data/options.json)
 export ANTHROPIC_API_KEY=$(jq -r '.anthropic_api_key' /data/options.json)
+export GEMINI_API_KEY=$(jq -r '.google_api_key // empty' /data/options.json)
 export EMBEDDING_MODEL=$(jq -r '.embedding_model' /data/options.json)
 export FACT_EXTRACTION_MODEL=$(jq -r '.fact_extraction_model' /data/options.json)
 export RECENT_TURNS=$(jq -r '.recent_turns' /data/options.json)

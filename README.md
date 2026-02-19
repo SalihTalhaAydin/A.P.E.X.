@@ -80,13 +80,13 @@ curl -X POST http://localhost:8080/api/chat \
 1. Find **Apex Brain** in the store list (refresh if needed)
 2. Click it, then **Install** (builds the Docker image, ~1-2 minutes)
 3. Go to the **Configuration** tab
-4. Set your `openai_api_key` (or `anthropic_api_key` depending on model)
-5. Adjust `litellm_model` if desired (default: `claude-sonnet-4-20250514`)
+4. Set your API key (`openai_api_key`, `anthropic_api_key`, or `google_api_key` depending on model)
+5. Adjust `litellm_model` if desired (default: `gemini/gemini-2.5-pro`)
 6. Click **Save**, then go to **Info** tab and click **Start**
 7. Check the **Log** tab — you should see:
    ```
    Apex Brain Add-on Starting...
-   Model: claude-sonnet-4-20250514
+   Model: gemini/gemini-2.5-pro
    Uvicorn running on http://0.0.0.0:8080
    ```
 
@@ -175,7 +175,7 @@ Restart the server. Done.
 Change `LITELLM_MODEL` in your .env or HA add-on config:
 - `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`
 - `claude-sonnet-4-20250514`, `claude-opus-4-20250514`
-- `gemini/gemini-2.0-flash`
+- `gemini/gemini-2.5-pro`, `gemini/gemini-2.0-flash`
 - Any model LiteLLM supports: https://docs.litellm.ai/docs/providers
 
 ## Updating the Add-on

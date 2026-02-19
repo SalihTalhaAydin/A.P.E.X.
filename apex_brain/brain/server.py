@@ -119,6 +119,10 @@ async def lifespan(_app: FastAPI):
         os.environ["ANTHROPIC_API_KEY"] = (
             settings.anthropic_api_key
         )
+    if settings.google_api_key:
+        os.environ["GEMINI_API_KEY"] = (
+            settings.google_api_key
+        )
 
     # Initialize memory stores
     convo_store = ConversationStore(settings.db_path)

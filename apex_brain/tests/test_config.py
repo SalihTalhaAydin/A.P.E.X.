@@ -12,7 +12,7 @@ def test_settings_defaults(monkeypatch):
     ):
         monkeypatch.delenv(key, raising=False)
     s = Settings(_env_file=None)
-    assert s.litellm_model == "claude-sonnet-4-20250514"
+    assert s.litellm_model == "gemini/gemini-2.5-pro"
     assert s.embedding_model == "text-embedding-3-small"
     assert s.recent_turns == 10
     assert s.max_facts_in_context == 20

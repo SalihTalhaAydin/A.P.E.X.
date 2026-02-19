@@ -15,12 +15,13 @@ logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     # AI model -- change this one string to swap providers
-    # Examples: gpt-4o, gpt-4o-mini, claude-sonnet-4-20250514, gemini/gemini-2.0-flash
-    litellm_model: str = "claude-sonnet-4-20250514"
+    # Examples: gpt-4o, gpt-4o-mini, claude-sonnet-4-20250514, gemini/gemini-2.5-pro
+    litellm_model: str = "gemini/gemini-2.5-pro"
 
     # API keys (only need the one matching your model)
     openai_api_key: str = ""
     anthropic_api_key: str = ""
+    google_api_key: str = ""
 
     # Embedding model for semantic memory search
     embedding_model: str = "text-embedding-3-small"
