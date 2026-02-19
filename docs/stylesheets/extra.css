@@ -1,0 +1,42 @@
+/* Apex Brain — subtle polish for documentation */
+
+/* Slightly improved line-height for long prose */
+.md-typeset {
+  line-height: 1.6;
+}
+
+/* Softer table borders and row striping */
+.md-typeset table:not([class]) {
+  border-radius: 0.25rem;
+  overflow: hidden;
+}
+
+.md-typeset table:not([class]) th,
+.md-typeset table:not([class]) td {
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) th,
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) td {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.md-typeset table:not([class]) tbody tr:nth-child(even) {
+  background-color: rgba(0, 0, 0, 0.02);
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) tbody tr:nth-child(even) {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+/* Code block styling: rounded corners, subtle shadow */
+.md-typeset pre > code {
+  border-radius: 0.375rem;
+  padding: 1rem 1.25rem;
+}
+
+/* Copy button hover feedback */
+.md-clipboard:hover {
+  opacity: 0.9;
+  transition: opacity 0.15s ease;
+}

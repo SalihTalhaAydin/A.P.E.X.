@@ -14,7 +14,8 @@
 4. [Voice Pipeline Architecture](#4-voice-pipeline-architecture)
 5. [Data Flow Diagrams](#5-data-flow-diagrams)
 6. [Technology Stack](#6-technology-stack)
-7. [Appendix: Current Tool Inventory](#appendix-current-tool-inventory)
+7. [Architectural Risks & Open Questions](#7-architectural-risks--open-questions)
+8. [Appendix: Current Tool Inventory](#appendix-current-tool-inventory)
 
 ---
 
@@ -80,8 +81,11 @@ APEX/                               # Git root
     │   ├── webhook.py              # Fire webhooks + custom events
     │   └── wait_tool.py            # Timed delays between tool calls
     │
-    └── tests/                      # 18 test files
+    └── tests/                      # 21 test files
         ├── test_config.py
+        ├── test_conversation.py      # 39 tests — orchestrator coverage
+        ├── test_context_builder.py   # 17 tests — context assembly coverage
+        ├── test_fact_extractor.py    # 25 tests — background extraction coverage
         ├── test_smart_home.py
         ├── test_vacuum.py
         ├── test_webhook.py
@@ -92,34 +96,58 @@ APEX/                               # Git root
 ### High-Level Architecture Diagram
 
 ```
-                    ┌──────────────────────────────────────────────┐
-                    │            Home Assistant (HAOS)              │
-                    │                                              │
-                    │  ┌─────────────┐    ┌─────────────────────┐  │
-                    │  │  Supervisor  │    │   HA Core REST API  │  │
-                    │  │  (manages    │    │   /api/states       │  │
-                    │  │   add-ons)   │    │   /api/services     │  │
-                    │  └──────┬───────┘    │   /api/template     │  │
-                    │         │            │   /api/history       │  │
-                    │         ▼            └────────▲────────────┘  │
-                    │  ┌──────────────┐            │               │
-                    │  │  Apex Brain  │────────────┘               │
-                    │  │  (Docker)    │   httpx + SUPERVISOR_TOKEN  │
-                    │  │             │                              │
-                    │  │  :8080      │◄──────── Wyoming Protocol   │
-                    │  └──────┬───────┘    (voice satellites)      │
-                    │         │                                    │
-                    └─────────┼────────────────────────────────────┘
-                              │
-              ┌───────────────┼───────────────┐
-              │               │               │
-              ▼               ▼               ▼
-    ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-    │  /v1/chat/   │  │  /api/chat   │  │ /api/webhook │
-    │  completions │  │  (test UI)   │  │ (HA events)  │
-    │  (HA voice)  │  │              │  │              │
-    └──────────────┘  └──────────────┘  └──────────────┘
+                    ┌───────────────────────────────────────────────────────────┐
+                    │                  Home Assistant (HAOS)                     │
+                    │                                                           │
+                    │  ┌─────────────────────┐    ┌─────────────────────────┐   │
+                    │  │  HA Supervisor API   │    │   HA Core REST API      │   │
+                    │  │                     │    │   /api/states            │   │
+                    │  │  /backups           │    │   /api/services          │   │
+                    │  │   (create, restore, │    │   /api/template          │   │
+                    │  │    list, delete)    │    │   /api/history           │   │
+                    │  │  /addons            │    │   /api/config            │   │
+                    │  │   (install, update, │    └────────────▲────────────┘   │
+                    │  │    restart, config) │                 │                │
+                    │  │  /core             │                 │                │
+                    │  │   (update, restart, │    ┌────────────────────────┐    │
+                    │  │    check)          │    │  HA WebSocket API      │    │
+                    │  │  /os               │    │  ws://ha:8123/api/ws   │    │
+                    │  │   (update, info,   │    │                        │    │
+                    │  │    disk, memory)   │    │  config/entity_registry │    │
+                    │  │  /network          │    │  config/device_registry │    │
+                    │  │  /hardware         │    │  config/area_registry   │    │
+                    │  └─────────▲──────────┘    │  config/config_entries  │    │
+                    │            │               └────────────▲───────────┘    │
+                    │            │                            │                │
+                    │  ┌─────────┴────────────────────────────┴──────────┐     │
+                    │  │              Apex Brain (Docker)                 │     │
+                    │  │                                                  │     │
+                    │  │  httpx ──► Core REST API (states, services)     │     │
+                    │  │  httpx ──► Supervisor API (backups, addons, OS) │     │
+                    │  │  websocket ──► WS API (registry, config ops)    │     │
+                    │  │                                                  │     │
+                    │  │  :8080  ◄──────── Wyoming Protocol              │     │
+                    │  │                   (voice satellites)             │     │
+                    │  └──────────────────────┬──────────────────────────┘     │
+                    │                         │                                │
+                    └─────────────────────────┼────────────────────────────────┘
+                                              │
+                              ┌───────────────┼───────────────┐
+                              │               │               │
+                              ▼               ▼               ▼
+                    ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+                    │  /v1/chat/   │  │  /api/chat   │  │ /api/webhook │
+                    │  completions │  │  (test UI)   │  │ (HA events)  │
+                    │  (HA voice)  │  │              │  │              │
+                    └──────────────┘  └──────────────┘  └──────────────┘
 ```
+
+> **Note on API surfaces:** Apex communicates with three distinct HA APIs.
+> The **Core REST API** handles entity state reads and service calls (the primary interface today).
+> The **Supervisor API** (`http://supervisor/<endpoint>`) handles system operations -- backups,
+> add-on management, OS/core updates, and hardware/network info. The **WebSocket API**
+> (`ws://supervisor/core/websocket`) is required for config/registry operations (entity rename,
+> area management, device registry, config entries) that are not exposed via REST.
 
 ### Deployment Modes
 
@@ -486,12 +514,15 @@ Uses Pydantic Settings for type-safe configuration from environment variables:
 | `WEBHOOK_SECRET` | (empty) | Optional HMAC secret |
 | `ANNOUNCE_ON_EVENTS` | true | Voice announcements on events |
 | `ANNOUNCE_TARGET` | `alexa_all` | Default announcement target |
+| `PHONE_NOTIFY_TARGET` | `mobile_app_salih_iphone` | Phone notification entity name |
 | `PORT` | 8080 | Server port |
 
 Auth token resolution order:
 1. `SUPERVISOR_TOKEN` env var (injected by HA Supervisor inside add-on)
 2. `HA_TOKEN` from settings / `.env`
 3. S6 container environment file (fallback for edge cases)
+
+**Supervisor API auth note:** The `SUPERVISOR_TOKEN` already grants full access to the Supervisor API (`http://supervisor/*`) -- no additional credentials are needed. When running as an HA add-on, Apex can call Supervisor endpoints (backups, add-ons, core/OS updates, hardware info) using the same token that authenticates Core REST API requests. The token is passed as `Authorization: Bearer <SUPERVISOR_TOKEN>` to both APIs. In local dev mode, the Supervisor API is not available (it only exists inside HAOS), so `manage()` operations will return an appropriate error message.
 
 ---
 
@@ -520,9 +551,9 @@ The current system has **60+ individual tools** -- each HA domain gets its own t
 4. **Maintenance burden**: Every HA update that adds services or changes schemas requires updating tool code, tests, and system prompt instructions.
 5. **Confabulation surface**: With so many similar tools, the LLM sometimes picks the wrong one or invents parameters that don't exist.
 
-### 3.2 The Solution: ~7 Generic Power Tools
+### 3.2 The Solution: ~9 Generic Power Tools
 
-Replace all domain-specific tools with a small set of generic tools that give the AI direct, unrestricted access to the HA API. The AI uses its knowledge of HA service schemas (injected into the system prompt) to construct the right calls.
+Replace all domain-specific tools with a small set of generic tools that give the AI direct, unrestricted access to the HA API and system management. The AI uses its knowledge of HA service schemas (injected into the system prompt) to construct the right calls, and gains system administration capabilities via the Supervisor and WebSocket APIs.
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
@@ -547,10 +578,11 @@ Replace all domain-specific tools with a small set of generic tools that give th
                               ▼
 
 ┌────────────────────────────────────────────────────────────────────┐
-│                     PROPOSED (~7 tools)                             │
+│                     PROPOSED (~9 tools)                             │
 │                                                                    │
 │      do()      query()    discover()    history()                  │
-│      automate()   notify()   remember()/recall()/forget()          │
+│      automate()   notify()   manage()   configure()               │
+│      remember()/recall()/forget()                                  │
 │                                                                    │
 └────────────────────────────────────────────────────────────────────┘
 ```
@@ -582,6 +614,20 @@ async def do(
 - Accepts `area_id` or `device_id` targeting (not just `entity_id`)
 - No hardcoded parameter validation -- the AI uses the service schema (injected in system prompt) to construct correct `data`
 - Error messages include the HA response body for debugging
+
+**Security considerations (IMPORTANT):**
+
+Giving the LLM unrestricted access to call any HA service is powerful but dangerous. A single hallucinated or misinterpreted service call could disarm the alarm, unlock the front door, or disable security cameras. Mitigations:
+
+1. **Sensitive domain gate**: Maintain a configurable list of security-critical domains that require extra safeguards:
+   - `lock` (door locks)
+   - `alarm_control_panel` (arm/disarm)
+   - `camera` (disable/snapshot)
+   - `cover` (garage doors)
+   - `automation` (delete/disable safety automations)
+2. **Confirmation step**: For actions on gated domains, `do()` should return a confirmation prompt ("About to unlock front_door. Confirm?") instead of executing immediately. The LLM must relay this to the user and only execute on explicit approval.
+3. **Allowlist/denylist config**: Add `PROTECTED_DOMAINS` and `BLOCKED_SERVICES` to `config.py` so the user can customize which actions require confirmation or are outright forbidden (e.g., `lock.unlock` from voice commands while away).
+4. **Audit log**: Every `do()` call should be logged with timestamp, domain, service, targets, and the originating session (voice vs. chat vs. webhook). This enables post-incident review.
 
 #### `query(target)` -- Universal State Reader
 
@@ -691,6 +737,112 @@ async def notify(
     """
 ```
 
+#### `manage(action, target, config)` -- System Operations via Supervisor API
+
+**Replaces:** nothing (new capability -- extends Apex from device control to full system administration)
+
+```python
+@tool(description="Manage HA system: backups, add-ons, updates, and system health.")
+async def manage(
+    action: str,    # "backup", "update", "restart", "install", "health", "logs"
+    target: str = "",  # "core", "os", "addon:<slug>", "supervisor", or specific backup ID
+    config: dict = None,  # Extra config (e.g., backup name, addon config options)
+) -> str:
+    """
+    Routes to the appropriate Supervisor API endpoint:
+
+    action="backup"   + target="create"          -> POST /backups/new/full (or /partial with config)
+    action="backup"   + target="list"            -> GET /backups
+    action="backup"   + target="restore"         -> POST /backups/{config['backup_id']}/restore
+    action="backup"   + target="delete"          -> DELETE /backups/{config['backup_id']}
+
+    action="update"   + target="core"            -> POST /core/update
+    action="update"   + target="os"              -> POST /os/update
+    action="update"   + target="addon:<slug>"    -> POST /addons/<slug>/update
+
+    action="restart"  + target="core"            -> POST /core/restart
+    action="restart"  + target="addon:<slug>"    -> POST /addons/<slug>/restart
+    action="restart"  + target="supervisor"      -> POST /supervisor/restart
+
+    action="install"  + target="addon:<slug>"    -> POST /addons/<slug>/install (with config)
+
+    action="health"   + target="" (default)      -> GET /core/info + /os/info + /supervisor/info
+                                                    Returns: CPU, memory, disk, network, versions
+
+    action="logs"     + target="core"            -> GET /core/logs
+    action="logs"     + target="supervisor"      -> GET /supervisor/logs
+    action="logs"     + target="addon:<slug>"    -> GET /addons/<slug>/logs
+
+    All calls use SUPERVISOR_TOKEN via http://supervisor/<endpoint>.
+    Returns human-readable summary of the result.
+    """
+```
+
+**Security considerations (IMPORTANT):**
+
+| Operation | Risk Level | Confirmation Required? |
+|-----------|-----------|----------------------|
+| `backup/create` | **Safe** | No -- creating a backup is non-destructive |
+| `backup/list` | **Safe** | No -- read-only |
+| `health` | **Safe** | No -- read-only diagnostics |
+| `logs` | **Safe** | No -- read-only |
+| `backup/restore` | **DESTRUCTIVE** | **Yes** -- wipes current state and restores from snapshot |
+| `backup/delete` | **Destructive** | **Yes** -- permanently removes a backup |
+| `update/core` | **Disruptive** | **Yes** -- triggers HA restart, causes downtime |
+| `update/os` | **Disruptive** | **Yes** -- triggers OS-level reboot |
+| `update/addon` | **Disruptive** | **Yes** -- restarts the add-on |
+| `restart/core` | **Disruptive** | **Yes** -- causes HA downtime |
+| `restart/addon` | **Disruptive** | **Yes** -- add-on temporarily unavailable |
+| `install/addon` | **Moderate** | **Yes** -- installs new software on the system |
+
+For destructive/disruptive operations, `manage()` returns a confirmation prompt instead of executing immediately. The LLM relays the prompt to the user and only executes on explicit approval.
+
+#### `configure(action, target, data)` -- Entity/Device/Area Registry Management via WebSocket API
+
+**Replaces:** nothing (new capability -- enables Apex to organize and maintain the HA instance)
+
+```python
+@tool(description="Organize HA: rename entities, manage areas, configure integrations, clean up stale devices.")
+async def configure(
+    action: str,     # "rename", "assign_area", "disable", "enable", "create_area",
+                     # "delete_area", "remove", "list_stale"
+    target: str = "",  # entity_id, device_id, or area name
+    data: dict = None,  # e.g., {"name": "Kitchen Light", "area_id": "kitchen"}
+) -> str:
+    """
+    Uses HA WebSocket API for registry operations not available via REST:
+
+    action="rename"       + target=entity_id  -> config/entity_registry/update {entity_id, name}
+    action="assign_area"  + target=entity_id  -> config/entity_registry/update {entity_id, area_id}
+                          + target=device_id  -> config/device_registry/update {device_id, area_id}
+    action="disable"      + target=entity_id  -> config/entity_registry/update {disabled_by: "user"}
+    action="enable"       + target=entity_id  -> config/entity_registry/update {disabled_by: null}
+    action="create_area"  + data={"name": ..} -> config/area_registry/create {name}
+    action="delete_area"  + target=area_name  -> config/area_registry/delete {area_id}
+    action="remove"       + target=device_id  -> config/device_registry/remove {device_id}
+    action="list_stale"                       -> config/entity_registry/list, filter by
+                                                 unavailable/unknown for 7+ days
+
+    Opens a transient WebSocket connection per operation.
+    Returns human-readable confirmation of what changed.
+    """
+```
+
+**Security considerations (IMPORTANT):**
+
+| Operation | Risk Level | Confirmation Required? |
+|-----------|-----------|----------------------|
+| `rename` | **Safe** | No -- cosmetic change, easily reversible |
+| `assign_area` | **Safe** | No -- organizational, easily reversible |
+| `enable` | **Safe** | No -- restores functionality |
+| `create_area` | **Safe** | No -- additive, no side effects |
+| `list_stale` | **Safe** | No -- read-only |
+| `disable` | **Moderate** | **Yes** -- disabling a critical entity (e.g., alarm sensor) could have safety implications |
+| `delete_area` | **Moderate** | **Yes** -- unassigns all entities from the area |
+| `remove` | **Destructive** | **Yes** -- permanently removes a device and its entities from HA |
+
+For operations that require confirmation, `configure()` first performs a **dry-run** that shows what would change (e.g., "This will disable binary_sensor.front_door_contact and remove it from automations X and Y. Confirm?") before applying.
+
 #### Memory Tools (keep as-is)
 
 `remember(key, value)`, `recall(query)`, `forget(key)` -- These are already clean and generic. Keep them unchanged, along with the routine tools (`define_routine`, `list_routines`, `run_routine`, `delete_routine`).
@@ -727,7 +879,56 @@ This replaces the current approach of hardcoding service knowledge into each too
 
 **Token budget**: The full service schema for a typical HA instance is ~2000-4000 tokens. This is significantly less than the current 60+ tool definitions (~8000-12000 tokens).
 
-### 3.5 Automatic Post-Action Verification
+**Caveats and filtering strategy:**
+
+The ~2,000-4,000 token estimate assumes a moderately-sized HA instance. This number can grow significantly with many integrations -- large installations with 30+ integrations and custom components could push schema sizes to 8,000+ tokens, erasing the token savings. Mitigations:
+
+1. **Domain filtering**: Only inject schemas for domains that have actual entities on the instance. If the user has no `vacuum` entities, omit vacuum service schemas entirely. This is the simplest and highest-impact optimization.
+2. **On-demand discovery**: Instead of injecting all schemas into every system prompt, the AI calls `discover(what="services", filter="climate")` before calling `do()` when it encounters an unfamiliar domain. This trades one extra tool call for significant token savings.
+3. **Schema compression**: Strip verbose field descriptions and only inject field names + types + enums. Full descriptions can be fetched on demand via `discover()`.
+4. **Startup measurement**: On first boot, measure the actual token count of the full schema dump and log it. If it exceeds a configurable threshold (e.g., `MAX_SCHEMA_TOKENS = 4000`), automatically fall back to domain filtering or on-demand mode.
+5. **Caching**: Schema data changes rarely. Cache the compressed schema and only refresh on HA restart or config reload (listen for `homeassistant.restart` event or check on a 1-hour interval).
+
+### 3.5 WebSocket API Requirements
+
+Some HA registry operations required by `configure()` are **only available via the WebSocket API**, not REST. These include:
+
+- `config/entity_registry/update` -- rename entities, disable/enable, assign areas
+- `config/device_registry/update` -- assign devices to areas, remove devices
+- `config/area_registry/create` / `delete` / `list` -- area CRUD
+- `config/config_entries/get` -- integration configuration entries
+
+**Implementation approach -- two options:**
+
+| Approach | Complexity | Pros | Cons |
+|----------|-----------|------|------|
+| **Persistent WebSocket connection** | Higher | Real-time events, reuse connection, lower latency for rapid operations | Must handle reconnection, keepalive, concurrent message routing |
+| **Transient connection per operation** | Lower | Simple, no state management, easy error handling | ~200ms overhead per operation (connect + auth + send + close) |
+
+**Recommendation: Start with transient connections.** Config/registry operations are infrequent (a few per day at most, typically during setup or maintenance sessions). The ~200ms overhead per operation is negligible for this use case. The implementation pattern:
+
+```python
+async def ws_command(command: dict) -> dict:
+    """Open a transient WebSocket connection, send one command, return the result."""
+    async with aiohttp.ClientSession() as session:
+        async with session.ws_connect(f"{WS_URL}/api/websocket") as ws:
+            # 1. Receive auth_required
+            await ws.receive_json()
+            # 2. Send auth
+            await ws.send_json({"type": "auth", "access_token": TOKEN})
+            auth_result = await ws.receive_json()
+            if auth_result["type"] != "auth_ok":
+                raise AuthError(auth_result)
+            # 3. Send command
+            await ws.send_json({"id": 1, **command})
+            # 4. Receive result
+            result = await ws.receive_json()
+            return result
+```
+
+A persistent connection can be added later (Phase 2+) if Apex needs real-time event subscriptions (e.g., listening for state changes without polling, or receiving `config_entry` update events).
+
+### 3.6 Automatic Post-Action Verification
 
 Currently, each domain tool has its own verification function (`_verify_light`, `_verify_climate`, `_verify_media`). In the redesign, `do()` includes a generic verifier:
 
@@ -757,7 +958,7 @@ async def _verify_action(domain: str, entity_id: str) -> str:
     return f"{fn}: {st}{detail}"
 ```
 
-### 3.6 Error Handling as Middleware
+### 3.7 Error Handling as Middleware
 
 Instead of try/except in every tool, errors are handled in `execute_tool()`:
 
@@ -776,7 +977,7 @@ async def execute_tool(name: str, arguments: dict) -> str:
         return f"Tool error ({name}): {e}"
 ```
 
-### 3.7 Migration Path
+### 3.8 Migration Path
 
 ```
 Phase 1: Build generic tools alongside existing tools
@@ -795,11 +996,11 @@ Phase 3: Remove old tools
          └── Service schemas become the single source of truth
 ```
 
-### 3.8 Comparison Summary
+### 3.9 Comparison Summary
 
-| Aspect | Current (60+ tools) | Proposed (~7 tools) |
+| Aspect | Current (60+ tools) | Proposed (~9 tools) |
 |--------|-------------------|-------------------|
-| **Tool count** | 60+ | ~7 + memory tools |
+| **Tool count** | 60+ | ~9 + memory tools |
 | **Token usage** (tool defs) | ~8,000-12,000 | ~2,000-4,000 (incl. schemas) |
 | **New HA service support** | Requires new code | Automatic (schema injection) |
 | **Parameter accuracy** | Hardcoded, may drift | Live from HA API |
@@ -1135,6 +1336,181 @@ Turn N+5: User says "What's happening this week?"
 | **pytest** | Test framework |
 | **pre-commit** | Secret scanning on commits |
 | **GitHub Actions** | CI: test + lint + secret check |
+
+---
+
+## 7. Architectural Risks & Open Questions
+
+Known risks, technical debt, and unresolved design decisions that should be addressed during implementation.
+
+### 7.1 Test Coverage (Critical -- Phase 0 Blocker)
+
+Overall coverage is **40%** (209 tests, 0 failing). The critical modules now have strong coverage:
+
+| Module | Risk Level | Coverage | Target | Status |
+|--------|-----------|----------|--------|--------|
+| `conversation.py` | **Critical** | **100%** | 60%+ | **DONE** -- 39 tests covering tool loop, confabulation guard, explainability, background tasks |
+| `context_builder.py` | **High** | **96%** | 60%+ | **DONE** -- 17 tests covering semantic search, fallback, core facts, presence/device/calendar integration |
+| `fact_extractor.py` | **High** | **100%** | 60%+ | **DONE** -- 25 tests covering JSON parsing, corrections, expiry, input validation, error handling |
+| `event_handler.py` | **Medium** | **84%** | 50%+ | **DONE** -- webhook processing, cooldowns, filtering, redundancy checks |
+
+**Phase 0 gate: PASSED.** The three critical modules now have regression tests protecting them. Phase 1 (Generic Tools) can safely proceed -- the tool dispatch loop in `conversation.py` and context assembly in `context_builder.py` are covered.
+
+### 7.2 Confabulation Surface in Generic Tools
+
+The current confabulation guard detects when the LLM claims it performed a device action without making tool calls. With generic tools, a new confabulation vector emerges: the LLM constructs a plausible-looking `do()` call with **invented parameters** that the HA API silently ignores.
+
+Example: `do("light", "turn_on", {"entity_id": "light.kitchen"}, {"mood": "romantic"})` -- HA ignores the unknown `mood` field, turns on the light at default settings, and the AI reports success. The user thinks "romantic mode" was applied.
+
+**Mitigations:**
+- **Schema-diff validation**: Before executing, `do()` should diff the requested `data` keys against the cached service schema for `{domain}.{service}`. Any key not present in the schema is flagged: "Warning: field 'mood' is not a known parameter for light.turn_on -- it will be ignored by HA." This catches hallucinated parameters before they reach the API.
+- **Post-action state diff**: After executing, compare the requested `data` values against the actual resulting state and flag discrepancies ("Requested brightness_pct=50 but light is at 100% -- the parameter may not have been applied"). This catches cases where valid-looking parameters are accepted but silently ignored.
+- **Audit trail**: Log every `do()` call with full request + response + state-before + state-after for post-incident review.
+
+### 7.3 Conversation Loop Token Budget
+
+The system prompt is rebuilt every turn and includes: persona, time context, 10 conversation turns, semantic facts (up to 20), presence summary, device summary, calendar, proactive hints, action trace, and (in the redesign) service schemas. This is a lot of context competing for a finite token window.
+
+**Current estimated per-turn context:**
+
+| Section | Est. Tokens |
+|---------|-------------|
+| Persona + rules | ~800 |
+| Time + presence + calendar | ~300 |
+| 10 conversation turns | ~1,500-3,000 |
+| Semantic facts (20 max) | ~600 |
+| Device summary | ~500-2,000 |
+| Service schemas (new) | ~2,000-4,000 |
+| Tool definitions (~9 tools) | ~600 |
+| **Total** | **~6,200-11,700** |
+
+With a 2,000-token `max_tokens` for the response, this fits within most model context windows but leaves limited room for long tool-calling loops (max 15 iterations, each adding tool call + result tokens). Monitor total token usage per turn and set alerts for when it approaches 80% of the model's context limit.
+
+**Recommended schema injection strategy: on-demand by default.**
+
+The 2,000-4,000 token estimate for service schemas assumes a moderate HA install. Real-world installs with 30+ integrations can push this to 8,000+ tokens, erasing the token savings that motivate the redesign. The recommended approach:
+
+1. **Inject only top-5 domain schemas** into every prompt (light, climate, cover, fan, switch -- the domains used in >80% of commands). This costs ~800-1,200 tokens.
+2. **On-demand for everything else.** The LLM calls `discover(what="services", filter="vacuum")` before calling `do()` for unfamiliar domains. One extra tool call per novel domain is a good trade for ~3,000 tokens saved per turn.
+3. **Measure on first boot.** Log the full schema token count at startup. If it exceeds `MAX_SCHEMA_TOKENS` (default: 1500), automatically fall back to on-demand mode for long-tail domains.
+4. **Cache aggressively.** Schemas change only on HA restart or config reload. Cache in memory and refresh on a 1-hour interval or `homeassistant.restart` event.
+
+### 7.4 SQLite Under Concurrent Load
+
+Both the conversation store and knowledge store use SQLite with `aiosqlite`. SQLite handles concurrent reads well but serializes writes. With webhooks, background fact extraction, and user conversations all writing simultaneously, write contention could cause latency spikes or `database is locked` errors under load.
+
+**Status: RESOLVED.** WAL mode and busy_timeout are now enabled on both stores:
+
+```python
+# Both conversation_store.py and knowledge_store.py initialize():
+await self._db.execute("PRAGMA journal_mode=WAL")
+await self._db.execute("PRAGMA busy_timeout=5000")
+```
+
+WAL allows concurrent reads during writes -- exactly the pattern Apex uses (context builder reads facts while fact extractor writes them). The 5-second busy_timeout lets SQLite retry internally before raising `database is locked` errors.
+
+**Further mitigations (if contention becomes measurable):**
+- Add a write queue or connection pool for serializing writes from multiple async tasks.
+- Monitor for `database is locked` errors in logs with a retry mechanism (exponential backoff, max 3 retries).
+
+### 7.5 Event Handler Storm Resistance
+
+The webhook cooldown (60s per entity:event_type) prevents basic reaction storms, but edge cases remain:
+
+- **Area-wide events**: A "goodnight" automation that changes 20 entities fires 20 webhooks in rapid succession, each for a different entity_id. The per-entity cooldown doesn't help because each entity is unique. This could trigger 20 simultaneous AI conversations.
+- **Cascading automations**: An AI-triggered action causes a state change, which fires a webhook, which triggers another AI response, creating a feedback loop.
+
+**Mitigations (all three recommended for Phase 1):**
+
+1. **Batch window (highest priority).** Buffer incoming webhooks for 2 seconds before processing. If multiple events arrive within the window, group them into a single AI prompt: "Multiple changes detected: kitchen light off, living room light off, bedroom light off." This converts 20 simultaneous AI calls into 1. Implementation: an `asyncio` debounce queue keyed on a global "batch slot" that flushes every 2 seconds.
+
+2. **Self-action filter.** Track every `do()` call with a timestamp and entity_id in a short-lived set (TTL: 10 seconds). When a webhook arrives, check if the entity was recently acted on by Apex itself. If so, suppress the webhook. This breaks the cascading automation feedback loop.
+
+3. **Global rate limit.** Cap webhook-triggered AI conversations at 5 per minute, regardless of entity. Events that exceed the limit are queued and batched into the next available slot. This is the safety net that catches anything the batch window and self-action filter miss.
+
+### 7.6 Phase Dependency Chain
+
+The ROADMAP phases are not independent -- each phase depends on the one before it being solid:
+
+```
+Phase 0 (Stabilize)
+  └──► Phase 1 (Generic Tools)     -- rewrites code that Phase 0 tests protect
+        └──► Phase 2 (Proactive)   -- needs generic do()/query() to act autonomously
+              └──► Phase 3 (Voice) -- proactive behavior drives most voice interactions
+                    └──► Phase 4 (Multi-User) -- voice ID feeds into per-user routing
+```
+
+**Risk:** The temptation to start Phase 1 before Phase 0 is complete, or to pull "easy" items from Phase 2/3 while Phase 1 is in progress. This creates technical debt that compounds: a half-finished Generic Tools layer makes Proactive Intelligence harder, not easier.
+
+**Mitigation:** Treat phase boundaries as hard gates. A phase is not complete until:
+1. All checklist items are checked in `ROADMAP.md`
+2. All tests pass (`pytest` green)
+3. Live HA validation confirms no regressions
+4. The architecture doc is updated to reflect what was actually built (not just what was planned)
+
+The one exception: **Phase 0 quick-wins that don't touch core modules** (e.g., enabling WAL mode, fixing the `notify.py` hardcoded target) can be done at any time since they carry no regression risk.
+
+**Status update:** Phase 0 is nearly complete. WAL mode is enabled, `notify.py` target is configurable, test coverage targets are exceeded, and the `test_settings_defaults` flake is fixed. The remaining Phase 0 item is the vacuum tool entity name dynamic resolution.
+
+### 7.7 Operational Risk: System-Level Access via manage() and configure()
+
+Giving the LLM system-level access to the HA instance (beyond device control) introduces a new class of risk: **operational disruption from hallucinated or misinterpreted system commands.**
+
+**Risk scenarios:**
+
+| Risk | Trigger | Impact |
+|------|---------|--------|
+| **Unintended HA update** | Hallucinated `manage("update", "core")` | Triggers a core update + restart at a bad time. HA goes offline, automations stop, voice control lost. If the update introduces breaking changes, recovery requires manual intervention. |
+| **Backup restore wipes state** | Hallucinated `manage("backup", "restore", config={"backup_id": "..."})` | Restores an old snapshot, destroying current state: entity customizations, recent automations, input helper values, and anything changed since the backup was taken. |
+| **Critical entity disabled** | Hallucinated `configure("disable", "binary_sensor.smoke_detector_kitchen")` | Disables a safety sensor. HA automations that depend on it (fire alerts, alarms) stop working silently. The user may not notice until an actual event occurs. |
+| **Device removal** | Hallucinated `configure("remove", device_id)` | Permanently removes a device and all its entities. Re-adding requires reconfiguration and may break automations that referenced those entities. |
+| **Add-on misconfiguration** | `manage("install", "addon:some_slug", config={...})` with wrong config | Installs or reconfigures an add-on with incorrect settings. Could expose ports, change network settings, or break other add-ons. |
+
+**Mitigations (all required for Phase 1):**
+
+1. **Tiered confirmation system.** Operations are classified into three tiers:
+
+   ```
+   Tier 0 (Safe -- no confirmation):
+     - backup/create, backup/list, health, logs
+     - rename, assign_area, enable, create_area, list_stale
+
+   Tier 1 (Disruptive -- confirmation required):
+     - update/core, update/os, update/addon, restart/core, restart/addon
+     - install/addon, disable, delete_area
+
+   Tier 2 (Destructive -- confirmation + summary of impact):
+     - backup/restore, backup/delete, remove (device)
+   ```
+
+   For Tier 1, `manage()`/`configure()` returns a confirmation prompt: "About to restart HA Core. This will cause ~30 seconds of downtime. Confirm?" The LLM relays this to the user and only executes on explicit "yes."
+
+   For Tier 2, the tool first performs a dry-run that shows the full impact: "Restoring backup 'daily_2026-02-17' will revert the system to Feb 17 state. Changes since then: 3 new automations, 12 entity customizations, 47 state changes. Proceed?" Only explicit user approval triggers execution.
+
+2. **Audit logging.** Every `manage()` and `configure()` call is logged to a dedicated audit table in SQLite:
+
+   ```
+   ┌───────────────────────────────────────────────────┐
+   │  system_audit_log table                            │
+   ├───────────────────────────────────────────────────┤
+   │  id          INTEGER PRIMARY KEY                   │
+   │  timestamp   TEXT (ISO 8601)                       │
+   │  tool        TEXT ("manage" | "configure")         │
+   │  action      TEXT                                  │
+   │  target      TEXT                                  │
+   │  config_json TEXT (serialized config/data)         │
+   │  result      TEXT ("confirmed" | "executed" |      │
+   │              "denied" | "error")                   │
+   │  session_id  TEXT (voice | chat | webhook)         │
+   │  user_approved BOOLEAN                             │
+   └───────────────────────────────────────────────────┘
+   ```
+
+   This provides a full audit trail for post-incident review ("what did Apex change on the system in the last 24 hours?").
+
+3. **Dry-run mode for configure().** All `configure()` operations support a `dry_run` flag (via `data={"dry_run": true}`) that returns what *would* change without applying it. The LLM should always call dry-run first for Tier 1+ operations and present the preview to the user.
+
+4. **Session-based escalation.** Webhook-triggered sessions (`session_id="apex_events"`) are restricted to Tier 0 operations only. The rationale: a state-change event should never autonomously trigger a system update or entity disable. Only direct user conversations (voice or chat) can escalate to Tier 1 and Tier 2.
 
 ---
 

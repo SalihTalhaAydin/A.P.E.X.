@@ -66,6 +66,8 @@ class KnowledgeStore:
         self._db = await aiosqlite.connect(
             self.db_path
         )
+        await self._db.execute("PRAGMA journal_mode=WAL")
+        await self._db.execute("PRAGMA busy_timeout=5000")
 
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS facts (

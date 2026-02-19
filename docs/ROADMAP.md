@@ -9,10 +9,11 @@
 
 Critical fixes and test coverage gaps that must be resolved before any new feature work.
 
-- [ ] Fix failing test: `test_settings_defaults` model default mismatch (`config.py` defaults to `gpt-4o`, test expects `claude-sonnet-4`)
-- [ ] Fix hardcoded phone notification target (`mobile_app_salih_iphone` in `notify.py`) -- should be configurable via settings or auto-discovered from HA
-- [ ] Sync `config.yaml` default model with `config.py` default so add-on config and code agree on the out-of-the-box model
-- [ ] Bump test coverage to 50%+ on critical paths (`conversation.py`, `context_builder.py`, `fact_extractor.py`)
+- [x] Fix failing test: `test_settings_defaults` -- root cause was shell env var `LITELLM_MODEL=gpt-4o` leaking into test; fixed with `monkeypatch.delenv`. Config defaults were already aligned at `claude-sonnet-4-20250514`.
+- [x] Fix hardcoded phone notification target (`mobile_app_salih_iphone` in `notify.py`) -- now configurable via `PHONE_NOTIFY_TARGET` env var / `settings.phone_notify_target`
+- [x] Sync `config.yaml` default model with `config.py` default -- already aligned at `claude-sonnet-4-20250514` (no change needed)
+- [x] Bump test coverage to 50%+ on critical paths -- `conversation.py` 100%, `context_builder.py` 96%, `fact_extractor.py` 100% (209 tests, 0 failing)
+- [x] Enable WAL mode + busy_timeout on both SQLite stores (`conversation_store.py`, `knowledge_store.py`)
 - [ ] Vacuum tool: read entity names from HA dynamically; fix context/name confusion when vacuums are renamed or re-paired
 
 ---
@@ -28,6 +29,24 @@ The most important architectural change. Replace 40+ hardcoded tools with ~5 gen
 - [ ] Keep old tools as deprecated aliases during migration (backward compat -- old tool names forward to new generic tools)
 - [ ] Update all tests for new tool architecture
 - [ ] End-to-end integration tests (call `do()` / `query()` / `discover()` against a live HA instance and verify results)
+- [ ] Implement `manage()` — Supervisor API operations: backups (create/list/restore/delete), add-on lifecycle (install/update/restart/configure), system updates (core/OS), health checks (CPU/memory/disk)
+- [ ] Implement `configure()` — Registry operations via WebSocket API: entity rename, area CRUD (create/rename/delete rooms), device-to-area assignment, disable/enable entities, stale entity cleanup
+- [ ] WebSocket API helper — transient WS connections for config/registry operations (entity_registry, device_registry, area_registry, config_entries)
+- [ ] Tiered confirmation system — safe operations (query, backup create, health check) run freely; destructive operations (update, restore, disable, delete) require explicit user confirmation before executing
+- [ ] Audit logging for all `manage()` and `configure()` calls — timestamp, action, target, result, originating session
+
+---
+
+## Phase 1.5: System Intelligence
+
+Apex becomes the caretaker of the Home Assistant instance — not just a device controller, but a system manager that organizes, maintains, and heals the environment it lives in.
+
+- [ ] Automated backup scheduling — Apex tracks when the last backup was taken and creates one if overdue (configurable interval, default: 3 days)
+- [ ] Update advisor — Apex checks for available updates (core, OS, add-ons) and recommends them with a summary of what's new; applies on user approval
+- [ ] Entity housekeeping — periodic scan for: entities with no area assigned, entities stuck in "unavailable" for 7+ days, duplicate entities from re-paired devices, automations that haven't triggered in 90+ days
+- [ ] Integration health monitoring — check integration diagnostics, detect degraded or failing integrations, report with actionable recommendations
+- [ ] Self-healing — for known-fixable issues (e.g., Zigbee network heal, MQTT broker reconnect, integration reload), attempt automatic repair before alerting the user
+- [ ] System dashboard context — inject HA system health (CPU/memory/disk, uptime, update status) into Apex's context so it can proactively mention issues ("Sir, disk usage is at 85% — shall I clean up old backups?")
 
 ---
 
@@ -127,4 +146,4 @@ Shipped milestones for historical reference.
 
 ---
 
-*Last updated: 2026-02-18*
+*Last updated: 2026-02-18 (expanded Phase 1 with ops/management tools — manage(), configure(), WebSocket helper, tiered confirmation, audit logging; added Phase 1.5: System Intelligence — Apex as full sysadmin/caretaker of the HA instance)*

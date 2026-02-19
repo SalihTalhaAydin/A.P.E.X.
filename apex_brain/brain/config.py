@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     announce_on_events: bool = True
     announce_target: str = "alexa_all"
 
+    # Phone notification target (mobile_app entity name)
+    phone_notify_target: str = "mobile_app_salih_iphone"
+
     # Server
     port: int = 8080
 

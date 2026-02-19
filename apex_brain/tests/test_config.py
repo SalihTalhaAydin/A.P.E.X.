@@ -3,8 +3,14 @@
 from brain.config import Settings
 
 
-def test_settings_defaults():
+def test_settings_defaults(monkeypatch):
     """Settings have expected default values (isolated from .env)."""
+    # Clear env vars that may override defaults (shell, direnv, etc.)
+    for key in (
+        "LITELLM_MODEL", "EMBEDDING_MODEL", "RECENT_TURNS",
+        "MAX_FACTS_IN_CONTEXT", "PORT",
+    ):
+        monkeypatch.delenv(key, raising=False)
     s = Settings(_env_file=None)
     assert s.litellm_model == "claude-sonnet-4-20250514"
     assert s.embedding_model == "text-embedding-3-small"

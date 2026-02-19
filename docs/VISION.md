@@ -8,6 +8,8 @@ Not a chatbot. Not a voice remote control. Not another "hey assistant, turn off 
 
 The goal is 100% AI capability over the home. No artificial restrictions. No hardcoded limits. Full autonomy. If Home Assistant can do it, Apex can do it -- and it should figure out *when* to do it without being asked.
 
+But controlling devices is only half the picture. Apex is also the **sysadmin and caretaker of the Home Assistant instance itself**. The analogy is Claude Code: Claude Code does not just write code -- it has full access to the IDE, the terminal, the filesystem, git, the web. It manages the entire development environment. Apex occupies the same role for Home Assistant. It has access to the Core API, the Supervisor API, and the WebSocket API. It manages backups, runs updates, organizes devices, monitors integration health, diagnoses network issues, and keeps the system clean and healthy. The home is the product; Home Assistant is the infrastructure. Apex manages both.
+
 ---
 
 ## Core Principles
@@ -20,15 +22,19 @@ Jarvis speaks first when it matters. A truly intelligent assistant does not wait
 
 No hardcoded tool list should define the boundaries of what Apex can do. The AI must be able to call **any** Home Assistant service dynamically -- lights, locks, climate, media, cameras, custom integrations, third-party services. If a new device appears on the network tomorrow, Apex should be able to control it tomorrow. The architecture must treat capability as unbounded.
 
-### 3. Persistent Memory
+### 3. Full System Access
+
+Apex does not just control devices *through* Home Assistant -- it manages Home Assistant *itself*. This is the distinction between a smart home controller and a smart home caretaker. A controller turns on lights. A caretaker turns on lights, keeps the system updated, backs up the configuration before changes, monitors integration health, reorganizes cluttered device registries, detects failing Zigbee routes, cleans up orphaned entities, and ensures the infrastructure is as well-maintained as the experience it delivers. Apex has access to the Core API, the Supervisor API, and the WebSocket API. It uses all three. If a human sysadmin would do it through the HA UI or CLI, Apex should be able to do it programmatically.
+
+### 4. Persistent Memory
 
 Apex remembers. Not just within a conversation, but across days, weeks, and months. It knows your preferred wake-up temperature, that you hate overhead lights in the evening, that Thursday is trash night, and that your partner prefers the thermostat two degrees warmer. Memory is what transforms a stateless tool into something that feels like it genuinely knows you.
 
-### 4. Natural Interaction
+### 5. Natural Interaction
 
 Voice-first, conversational, personality-driven. Apex should feel like talking to someone, not issuing commands to a machine. It has a consistent persona. It uses natural language. It can handle ambiguity, follow-up questions, and context shifts the way a human would. The interaction model is dialogue, not syntax.
 
-### 5. Privacy-First
+### 6. Privacy-First
 
 All core processing can run locally. Speech-to-text, text-to-speech, wake word detection, and inference can all be handled on-premises. Cloud services are optional enhancements, never requirements. Your home intelligence should not depend on someone else's servers, and your conversations should not leave your network unless you choose otherwise.
 
@@ -48,10 +54,11 @@ This scorecard defines what "Jarvis-level" means in concrete, measurable terms. 
 | Voice Pipeline | 3 / 10 | 9 / 10 | Full Wyoming protocol integration, local STT/TTS, wake word, speaker zones |
 | Scheduled Actions | 2 / 10 | 9 / 10 | Natural-language reminders, timed actions, recurring tasks, countdown timers |
 | Multi-User Support | 3 / 10 | 8 / 10 | Per-person fact stores, voice identification, personalized responses and preferences |
-| Test Coverage | 34% | 80% | Integration tests, HA API mocking, end-to-end conversation tests |
+| System Management | 0 / 10 | 9 / 10 | Backups, updates, device organization, integration health monitoring, diagnostics, self-healing |
+| Test Coverage | 40% (209 tests) | 80% | Integration tests, HA API mocking, end-to-end conversation tests |
 | **Overall Jarvis Score** | **7.5 / 10** | **9.5 / 10** | |
 
-The overall score is not an average. It is a holistic assessment of how close the system feels to a real Jarvis experience. A perfect 10 in memory means nothing if the assistant never speaks unless spoken to. The categories are interdependent -- proactive behavior requires context awareness, which requires memory, which requires multi-user support to be truly personal.
+The overall score is not an average. It is a holistic assessment of how close the system feels to a real Jarvis experience. A perfect 10 in memory means nothing if the assistant never speaks unless spoken to. The categories are interdependent -- proactive behavior requires context awareness, which requires memory, which requires multi-user support to be truly personal. System management is a new dimension: a true Jarvis does not just operate within the house, it maintains the house. The infrastructure should be as invisible and well-kept as the experience it enables.
 
 ---
 
@@ -66,8 +73,9 @@ Apex Brain today is a working, deployed system with real capability:
 - **Dynamic system prompt**: Rebuilt every turn with current entity states, user facts, time context, and conversation history
 - **Anti-confabulation detection**: Validates claims against actual HA state to prevent hallucinated device status
 - **OpenAI-compatible API**: Drop-in replacement endpoint enabling native integration with Home Assistant voice pipelines
+- **Supervisor API access**: `SUPERVISOR_TOKEN` is injected automatically by the HA Supervisor at runtime, granting full access to add-on management, host operations, snapshots, updates, and system health endpoints. This access is available but not yet utilized -- no system management tools have been built against it.
 
-The foundation is solid. The architecture is right. What remains is filling the gaps identified in the Jarvis Standard -- primarily proactive behavior, voice pipeline, scheduled actions, and multi-user support.
+The foundation is solid. The architecture is right. What remains is filling the gaps identified in the Jarvis Standard -- primarily proactive behavior, voice pipeline, scheduled actions, multi-user support, and the entirely new system management dimension.
 
 ---
 
@@ -86,6 +94,12 @@ These are not hypothetical features. These are the concrete scenarios that defin
 **Multi-room presence.** "Play my dinner playlist" works because Apex knows which room you are in, which speakers are in that room, and what your dinner playlist is. No room name required. No service name required. Context handles it.
 
 **Family recognition.** Your partner says "turn the lights to my reading mode." Apex recognizes a different voice, retrieves that person's preferences, and sets the lights accordingly -- different from what it would do for you.
+
+**Housekeeping.** Over six months, 40 new entities have appeared from various integrations. Half are unnamed, some are duplicates, a dozen have no area assignment. Apex notices the mess during a routine audit. It groups entities by device, proposes area assignments based on naming patterns and existing groupings, flags likely duplicates, and presents a cleanup plan: "Sir, I have identified 14 entities with no area assignment, 6 probable duplicates, and 3 devices that appear to be offline permanently. I can organize these now, or walk you through the changes first." You say "do it." The device registry is clean in thirty seconds.
+
+**Self-maintenance.** A new Home Assistant release is available. Apex does not blindly update. It creates a full backup first, checks the release notes for breaking changes against your installed integrations, waits for a low-activity window (3am, no motion detected, no active media), applies the update, waits for the system to restart, runs a health check against all critical integrations, and verifies that key automations still trigger correctly. If anything fails, it rolls back to the backup and reports what went wrong. You wake up to a fully updated, fully functional system -- or a clear explanation of why the update was deferred.
+
+**Diagnostics.** Your Zigbee network has been degrading for a week. Three devices are intermittently unavailable. Apex correlates the timing, identifies that a specific router device went offline five days ago and the affected devices were all routed through it, and reports: "Sir, your Zigbee mesh has a routing gap. The IKEA repeater in the hallway has been offline since Tuesday, and three devices that depended on it are now unreliable. I recommend power-cycling the repeater. If that does not resolve it, I can re-pair the affected devices through an alternate route." It does not just report "entity unavailable" -- it diagnoses the root cause and offers a concrete fix.
 
 ---
 

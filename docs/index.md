@@ -8,6 +8,9 @@ Apex Brain is a personal AI assistant that runs as a Home Assistant add-on. It h
 
 ## Documentation
 
+!!! tip "New here?"
+    Start with [VISION](VISION.md) for the big picture, then [WORKFLOW](WORKFLOW.md) for how we develop.
+
 | | |
 |---|---|
 | [Vision](VISION.md) | What we're building and why. The Jarvis Standard scorecard. |
@@ -35,20 +38,22 @@ Apex Brain is a personal AI assistant that runs as a Home Assistant add-on. It h
 
 ## Quick Start
 
-```bash
-# Local development
-cd apex_brain
-pip install -r requirements.txt
-cp ../.env.example .env
-python -m brain.server
-```
+!!! note "Local development"
+    ```bash
+    cd apex_brain
+    pip install -r requirements.txt
+    cp ../.env.example .env
+    python -m brain.server
+    ```
 
-```bash
-# View these docs locally (or: ./scripts/serve-docs.sh)
-pip install -r requirements-docs.txt   # Zensical — Material team's MkDocs successor
-zensical serve
-# Open http://127.0.0.1:8000
-```
+!!! note "View these docs locally"
+    Run `./scripts/serve-docs.sh` or:
+
+    ```bash
+    pip install -r requirements-docs.txt   # Zensical — Material team's MkDocs successor
+    zensical serve
+    # Open http://127.0.0.1:8000
+    ```
 
 ---
 

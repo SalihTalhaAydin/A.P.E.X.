@@ -12,6 +12,9 @@ scripts/broadlink_import/jsonSubIr
 scripts/broadlink_import/jsonButton
 scripts/broadlink_import/jsonIrCode
 
+# MkDocs / Zensical build output (regenerate with mkdocs build or zensical build)
+site/
+
 # Python
 __pycache__/
 *.py[cod]

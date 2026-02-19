@@ -13,6 +13,7 @@ import logging
 
 import httpx
 
+from brain.config import settings
 from tools.base import tool
 from tools.ha_helpers import format_ha_error, ha_request
 
@@ -138,7 +139,7 @@ async def announce(
         if target == "phone":
             await ha_request(
                 "POST",
-                "/services/notify/mobile_app_salih_iphone",
+                f"/services/notify/{settings.phone_notify_target}",
                 json_data={"message": message},
             )
             return f"Phone notification sent: \"{message}\""
