@@ -144,12 +144,14 @@ Agents 1-4 launch simultaneously. Agents 2-4 use Agent 1's findings if needed (E
 
 ## Starting a New Session
 
+> **Project status (as of 2026-02-18):** ROADMAP Phase 0 and Phase 1 are complete. The test suite contains 423 tests. See `docs/ROADMAP.md` for current priorities.
+
 When a new AI session begins working on this project, follow this exact sequence:
 
 1. **Read `docs/VISION.md`** -- understand what we are building and why. The Jarvis standard defines the quality bar.
 2. **Read `docs/ROADMAP.md`** -- see the prioritized backlog and find what is next.
 3. **Read `docs/ARCHITECTURE.md`** -- understand the system structure, data flow, and design decisions.
-4. **Run `pytest apex_brain/tests/ -v`** -- verify the current state of the codebase. If tests fail, fixing them is the first priority.
+4. **Run `pytest apex_brain/tests/ -v`** -- verify the current state of the codebase (expect 423+ tests). If tests fail, fixing them is the first priority.
 5. **Pick the next unchecked item from ROADMAP.md** -- this is your task for the session.
 6. **Follow the 3-phase cycle** -- Evaluate, Implement, Validate. No shortcuts.
 

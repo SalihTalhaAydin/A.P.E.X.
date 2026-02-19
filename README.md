@@ -6,12 +6,21 @@
 
 Personal AI assistant with persistent memory, smart home control, and semantic knowledge. Runs as a Home Assistant **App** (formerly "add-on") on a dedicated HAOS mini PC.
 
+## Key Capabilities
+
+- **Generic tool architecture** (Phase 1 complete) — 6 primary tools (`do()`, `query()`, `discover()`, `history()`, `manage()`, `configure()`) replace 35+ domain-specific tools. Legacy wrappers remain for backward compatibility.
+- **Service schema injection** — HA service documentation is auto-cached and injected into tool descriptions so the LLM knows exact parameter schemas.
+- **Tiered confirmation** — system-altering operations (restarts, updates, device removal) require explicit user confirmation before execution.
+- **Audit logging** — all administrative and sensitive actions are recorded to a persistent audit log.
+- **Persistent memory** — facts extracted from conversations are stored with embeddings for semantic recall.
+- **Model-agnostic** — swap between OpenAI, Anthropic, Google, or any LiteLLM-supported provider.
+
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
 | [VISION.md](docs/VISION.md) | Product vision, Jarvis Standard scorecard, what success looks like |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture, data flows, proposed Generic Tools redesign |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture, data flows, Generic Tools design |
 | [ROADMAP.md](docs/ROADMAP.md) | Prioritized backlog — Phase 0 through Phase 5 + unscheduled ideas |
 | [WORKFLOW.md](docs/WORKFLOW.md) | 3-phase development process: Evaluate → Implement → Validate |
 | [VOICE_PIPELINE.md](docs/VOICE_PIPELINE.md) | Voice pipeline research — hardware, STT/TTS options, latency, costs |
@@ -127,18 +136,22 @@ APEX/                           # Git root (github.com/SalihTalhaAydin/A.P.E.X.)
     │   ├── server.py           # /v1/chat/completions, /api/chat, /health
     │   ├── conversation.py     # Orchestrator with tool-calling loop
     │   ├── config.py           # Pydantic Settings (env vars + .env)
-    │   └── system_prompt.py    # Dynamic prompt with injected context
+    │   └── system_prompt.py    # Dynamic prompt with injected HA service schemas
     ├── memory/                 # Persistent memory system
     │   ├── conversation_store.py  # SQLite conversation history
     │   ├── knowledge_store.py     # Facts + embeddings + cosine similarity
     │   ├── fact_extractor.py      # Background fact extraction (gpt-4o-mini)
+    │   ├── audit_store.py         # Persistent audit log for admin actions
     │   └── context_builder.py     # Assembles context per turn
     └── tools/                  # Auto-discovered tool modules
         ├── base.py             # @tool decorator + registry
-        ├── smart_home.py       # HA entity control
+        ├── generic.py          # 4 universal HA tools: do(), query(), discover(), history()
+        ├── manage.py           # Supervisor API: backups, updates, restarts (tiered confirmation)
+        ├── configure.py        # Entity/device/area registry management via WebSocket
+        ├── smart_home.py       # Legacy entity control (backward-compatible wrapper)
         ├── knowledge.py        # remember/recall/forget
         ├── datetime_tool.py    # Current time
-        └── calendar_tool.py    # Stub (Google Calendar, future)
+        └── ...                 # + legacy domain wrappers, helpers, calendar stub
 ```
 
 ## Adding New Tools

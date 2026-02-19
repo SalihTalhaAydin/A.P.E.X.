@@ -7,6 +7,17 @@ Rebuilt for every conversation turn with live context
 from __future__ import annotations
 
 import datetime as _dt
+import logging
+import time
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Service schema cache (refreshed every hour)
+# ---------------------------------------------------------------------------
+_schema_cache: dict = {"schemas": "", "timestamp": 0.0}
+_SCHEMA_REFRESH_SECONDS = 3600  # 1 hour
+_TOP_DOMAINS = ("light", "climate", "cover", "fan", "switch")
 
 SYSTEM_PROMPT_TEMPLATE = """\
 You are Apex, a personal AI assistant integrated into \
@@ -41,7 +52,11 @@ You never overdo it — subtlety is key.
 
 {context_block}
 
-SMART HOME (you have full control):
+IMPORTANT: Prefer the generic tools (do, query, discover, history, manage, configure) \
+over the legacy per-device tools listed below. The legacy tools still work but the generic \
+tools are more capable and flexible.
+
+LEGACY SMART HOME TOOLS (still functional, prefer generic tools above):
 - Use control_light for lights (brightness, color, color temperature). \
 To set brightness, always provide brightness_pct.
 - Use control_climate for thermostats (temperature, HVAC mode, presets).
@@ -65,6 +80,7 @@ announce(message, target="alexa_all") for all Alexa devices (default).
 Use list_entities(domain="todo") to discover available lists. \
 Always view the list first before modifying.
 {devices_block}
+{service_schemas_block}\
 - Use query_sensors for temperature, humidity, battery, power, or motion \
 questions. Filter by sensor_type or area (room name).
 - Use list_automations to see HA automations and their on/off status. \
@@ -218,6 +234,93 @@ def _build_time_context(now: _dt.datetime) -> dict:
     }
 
 
+async def fetch_service_schemas() -> str:
+    """Fetch and cache top-domain service schemas for prompt injection.
+
+    Returns a compact string describing the services available in the
+    top-5 domains (light, climate, cover, fan, switch).  The result
+    is cached in memory and refreshed every hour.  On any error the
+    function returns an empty string (graceful degradation).
+    """
+    global _schema_cache
+
+    now = time.monotonic()
+    if (
+        _schema_cache["schemas"]
+        and (now - _schema_cache["timestamp"])
+        < _SCHEMA_REFRESH_SECONDS
+    ):
+        return _schema_cache["schemas"]
+
+    try:
+        from tools.ha_helpers import ha_request
+        from tools.generic import _selector_to_type
+
+        services_raw = await ha_request("GET", "/services")
+        if not isinstance(services_raw, list):
+            return _schema_cache.get("schemas", "")
+
+        # Build a lookup: domain -> services dict
+        domain_map: dict = {}
+        for entry in services_raw:
+            domain_map[entry.get("domain", "")] = entry.get(
+                "services", {}
+            )
+
+        lines: list[str] = []
+        for domain in _TOP_DOMAINS:
+            svc_dict = domain_map.get(domain)
+            if not svc_dict:
+                continue
+            lines.append(f"## {domain}")
+            for svc_name, svc_info in svc_dict.items():
+                fields = svc_info.get("fields", {})
+                # Build compact field list
+                parts: list[str] = []
+                for fname, finfo in fields.items():
+                    selector = finfo.get("selector", {})
+                    type_str = (
+                        _selector_to_type(selector)
+                        if selector
+                        else "any"
+                    )
+                    parts.append(f"{fname}({type_str})")
+                field_str = (
+                    ", ".join(parts) if parts else ""
+                )
+                lines.append(
+                    f"- {domain}.{svc_name}: {field_str}"
+                )
+
+        schema_text = "\n".join(lines)
+
+        # Measure approximate token count and log it
+        token_estimate = len(schema_text) // 4
+        logger.info(
+            "Service schemas refreshed: %d domains, "
+            "~%d tokens",
+            len(
+                [
+                    d
+                    for d in _TOP_DOMAINS
+                    if d in domain_map
+                ]
+            ),
+            token_estimate,
+        )
+
+        _schema_cache["schemas"] = schema_text
+        _schema_cache["timestamp"] = now
+        return schema_text
+
+    except Exception:
+        logger.warning(
+            "Failed to fetch service schemas",
+            exc_info=True,
+        )
+        return _schema_cache.get("schemas", "")
+
+
 def _build_proactive_hints(
     time_ctx: dict | None = None,
     presence: str = "",
@@ -312,6 +415,7 @@ def build_system_prompt(
     presence_summary: str = "",
     time_context: dict | None = None,
     device_summary: str = "",
+    service_schemas: str = "",
 ) -> str:
     """Build the full system prompt with injected context."""
     sections = []
@@ -369,8 +473,19 @@ def build_system_prompt(
             f"{device_summary}"
         )
 
+    # Build the service schemas block for the prompt
+    service_schemas_block = ""
+    if service_schemas:
+        service_schemas_block = (
+            "\nSERVICE SCHEMAS (top domains — use "
+            "discover(what='services', filter='domain') "
+            "for others):\n"
+            f"{service_schemas}\n"
+        )
+
     return SYSTEM_PROMPT_TEMPLATE.format(
         context_block=context_block,
         proactive_block=proactive_block,
         devices_block=devices_block,
+        service_schemas_block=service_schemas_block,
     )

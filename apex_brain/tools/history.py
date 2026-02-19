@@ -1,13 +1,16 @@
 """
 History & Logbook tools for Home Assistant.
 Query past state changes and event logs.
+
+DEPRECATED: These tools are thin wrappers that delegate to the generic
+history() tool in tools.generic. Use history() directly for new code.
 """
 from __future__ import annotations
 
 import logging
 
 from tools.base import tool
-from tools.ha_helpers import ha_request
+from tools.generic import history
 
 logger = logging.getLogger(__name__)
 
@@ -44,50 +47,13 @@ logger = logging.getLogger(__name__)
 )
 async def get_history(entity_id: str, hours_back: int = 24) -> str:
     """Get state history for an entity."""
+    logger.warning(
+        "DEPRECATED: %s() called — use %s() instead",
+        "get_history", "history",
+    )
     try:
-        from datetime import datetime, timedelta, timezone
-
         hours = max(1, min(168, hours_back))
-        start = datetime.now(timezone.utc) - timedelta(hours=hours)
-        start_iso = start.strftime("%Y-%m-%dT%H:%M:%S+00:00")
-
-        result = await ha_request(
-            "GET",
-            f"/history/period/{start_iso}"
-            f"?filter_entity_id={entity_id}"
-            "&minimal_response&no_attributes",
-        )
-
-        if not result or not isinstance(result, list):
-            return f"No history found for {entity_id}."
-
-        entries = result[0] if result else []
-        if not entries:
-            return (
-                f"No state changes for {entity_id} "
-                f"in the last {hours} hours."
-            )
-
-        _MAX_ENTRIES = 50
-        lines = []
-        for entry in entries[-_MAX_ENTRIES:]:
-            state = entry.get("state", "?")
-            last_changed = entry.get("last_changed", "")
-            # Trim to readable format
-            if "T" in last_changed:
-                ts = last_changed.split(".")[0].replace("T", " ")
-            else:
-                ts = last_changed
-            lines.append(f"  {ts}: {state}")
-
-        total = len(entries)
-        header = (
-            f"History for {entity_id} (last {hours}h, {total} changes):"
-        )
-        if total > _MAX_ENTRIES:
-            header += f" (showing last {_MAX_ENTRIES})"
-
-        return header + "\n" + "\n".join(lines)
+        return await history(entity_id, hours, "changes")
     except Exception as e:
         return f"Error getting history: {e}"
 
@@ -119,46 +85,12 @@ async def get_history(entity_id: str, hours_back: int = 24) -> str:
 )
 async def get_logbook(entity_id: str = "", hours_back: int = 12) -> str:
     """Get logbook events."""
+    logger.warning(
+        "DEPRECATED: %s() called — use %s() instead",
+        "get_logbook", "history",
+    )
     try:
-        from datetime import datetime, timedelta, timezone
-
         hours = max(1, min(72, hours_back))
-        start = datetime.now(timezone.utc) - timedelta(hours=hours)
-        start_iso = start.strftime("%Y-%m-%dT%H:%M:%S+00:00")
-
-        path = f"/logbook/{start_iso}"
-        if entity_id:
-            path += f"?entity={entity_id}"
-
-        result = await ha_request("GET", path)
-
-        if not result or not isinstance(result, list):
-            return "No logbook entries found."
-
-        _MAX_ENTRIES = 40
-        lines = []
-        for entry in result[-_MAX_ENTRIES:]:
-            name = entry.get("name", "?")
-            message = entry.get("message", "")
-            when = entry.get("when", "")
-            if "T" in when:
-                ts = when.split(".")[0].replace("T", " ")
-            else:
-                ts = when
-            eid = entry.get("entity_id", "")
-
-            line = f"  {ts} | {name}"
-            if message:
-                line += f" {message}"
-            if eid:
-                line += f" ({eid})"
-            lines.append(line)
-
-        total = len(result)
-        header = f"Logbook (last {hours}h, {total} events):"
-        if total > _MAX_ENTRIES:
-            header += f" (showing last {_MAX_ENTRIES})"
-
-        return header + "\n" + "\n".join(lines)
+        return await history(entity_id, hours, "logbook")
     except Exception as e:
         return f"Error getting logbook: {e}"

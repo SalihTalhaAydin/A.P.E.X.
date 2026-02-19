@@ -3,15 +3,21 @@ Security tools for Home Assistant alarm panels and cameras.
 - control_alarm: arm/disarm alarm control panels with optional PIN code.
 - get_camera_snapshot: returns the HA proxy URL for a camera snapshot.
 - get_camera_state: returns camera recording/streaming state.
+
+DEPRECATED: control_alarm is a thin wrapper that delegates to the generic
+do() tool in tools.generic. Use do() directly for new code.
+Camera tools are kept as-is (no generic equivalent).
 """
 
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from tools.base import tool
+from tools.generic import do
 from tools.ha_helpers import (
-    call_ha_service,
     format_ha_error,
     friendly_name,
     read_state,
@@ -19,37 +25,7 @@ from tools.ha_helpers import (
 
 from brain.config import settings
 
-
-# --------------------------------------------------
-# Alarm panel helpers
-# --------------------------------------------------
-
-
-async def _verify_alarm(entity_id: str) -> str:
-    """Read back an alarm panel's state."""
-    try:
-        state = await read_state(entity_id)
-        attrs = state.get("attributes", {})
-        fn = attrs.get(
-            "friendly_name", friendly_name(entity_id)
-        )
-        current = state.get("state", "unknown")
-        parts = [f"{fn}: {current}"]
-        if current == "triggered":
-            parts.append("(ALARM TRIGGERED!)")
-        if (
-            "changed_by" in attrs
-            and attrs["changed_by"] is not None
-        ):
-            parts.append(
-                f"changed by: {attrs['changed_by']}"
-            )
-        return ", ".join(parts)
-    except Exception:
-        return (
-            f"{friendly_name(entity_id)}: "
-            "(state unconfirmed)"
-        )
+logger = logging.getLogger(__name__)
 
 
 # --------------------------------------------------
@@ -106,6 +82,10 @@ async def control_alarm(
     code: str | None = None,
 ) -> str:
     """Control an alarm control panel."""
+    logger.warning(
+        "DEPRECATED: %s() called — use %s() instead",
+        "control_alarm", "do",
+    )
     try:
         svc_map = {
             "arm_home": "alarm_arm_home",
@@ -118,30 +98,19 @@ async def control_alarm(
         if not service:
             return f"Unknown alarm action: {action}"
 
-        data: dict = {}
-        if code is not None:
-            data["code"] = code
-
-        await call_ha_service(
+        return await do(
             "alarm_control_panel",
             service,
-            entity_id,
-            data or None,
+            {"entity_id": entity_id},
+            {"code": code} if code else None,
         )
 
-        status = await _verify_alarm(entity_id)
-        return f"Done. {status}"
-
-    except httpx.HTTPStatusError as e:
-        return format_ha_error(
-            entity_id, "alarm_control_panel", e
-        )
     except Exception as e:
         return f"Error controlling alarm: {e}"
 
 
 # --------------------------------------------------
-# Camera tools
+# Camera tools (kept as-is, no generic equivalent)
 # --------------------------------------------------
 
 

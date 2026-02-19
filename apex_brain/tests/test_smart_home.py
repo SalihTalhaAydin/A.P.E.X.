@@ -78,23 +78,24 @@ _AREA_TEMPLATE_RESPONSE = (
 
 @pytest.mark.asyncio
 async def test_control_area_resolves_area_and_calls_service():
-    """control_area resolves area name to area_id and calls service."""
-    # ha_request is called twice:
-    #   1st call: POST /template -> returns area list string
-    #   2nd call: POST /services/light/turn_on -> returns {}
-    call_responses = [_AREA_TEMPLATE_RESPONSE, {}]
-    call_index = 0
+    """control_area resolves area name to area_id and calls do()."""
 
-    async def mock_ha_request(method, path, json_data=None, **kwargs):
-        nonlocal call_index
-        resp = call_responses[call_index]
-        call_index += 1
-        return resp
+    async def mock_template_request(method, path, json_data=None, **kwargs):
+        return _AREA_TEMPLATE_RESPONSE
 
     with patch(
         "tools.smart_home.ha_request",
-        side_effect=mock_ha_request,
+        side_effect=mock_template_request,
+    ), patch(
+        "tools.generic.ha_request", new_callable=AsyncMock,
+    ) as mock_do_ha, patch(
+        "tools.generic.verify_generic", new_callable=AsyncMock,
+    ) as mock_verify, patch(
+        "tools.generic.asyncio.sleep", new_callable=AsyncMock,
     ):
+        mock_do_ha.return_value = []
+        mock_verify.return_value = "Kitchen lights: on"
+
         from tools.smart_home import control_area
 
         result = await control_area(
@@ -105,8 +106,8 @@ async def test_control_area_resolves_area_and_calls_service():
 
     assert "kitchen" in result.lower() or "Kitchen" in result
     assert "done" in result.lower()
-    # call_index must be 2 (template + service call)
-    assert call_index == 2
+    # do() must have been called (which calls ha_request)
+    mock_do_ha.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -114,16 +115,24 @@ async def test_control_area_uses_area_id_not_entity_id():
     """The service call payload must contain area_id, not entity_id."""
     captured_payload = {}
 
-    async def mock_ha_request(method, path, json_data=None, **kwargs):
-        if path == "/template":
-            return _AREA_TEMPLATE_RESPONSE
-        # Capture the service call payload
+    async def mock_template_request(method, path, json_data=None, **kwargs):
+        return _AREA_TEMPLATE_RESPONSE
+
+    async def mock_do_ha(method, path, json_data=None, **kwargs):
         captured_payload.update(json_data or {})
-        return {}
+        return []
 
     with patch(
         "tools.smart_home.ha_request",
-        side_effect=mock_ha_request,
+        side_effect=mock_template_request,
+    ), patch(
+        "tools.generic.ha_request",
+        side_effect=mock_do_ha,
+    ), patch(
+        "tools.generic.verify_generic", new_callable=AsyncMock,
+        return_value="Basement lights: on",
+    ), patch(
+        "tools.generic.asyncio.sleep", new_callable=AsyncMock,
     ):
         from tools.smart_home import control_area
 
@@ -145,15 +154,24 @@ async def test_control_area_passes_brightness_and_color_temp():
     """brightness_pct and color_temp_kelvin are forwarded in turn_on payload."""
     captured_payload = {}
 
-    async def mock_ha_request(method, path, json_data=None, **kwargs):
-        if path == "/template":
-            return _AREA_TEMPLATE_RESPONSE
+    async def mock_template_request(method, path, json_data=None, **kwargs):
+        return _AREA_TEMPLATE_RESPONSE
+
+    async def mock_do_ha(method, path, json_data=None, **kwargs):
         captured_payload.update(json_data or {})
-        return {}
+        return []
 
     with patch(
         "tools.smart_home.ha_request",
-        side_effect=mock_ha_request,
+        side_effect=mock_template_request,
+    ), patch(
+        "tools.generic.ha_request",
+        side_effect=mock_do_ha,
+    ), patch(
+        "tools.generic.verify_generic", new_callable=AsyncMock,
+        return_value="Bedroom lights: on at 50%",
+    ), patch(
+        "tools.generic.asyncio.sleep", new_callable=AsyncMock,
     ):
         from tools.smart_home import control_area
 
@@ -204,15 +222,24 @@ async def test_control_area_case_insensitive_match():
     """Area name lookup is case-insensitive."""
     captured_payload = {}
 
-    async def mock_ha_request(method, path, json_data=None, **kwargs):
-        if path == "/template":
-            return _AREA_TEMPLATE_RESPONSE
+    async def mock_template_request(method, path, json_data=None, **kwargs):
+        return _AREA_TEMPLATE_RESPONSE
+
+    async def mock_do_ha(method, path, json_data=None, **kwargs):
         captured_payload.update(json_data or {})
-        return {}
+        return []
 
     with patch(
         "tools.smart_home.ha_request",
-        side_effect=mock_ha_request,
+        side_effect=mock_template_request,
+    ), patch(
+        "tools.generic.ha_request",
+        side_effect=mock_do_ha,
+    ), patch(
+        "tools.generic.verify_generic", new_callable=AsyncMock,
+        return_value="Kitchen lights: off",
+    ), patch(
+        "tools.generic.asyncio.sleep", new_callable=AsyncMock,
     ):
         from tools.smart_home import control_area
 
@@ -232,15 +259,24 @@ async def test_control_area_turn_off_omits_brightness():
     """When action='off', brightness_pct is NOT sent even if provided."""
     captured_payload = {}
 
-    async def mock_ha_request(method, path, json_data=None, **kwargs):
-        if path == "/template":
-            return _AREA_TEMPLATE_RESPONSE
+    async def mock_template_request(method, path, json_data=None, **kwargs):
+        return _AREA_TEMPLATE_RESPONSE
+
+    async def mock_do_ha(method, path, json_data=None, **kwargs):
         captured_payload.update(json_data or {})
-        return {}
+        return []
 
     with patch(
         "tools.smart_home.ha_request",
-        side_effect=mock_ha_request,
+        side_effect=mock_template_request,
+    ), patch(
+        "tools.generic.ha_request",
+        side_effect=mock_do_ha,
+    ), patch(
+        "tools.generic.verify_generic", new_callable=AsyncMock,
+        return_value="Kitchen lights: off",
+    ), patch(
+        "tools.generic.asyncio.sleep", new_callable=AsyncMock,
     ):
         from tools.smart_home import control_area
 

@@ -1,11 +1,17 @@
 """
 Configuration reload tools for Home Assistant.
 Reload automations, scripts, scenes, groups, etc. without restarting.
+
+DEPRECATED: This tool is a thin wrapper that delegates to the generic
+do() tool in tools.generic for the 'all' case. Domain-specific reloads
+keep their existing implementation (the reload service paths don't map
+cleanly to the generic do() pattern).
 """
 
 import logging
 
 from tools.base import tool
+from tools.generic import do
 from tools.ha_helpers import ha_request
 
 logger = logging.getLogger(__name__)
@@ -42,16 +48,18 @@ logger = logging.getLogger(__name__)
 )
 async def reload_config(domain: str) -> str:
     """Reload HA configuration for a domain."""
+    logger.warning(
+        "DEPRECATED: %s() called — use %s() instead",
+        "reload_config", "do",
+    )
     try:
         domain = domain.lower().strip()
 
         if domain == "all":
-            await ha_request(
-                "POST",
-                "/services/homeassistant/reload_all",
-                json_data={},
+            return await do(
+                "homeassistant",
+                "reload_all",
             )
-            return "Done. Reloaded all configurations."
 
         # Most domains use their own reload service
         reload_map = {
@@ -77,12 +85,9 @@ async def reload_config(domain: str) -> str:
                 f"{', '.join(sorted(reload_map))}, all"
             )
 
-        await ha_request(
-            "POST",
-            f"/services/{service_path}",
-            json_data={},
-        )
-        return f"Done. Reloaded {domain} configuration."
+        # Use do() — split "domain/service" into parts
+        reload_domain, reload_service = service_path.split("/")
+        return await do(reload_domain, reload_service)
 
     except Exception as e:
         return f"Error reloading {domain}: {e}"

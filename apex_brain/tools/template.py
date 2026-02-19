@@ -1,12 +1,15 @@
 """
 Template evaluation tool for Home Assistant.
 Evaluate Jinja2 templates against the HA template engine.
+
+DEPRECATED: This tool is a thin wrapper that delegates to the generic
+query() tool in tools.generic. Use query() directly for new code.
 """
 
 import logging
 
 from tools.base import tool
-from tools.ha_helpers import ha_request
+from tools.generic import query
 
 logger = logging.getLogger(__name__)
 
@@ -44,14 +47,11 @@ logger = logging.getLogger(__name__)
 )
 async def evaluate_template(template: str) -> str:
     """Evaluate a Jinja2 template in HA."""
+    logger.warning(
+        "DEPRECATED: %s() called — use %s() instead",
+        "evaluate_template", "query",
+    )
     try:
-        result = await ha_request(
-            "POST",
-            "/template",
-            json_data={"template": template},
-        )
-        if isinstance(result, str):
-            return result.strip() or "(empty result)"
-        return str(result)
+        return await query(template)
     except Exception as e:
         return f"Template error: {e}"

@@ -26,10 +26,10 @@ The most important architectural change. Replace 40+ hardcoded tools with ~5 gen
 - [x] Implement `query()` -- unified state reader + Jinja2 template evaluator, domain-aware attribute formatting, smart 404 fallback — `tools/generic.py`
 - [x] Implement `discover()` -- unified entity/service/area/device/integration/info discovery, service schema display with field types — `tools/generic.py`
 - [x] Implement `history()` -- state change history + logbook entries, deduplication, timestamp formatting — `tools/generic.py`, 75 tests in `test_generic.py`
-- [ ] Inject HA service schemas into system prompt for AI guidance (so the model knows valid services, fields, and enums without hardcoding)
-- [ ] Keep old tools as deprecated aliases during migration (backward compat -- old tool names forward to new generic tools)
-- [ ] Update all tests for new tool architecture
-- [ ] End-to-end integration tests (call `do()` / `query()` / `discover()` against a live HA instance and verify results)
+- [x] Inject HA service schemas into system prompt — top-5 domains (light, climate, cover, fan, switch) injected per-turn (~800-1200 tokens), hourly cache refresh, token count logging
+- [x] Keep old tools as deprecated wrappers — all legacy tools delegate to generic tools (do, query, discover, history) with deprecation warnings in logs
+- [x] Update tests for new tool architecture — integration tests validate full pipeline with generic tools
+- [x] End-to-end integration tests — test_integration.py validates user message → context build → LLM → tool call → HA API → response (see `apex_brain/tests/test_integration.py`)
 - [x] Implement `manage()` — Supervisor API operations: backups (create/list/restore/delete), add-on lifecycle (install/update/restart/configure), system updates (core/OS), health checks (CPU/memory/disk) — `tools/manage.py`, 53 tests
 - [x] Implement `configure()` — Registry operations via WebSocket API: entity rename, area CRUD (create/rename/delete rooms), device-to-area assignment, disable/enable entities, stale entity cleanup — `tools/configure.py`, 49 tests
 - [x] WebSocket API helper — transient WS connections for config/registry operations (entity_registry, device_registry, area_registry, config_entries) — `tools/ws_helpers.py`
@@ -40,7 +40,7 @@ The most important architectural change. Replace 40+ hardcoded tools with ~5 gen
 
 ## Phase 1.5: System Intelligence
 
-Apex becomes the caretaker of the Home Assistant instance — not just a device controller, but a system manager that organizes, maintains, and heals the environment it lives in.
+Apex becomes the caretaker of the Home Assistant instance — not just a device controller, but a system manager that organizes, maintains, and heals the environment it lives in. Phase 1 infrastructure (`manage()` and `configure()` tools) provides the foundation for these items.
 
 - [ ] Automated backup scheduling — Apex tracks when the last backup was taken and creates one if overdue (configurable interval, default: 3 days)
 - [ ] Update advisor — Apex checks for available updates (core, OS, add-ons) and recommends them with a summary of what's new; applies on user approval
@@ -147,4 +147,4 @@ Shipped milestones for historical reference.
 
 ---
 
-*Last updated: 2026-02-18 (Phase 1 core generic tools complete — do(), query(), discover(), history() implemented in tools/generic.py with 75 tests; manage(), configure(), ws_helpers, audit_store with 111 tests; tiered confirmation, security gate for protected domains; 398 total tests passing)*
+*Last updated: 2026-02-18 (Phase 1 complete — generic tools (do, query, discover, history, manage, configure) fully implemented with 423 tests passing; service schema injection active; legacy tools delegate to generic tools with deprecation warnings; audit store enabled)*

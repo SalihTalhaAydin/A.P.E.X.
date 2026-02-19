@@ -15,6 +15,7 @@ from brain.config import settings
 from brain.system_prompt import (
     _build_time_context,
     build_system_prompt,
+    fetch_service_schemas,
 )
 
 from memory.conversation_store import ConversationStore
@@ -110,6 +111,18 @@ class ContextBuilder:
         except Exception:
             logger.warning("context_builder: Failed to fetch device summary", exc_info=True)
 
+        # 4.7. Service schemas for top domains
+        service_schemas = ""
+        try:
+            service_schemas = (
+                await fetch_service_schemas()
+            )
+        except Exception:
+            logger.warning(
+                "context_builder: Failed to fetch service schemas",
+                exc_info=True,
+            )
+
         # 5. Calendar summary
         calendar_summary = ""
         try:
@@ -132,4 +145,5 @@ class ContextBuilder:
             presence_summary=presence_summary,
             time_context=time_context,
             device_summary=device_summary,
+            service_schemas=service_schemas,
         )

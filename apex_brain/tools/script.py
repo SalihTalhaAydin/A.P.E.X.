@@ -3,21 +3,19 @@ Script tools for Home Assistant.
 List and execute HA scripts (domain: script.*).
 Scripts differ from automations: they are user-defined sequences of actions
 that can accept input variables and be triggered on demand.
+
+DEPRECATED: These tools are thin wrappers that delegate to the generic
+discover() and do() tools in tools.generic. Use those directly for new
+code.
 """
 
 import json
 import logging
 
-import httpx
+from tools.base import tool
+from tools.generic import discover, do
 
 logger = logging.getLogger(__name__)
-
-from tools.base import tool
-from tools.ha_helpers import (
-    format_ha_error,
-    ha_request,
-    verify_generic,
-)
 
 
 @tool(
@@ -43,50 +41,13 @@ from tools.ha_helpers import (
 )
 async def list_scripts(keyword: str = "") -> str:
     """List all HA scripts."""
+    logger.warning(
+        "DEPRECATED: %s() called — use %s() instead",
+        "list_scripts", "discover",
+    )
     try:
-        states = await ha_request("GET", "/states")
-        scripts = [
-            s
-            for s in states
-            if s["entity_id"].startswith("script.")
-        ]
-
-        if keyword:
-            kw_lower = keyword.lower()
-            scripts = [
-                s
-                for s in scripts
-                if kw_lower
-                in s.get("attributes", {})
-                .get("friendly_name", "")
-                .lower()
-                or kw_lower in s["entity_id"].lower()
-            ]
-
-        if not scripts:
-            suffix = (
-                f" matching '{keyword}'" if keyword else ""
-            )
-            return f"No scripts found{suffix}."
-
-        lines = []
-        for s in scripts:
-            name = s.get("attributes", {}).get(
-                "friendly_name", s["entity_id"]
-            )
-            state = s.get("state", "unknown")
-            eid = s["entity_id"]
-            status = "running" if state == "on" else "idle"
-            lines.append(
-                f"- {name} ({eid}): {status}"
-            )
-
-        return (
-            f"Found {len(lines)} script(s):\n"
-            + "\n".join(lines)
-        )
-    except httpx.HTTPStatusError as e:
-        return format_ha_error("script.*", "script", e)
+        filter_str = keyword if keyword else "script"
+        return await discover("entities", filter_str)
     except Exception as e:
         return f"Error listing scripts: {e}"
 
@@ -125,14 +86,17 @@ async def execute_script(
     entity_id: str, variables: str = ""
 ) -> str:
     """Execute a HA script with optional variables."""
+    logger.warning(
+        "DEPRECATED: %s() called — use %s() instead",
+        "execute_script", "do",
+    )
     try:
-        payload: dict = {"entity_id": entity_id}
-
+        data = None
         if variables:
             try:
                 parsed = json.loads(variables)
                 if isinstance(parsed, dict):
-                    payload["variables"] = parsed
+                    data = parsed
                 else:
                     return (
                         "Variables must be a JSON object "
@@ -146,17 +110,12 @@ async def execute_script(
                     "leave empty."
                 )
 
-        logger.debug("Executing %s payload=%s", entity_id, payload)
-        await ha_request(
-            "POST",
-            "/services/script/turn_on",
-            json_data=payload,
+        return await do(
+            "script",
+            "turn_on",
+            {"entity_id": entity_id},
+            data,
         )
 
-        status = await verify_generic(entity_id)
-        return f"Done. Executed {entity_id}. {status}"
-
-    except httpx.HTTPStatusError as e:
-        return format_ha_error(entity_id, "script", e)
     except Exception as e:
         return f"Error executing script: {e}"

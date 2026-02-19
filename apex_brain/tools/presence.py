@@ -3,17 +3,17 @@ Presence tool for Home Assistant.
 Queries person entities to determine who is home or away.
 Also exposes a helper for the context builder to inject
 presence into the system prompt automatically.
+
+DEPRECATED: get_presence is a thin wrapper that delegates to the generic
+discover() tool in tools.generic. Use discover() directly for new code.
+The get_presence_summary() helper is kept as-is (used by context builder).
 """
 
 import logging
 
-import httpx
-
 from tools.base import tool
-from tools.ha_helpers import (
-    format_ha_error,
-    ha_request,
-)
+from tools.generic import discover
+from tools.ha_helpers import ha_request
 
 logger = logging.getLogger(__name__)
 
@@ -71,55 +71,12 @@ async def get_presence_summary() -> str:
 )
 async def get_presence(person: str = "") -> str:
     """Check who is home or away."""
+    logger.warning(
+        "DEPRECATED: %s() called — use %s() instead",
+        "get_presence", "discover",
+    )
     try:
-        states = await ha_request("GET", "/states")
-        persons = [
-            s
-            for s in states
-            if s["entity_id"].startswith("person.")
-        ]
-
-        if person:
-            person_lower = person.lower()
-            persons = [
-                p
-                for p in persons
-                if person_lower
-                in p.get("attributes", {})
-                .get("friendly_name", "")
-                .lower()
-            ]
-
-        if not persons:
-            suffix = (
-                f" matching '{person}'"
-                if person
-                else ""
-            )
-            return (
-                f"No person entities found{suffix}."
-            )
-
-        lines = []
-        for p in persons:
-            attrs = p.get("attributes", {})
-            name = attrs.get(
-                "friendly_name",
-                p["entity_id"]
-                .split(".")[-1]
-                .title(),
-            )
-            state = p.get("state", "unknown")
-            line = f"- {name}: {state}"
-            if "source" in attrs:
-                line += f" (via {attrs['source']})"
-            lines.append(line)
-
-        return "\n".join(lines)
-
-    except httpx.HTTPStatusError as e:
-        return format_ha_error(
-            "person.*", "person", e
-        )
+        filter_str = person if person else "person"
+        return await discover("entities", filter_str)
     except Exception as e:
         return f"Error checking presence: {e}"

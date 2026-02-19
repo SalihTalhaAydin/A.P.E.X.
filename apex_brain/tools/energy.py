@@ -2,18 +2,27 @@
 Energy monitoring tools for Home Assistant.
 Query power (W/kW) and energy (Wh/kWh) sensors to provide
 summaries of household energy consumption, solar generation, etc.
+
+DEPRECATED: get_entity_power is a thin wrapper that delegates to the
+generic query() tool. get_energy_entities and get_energy_summary keep
+their existing implementations (complex logic with no direct generic
+equivalent).
 """
 
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from tools.base import tool
+from tools.generic import query
 from tools.ha_helpers import (
     format_ha_error,
     ha_request,
-    read_state,
 )
+
+logger = logging.getLogger(__name__)
 
 # Device classes and units that indicate energy-related sensors
 _ENERGY_DEVICE_CLASSES = {"energy", "power"}
@@ -111,6 +120,8 @@ def _categorize_reading(
 )
 async def get_energy_entities() -> str:
     """List all energy-related entities."""
+    # Kept as-is: complex filtering logic has no direct
+    # generic equivalent.
     try:
         states = await ha_request("GET", "/states")
         energy = [
@@ -202,50 +213,12 @@ async def get_energy_entities() -> str:
 )
 async def get_entity_power(entity_id: str) -> str:
     """Get current power/energy reading for a sensor."""
+    logger.warning(
+        "DEPRECATED: %s() called — use %s() instead",
+        "get_entity_power", "query",
+    )
     try:
-        state = await read_state(entity_id)
-        attrs = state.get("attributes", {})
-        name = attrs.get("friendly_name", entity_id)
-        value = state.get("state", "unknown")
-        unit = attrs.get("unit_of_measurement", "")
-        device_class = attrs.get("device_class", "")
-
-        if value in ("unavailable", "unknown"):
-            return (
-                f"{name} ({entity_id}): {value} "
-                "(sensor may be offline)"
-            )
-
-        parts = [f"{name} ({entity_id}): {value} {unit}"]
-
-        if device_class:
-            parts.append(f"  Device class: {device_class}")
-
-        # Add context about what the reading means
-        try:
-            val = float(value)
-            unit_lower = (unit or "").lower()
-            if unit_lower in ("w", "kw"):
-                if val > 0:
-                    parts.append(
-                        "  Status: currently drawing power"
-                    )
-                elif val < 0:
-                    parts.append(
-                        "  Status: currently "
-                        "generating/exporting power"
-                    )
-                else:
-                    parts.append(
-                        "  Status: no power flow"
-                    )
-        except (ValueError, TypeError):
-            pass
-
-        return "\n".join(parts)
-
-    except httpx.HTTPStatusError as e:
-        return format_ha_error(entity_id, "energy", e)
+        return await query(entity_id)
     except Exception as e:
         return f"Error reading energy sensor: {e}"
 
@@ -266,6 +239,8 @@ async def get_entity_power(entity_id: str) -> str:
 )
 async def get_energy_summary() -> str:
     """Query common energy entities and build a summary."""
+    # Kept as-is: complex aggregation logic has no direct
+    # generic equivalent.
     try:
         states = await ha_request("GET", "/states")
         energy = [

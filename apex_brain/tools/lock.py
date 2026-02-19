@@ -2,17 +2,21 @@
 Lock control tool for Home Assistant smart locks.
 Supports lock, unlock, and open (for locks with the open feature).
 Handles jammed/unavailable states gracefully.
+
+DEPRECATED: This tool is a thin wrapper that delegates to the generic
+do() tool in tools.generic. Use do() directly for new code.
 """
 
-import httpx
+import logging
 
 from tools.base import tool
+from tools.generic import do
 from tools.ha_helpers import (
-    call_ha_service,
-    format_ha_error,
     friendly_name,
     read_state,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def _verify_lock(entity_id: str) -> str:
@@ -76,6 +80,10 @@ async def control_lock(
     action: str,
 ) -> str:
     """Control a smart lock."""
+    logger.warning(
+        "DEPRECATED: %s() called — use %s() instead",
+        "control_lock", "do",
+    )
     try:
         # Check current state first
         pre_state = await read_state(entity_id)
@@ -103,14 +111,11 @@ async def control_lock(
         if not service:
             return f"Unknown lock action: {action}"
 
-        await call_ha_service(
-            "lock", service, entity_id
+        return await do(
+            "lock",
+            service,
+            {"entity_id": entity_id},
         )
 
-        status = await _verify_lock(entity_id)
-        return f"Done. {status}"
-
-    except httpx.HTTPStatusError as e:
-        return format_ha_error(entity_id, "lock", e)
     except Exception as e:
         return f"Error controlling lock: {e}"

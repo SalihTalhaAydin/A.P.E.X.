@@ -7,6 +7,10 @@ Design: Each major HA domain gets its own tool with FLAT top-level
 parameters. LLMs reliably fill flat params but consistently skip nested
 optional objects. The generic call_service is kept as a fallback for
 domains without a dedicated tool.
+
+DEPRECATED: These tools are thin wrappers that delegate to the generic
+tools in tools.generic (do, query, discover). Use the generic tools
+directly for new code.
 """
 
 from __future__ import annotations
@@ -14,23 +18,19 @@ from __future__ import annotations
 import asyncio
 import logging
 
-import httpx
-
 from tools.base import tool
+from tools.generic import discover, do, query
 from tools.ha_helpers import (
     call_ha_service,
-    format_ha_error,
     friendly_name,
-    get_battery_level,
     ha_request,
     read_state,
-    verify_generic,
 )
 
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------
-# Domain-specific verify helpers
+# Domain-specific verify helpers (kept for cycle_light_timed)
 # --------------------------------------------------
 
 
@@ -62,77 +62,6 @@ async def _verify_light(entity_id: str) -> str:
             and attrs["rgb_color"] is not None
         ):
             parts.append(f"RGB{tuple(attrs['rgb_color'])}")
-        return ", ".join(parts)
-    except Exception:
-        return (
-            f"{friendly_name(entity_id)}: "
-            "(state unconfirmed)"
-        )
-
-
-async def _verify_climate(entity_id: str) -> str:
-    """Read back a climate entity's state."""
-    try:
-        state = await read_state(entity_id)
-        fn = state.get("attributes", {}).get(
-            "friendly_name", friendly_name(entity_id)
-        )
-        mode = state.get("state", "unknown")
-        attrs = state.get("attributes", {})
-        parts = [f"{fn}: {mode}"]
-        if (
-            "temperature" in attrs
-            and attrs["temperature"] is not None
-        ):
-            parts.append(f"target {attrs['temperature']}°")
-        if (
-            "current_temperature" in attrs
-            and attrs["current_temperature"] is not None
-        ):
-            parts.append(
-                f"current {attrs['current_temperature']}°"
-            )
-        if (
-            "preset_mode" in attrs
-            and attrs["preset_mode"] is not None
-        ):
-            parts.append(f"preset: {attrs['preset_mode']}")
-        return ", ".join(parts)
-    except Exception:
-        return (
-            f"{friendly_name(entity_id)}: "
-            "(state unconfirmed)"
-        )
-
-
-async def _verify_media(entity_id: str) -> str:
-    """Read back a media_player entity's state."""
-    try:
-        state = await read_state(entity_id)
-        fn = state.get("attributes", {}).get(
-            "friendly_name", friendly_name(entity_id)
-        )
-        player_state = state.get("state", "unknown")
-        attrs = state.get("attributes", {})
-        parts = [f"{fn}: {player_state}"]
-        if (
-            "volume_level" in attrs
-            and attrs["volume_level"] is not None
-        ):
-            parts.append(
-                f"volume "
-                f"{round(attrs['volume_level'] * 100)}%"
-            )
-        if (
-            "media_title" in attrs
-            and attrs["media_title"] is not None
-        ):
-            parts.append(f"playing: {attrs['media_title']}")
-        if (
-            "source" in attrs
-            and attrs["source"] is not None
-        ):
-            parts.append(f"source: {attrs['source']}")
         return ", ".join(parts)
     except Exception:
         return (
@@ -175,48 +104,12 @@ _MAX_ENTITIES_WITH_DOMAIN = 200
 )
 async def list_entities(domain: str = "") -> str:
     """List all entities, optionally filtered by domain."""
+    logger.warning(
+        "DEPRECATED: %s() called — use %s() instead",
+        "list_entities", "discover",
+    )
     try:
-        states = await ha_request("GET", "/states")
-        if domain:
-            states = [
-                s
-                for s in states
-                if s["entity_id"].startswith(f"{domain}.")
-            ]
-
-        if not states:
-            suffix = (
-                f" for domain {domain}" if domain else ""
-            )
-            return f"No entities found{suffix}."
-
-        total = len(states)
-        cap = (
-            _MAX_ENTITIES_WITH_DOMAIN
-            if domain
-            else _MAX_ENTITIES_NO_DOMAIN
-        )
-        shown = states[:cap]
-        lines = []
-        for s in shown:
-            eid = s["entity_id"]
-            st = s["state"]
-            fn = s.get("attributes", {}).get(
-                "friendly_name", eid
-            )
-            lines.append(f"- {fn} ({eid}): {st}")
-
-        result = "\n".join(lines)
-        if total > len(shown):
-            result += (
-                f"\n(Showing first {len(shown)} "
-                f"of {total} entities)"
-            )
-        logger.debug(
-            "list_entities domain=%r total=%d showing=%d",
-            domain, total, len(shown),
-        )
-        return result
+        return await discover("entities", domain)
     except Exception as e:
         return f"Error listing entities: {e}"
 
@@ -244,90 +137,12 @@ async def list_entities(domain: str = "") -> str:
 )
 async def get_entity_state(entity_id: str) -> str:
     """Get detailed state of a specific entity."""
+    logger.warning(
+        "DEPRECATED: %s() called — use %s() instead",
+        "get_entity_state", "query",
+    )
     try:
-        state = await ha_request(
-            "GET", f"/states/{entity_id}"
-        )
-        fn = state.get("attributes", {}).get(
-            "friendly_name", entity_id
-        )
-        current = state.get("state", "unknown")
-        attrs = state.get("attributes", {})
-
-        info = [f"{fn} ({entity_id}): {current}"]
-
-        if "brightness" in attrs and attrs["brightness"] is not None:
-            info.append(
-                "  Brightness: "
-                f"{round(attrs['brightness'] / 255 * 100)}%"
-            )
-        if "color_temp_kelvin" in attrs:
-            info.append(
-                f"  Color temp: "
-                f"{attrs['color_temp_kelvin']}K"
-            )
-        elif "color_temp" in attrs:
-            info.append(
-                f"  Color temp: "
-                f"{attrs['color_temp']} mireds"
-            )
-        if "rgb_color" in attrs:
-            info.append(f"  RGB: {attrs['rgb_color']}")
-        if "temperature" in attrs:
-            info.append(
-                f"  Temperature: {attrs['temperature']}°"
-            )
-        if "current_temperature" in attrs:
-            info.append(
-                f"  Current temp: "
-                f"{attrs['current_temperature']}°"
-            )
-        if "hvac_action" in attrs:
-            info.append(
-                f"  HVAC action: {attrs['hvac_action']}"
-            )
-        if "media_title" in attrs:
-            info.append(
-                f"  Playing: {attrs['media_title']}"
-            )
-        if "volume_level" in attrs and attrs["volume_level"] is not None:
-            info.append(
-                f"  Volume: "
-                f"{round(attrs['volume_level'] * 100)}%"
-            )
-        if "current_position" in attrs and attrs["current_position"] is not None:
-            info.append(
-                f"  Position: "
-                f"{attrs['current_position']}%"
-            )
-        if "battery_level" in attrs:
-            info.append(
-                f"  Battery: {attrs['battery_level']}%"
-            )
-        elif entity_id.startswith("vacuum."):
-            battery = await get_battery_level(entity_id)
-            if battery is not None:
-                info.append(f"  Battery: {battery}%")
-
-        if entity_id.startswith("vacuum."):
-            for _wattr in (
-                "water_box_mode",
-                "water_level",
-                "mop_mode",
-            ):
-                if _wattr in attrs:
-                    label = _wattr.replace("_", " ")
-                    info.append(
-                        f"  Water ({label}): "
-                        f"{attrs[_wattr]}"
-                    )
-                    break
-
-        return "\n".join(info)
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            return f"Entity '{entity_id}' not found."
-        return f"Error: {e}"
+        return await query(entity_id)
     except Exception as e:
         return f"Error getting state: {e}"
 
@@ -345,23 +160,12 @@ async def get_entity_state(entity_id: str) -> str:
 )
 async def get_areas() -> str:
     """List all areas (rooms) in Home Assistant."""
+    logger.warning(
+        "DEPRECATED: %s() called — use %s() instead",
+        "get_areas", "discover",
+    )
     try:
-        result = await ha_request(
-            "POST",
-            "/template",
-            json_data={
-                "template": (
-                    "{% for area in areas() %}"
-                    "{{ area_name(area) }} "
-                    "({{ area }})\n{% endfor %}"
-                )
-            },
-        )
-        if isinstance(result, str) and result.strip():
-            return (
-                f"Areas in your home:\n{result.strip()}"
-            )
-        return "No areas configured yet."
+        return await discover("areas")
     except Exception as e:
         return f"Error listing areas: {e}"
 
@@ -410,83 +214,16 @@ async def query_sensors(
     entity_id: str = "",
 ) -> str:
     """Query sensors by type or area."""
+    logger.warning(
+        "DEPRECATED: %s() called — use %s() instead",
+        "query_sensors", "query/discover",
+    )
     try:
         if entity_id:
-            state = await ha_request(
-                "GET", f"/states/{entity_id}"
-            )
-            fn = state.get("attributes", {}).get(
-                "friendly_name", entity_id
-            )
-            unit = state.get("attributes", {}).get(
-                "unit_of_measurement", ""
-            )
-            return (
-                f"{fn} ({entity_id}): "
-                f"{state.get('state', '?')}"
-                f"{' ' + unit if unit else ''}"
-            )
-
-        states = await ha_request("GET", "/states")
-        sensors = [
-            s
-            for s in states
-            if s["entity_id"].startswith("sensor.")
-            or s["entity_id"].startswith(
-                "binary_sensor."
-            )
-        ]
-
-        if sensor_type:
-            st = sensor_type.lower()
-            sensors = [
-                s
-                for s in sensors
-                if st
-                in s.get("attributes", {})
-                .get("device_class", "")
-                .lower()
-                or st in s["entity_id"].lower()
-            ]
-
-        if area:
-            ar = area.lower()
-            sensors = [
-                s
-                for s in sensors
-                if ar in s["entity_id"].lower()
-                or ar
-                in s.get("attributes", {})
-                .get("friendly_name", "")
-                .lower()
-            ]
-
-        if not sensors:
-            return "No matching sensors found."
-
-        _MAX_SENSORS = 20
-        shown = sensors[:_MAX_SENSORS]
-        lines = []
-        for s in shown:
-            fn = s.get("attributes", {}).get(
-                "friendly_name", s["entity_id"]
-            )
-            unit = s.get("attributes", {}).get(
-                "unit_of_measurement", ""
-            )
-            val = s.get("state", "?")
-            lines.append(
-                f"- {fn} ({s['entity_id']}): "
-                f"{val}{' ' + unit if unit else ''}"
-            )
-
-        result = "\n".join(lines)
-        if len(sensors) > _MAX_SENSORS:
-            result += (
-                f"\n(Showing {_MAX_SENSORS} of "
-                f"{len(sensors)} sensors)"
-            )
-        return result
+            return await query(entity_id)
+        # Use the best available filter
+        filter_str = sensor_type or area or ""
+        return await discover("entities", filter_str)
     except Exception as e:
         return f"Error querying sensors: {e}"
 
@@ -561,6 +298,10 @@ async def control_light(
     transition: float | None = None,
 ) -> str:
     """Control a light with explicit flat parameters."""
+    logger.warning(
+        "DEPRECATED: %s() called — use %s() instead",
+        "control_light", "do",
+    )
     try:
         svc_map = {
             "on": "turn_on",
@@ -570,39 +311,37 @@ async def control_light(
         service = svc_map[action]
         data: dict = {}
 
-        if action in ("on", "toggle"):
-            if brightness_pct is not None:
-                data["brightness_pct"] = max(
-                    0, min(100, brightness_pct)
+        if brightness_pct is not None:
+            data["brightness_pct"] = max(
+                0, min(100, brightness_pct)
+            )
+        if color is not None:
+            if (
+                color.startswith("#")
+                and len(color) == 7
+            ):
+                r, g, b = (
+                    int(color[1:3], 16),
+                    int(color[3:5], 16),
+                    int(color[5:7], 16),
                 )
-            if color is not None:
-                if (
-                    color.startswith("#")
-                    and len(color) == 7
-                ):
-                    r, g, b = (
-                        int(color[1:3], 16),
-                        int(color[3:5], 16),
-                        int(color[5:7], 16),
-                    )
-                    data["rgb_color"] = [r, g, b]
-                else:
-                    data["color_name"] = color
-            if color_temp_kelvin is not None:
-                data["color_temp_kelvin"] = (
-                    color_temp_kelvin
-                )
-            if transition is not None:
-                data["transition"] = transition
+                data["rgb_color"] = [r, g, b]
+            else:
+                data["color_name"] = color
+        if color_temp_kelvin is not None:
+            data["color_temp_kelvin"] = (
+                color_temp_kelvin
+            )
+        if transition is not None:
+            data["transition"] = transition
 
-        await call_ha_service(
-            "light", service, entity_id, data or None
+        return await do(
+            "light",
+            service,
+            {"entity_id": entity_id},
+            data or None,
         )
-        status = await _verify_light(entity_id)
-        return f"Done. {status}"
 
-    except httpx.HTTPStatusError as e:
-        return format_ha_error(entity_id, "light", e)
     except Exception as e:
         return f"Error controlling light: {e}"
 
@@ -684,8 +423,6 @@ async def cycle_light_timed(
             f"Done. Cycled {t} times with "
             f"{sec}s between. {status}"
         )
-    except httpx.HTTPStatusError as e:
-        return format_ha_error(entity_id, "light", e)
     except Exception as e:
         return f"Error cycling light: {e}"
 
@@ -751,32 +488,37 @@ async def control_climate(
     fan_mode: str | None = None,
 ) -> str:
     """Control a climate / thermostat device."""
+    logger.warning(
+        "DEPRECATED: %s() called — use %s() instead",
+        "control_climate", "do",
+    )
     try:
         actions_taken = []
+        last_result = ""
 
         if hvac_mode is not None:
-            await call_ha_service(
+            last_result = await do(
                 "climate",
                 "set_hvac_mode",
-                entity_id,
+                {"entity_id": entity_id},
                 {"hvac_mode": hvac_mode},
             )
             actions_taken.append(f"mode={hvac_mode}")
 
         if temperature is not None:
-            await call_ha_service(
+            last_result = await do(
                 "climate",
                 "set_temperature",
-                entity_id,
+                {"entity_id": entity_id},
                 {"temperature": temperature},
             )
-            actions_taken.append(f"temp={temperature}°")
+            actions_taken.append(f"temp={temperature}")
 
         if preset_mode is not None:
-            await call_ha_service(
+            last_result = await do(
                 "climate",
                 "set_preset_mode",
-                entity_id,
+                {"entity_id": entity_id},
                 {"preset_mode": preset_mode},
             )
             actions_taken.append(
@@ -784,10 +526,10 @@ async def control_climate(
             )
 
         if fan_mode is not None:
-            await call_ha_service(
+            last_result = await do(
                 "climate",
                 "set_fan_mode",
-                entity_id,
+                {"entity_id": entity_id},
                 {"fan_mode": fan_mode},
             )
             actions_taken.append(f"fan={fan_mode}")
@@ -799,14 +541,11 @@ async def control_climate(
                 "preset_mode, or fan_mode."
             )
 
-        status = await _verify_climate(entity_id)
         return (
             f"Done ({', '.join(actions_taken)}). "
-            f"{status}"
+            f"{last_result}"
         )
 
-    except httpx.HTTPStatusError as e:
-        return format_ha_error(entity_id, "climate", e)
     except Exception as e:
         return f"Error controlling climate: {e}"
 
@@ -871,6 +610,10 @@ async def control_media(
     source: str | None = None,
 ) -> str:
     """Control a media player with flat parameters."""
+    logger.warning(
+        "DEPRECATED: %s() called — use %s() instead",
+        "control_media", "do",
+    )
     try:
         action_map = {
             "turn_on": "turn_on",
@@ -890,55 +633,41 @@ async def control_media(
         if not service:
             return f"Unknown media action: {action}"
 
-        if action in ("turn_on", "turn_off"):
-            await call_ha_service(
-                "media_player", service, entity_id
-            )
-        elif action == "mute":
-            await call_ha_service(
-                "media_player",
-                service,
-                entity_id,
-                {"is_volume_muted": True},
-            )
+        # Build data for mute/unmute
+        data = None
+        if action == "mute":
+            data = {"is_volume_muted": True}
         elif action == "unmute":
-            await call_ha_service(
-                "media_player",
-                service,
-                entity_id,
-                {"is_volume_muted": False},
-            )
-        else:
-            await call_ha_service(
-                "media_player", service, entity_id
-            )
+            data = {"is_volume_muted": False}
+
+        last_result = await do(
+            "media_player",
+            service,
+            {"entity_id": entity_id},
+            data,
+        )
 
         if volume_level is not None:
             level = (
                 max(0, min(100, volume_level)) / 100.0
             )
-            await call_ha_service(
+            last_result = await do(
                 "media_player",
                 "volume_set",
-                entity_id,
+                {"entity_id": entity_id},
                 {"volume_level": level},
             )
 
         if source is not None:
-            await call_ha_service(
+            last_result = await do(
                 "media_player",
                 "select_source",
-                entity_id,
+                {"entity_id": entity_id},
                 {"source": source},
             )
 
-        status = await _verify_media(entity_id)
-        return f"Done. {status}"
+        return last_result
 
-    except httpx.HTTPStatusError as e:
-        return format_ha_error(
-            entity_id, "media_player", e
-        )
     except Exception as e:
         return f"Error controlling media player: {e}"
 
@@ -988,29 +717,18 @@ async def control_cover(
     position: int | None = None,
     tilt_position: int | None = None,
 ) -> str:
-    """Control a cover / blind / garage door.
-
-    Behaviour when both ``position`` and ``action`` are supplied:
-    - ``position`` takes precedence: the cover is moved to the exact
-      percentage position via ``set_cover_position``.
-    - ``action`` is ignored when ``position`` is set (setting a precise
-      position is more specific than a directional command).
-
-    When only ``action`` is supplied (no ``position``), the named action
-    service is called:
-    - "open"  -> cover.open_cover
-    - "close" -> cover.close_cover
-    - "stop"  -> cover.stop_cover
-
-    At least one of ``position`` or a valid ``action`` must be provided.
-    """
+    """Control a cover / blind / garage door."""
+    logger.warning(
+        "DEPRECATED: %s() called — use %s() instead",
+        "control_cover", "do",
+    )
     try:
         if position is not None:
             pos = max(0, min(100, position))
-            await call_ha_service(
+            result = await do(
                 "cover",
                 "set_cover_position",
-                entity_id,
+                {"entity_id": entity_id},
                 {"position": pos},
             )
         elif action:
@@ -1022,8 +740,10 @@ async def control_cover(
             service = service_map.get(action)
             if not service:
                 return f"Unknown cover action: {action}"
-            await call_ha_service(
-                "cover", service, entity_id
+            result = await do(
+                "cover",
+                service,
+                {"entity_id": entity_id},
             )
         else:
             return (
@@ -1033,18 +753,15 @@ async def control_cover(
 
         if tilt_position is not None:
             tilt = max(0, min(100, tilt_position))
-            await call_ha_service(
+            result = await do(
                 "cover",
                 "set_cover_tilt_position",
-                entity_id,
+                {"entity_id": entity_id},
                 {"tilt_position": tilt},
             )
 
-        status = await verify_generic(entity_id)
-        return f"Done. {status}"
+        return result
 
-    except httpx.HTTPStatusError as e:
-        return format_ha_error(entity_id, "cover", e)
     except Exception as e:
         return f"Error controlling cover: {e}"
 
@@ -1095,6 +812,10 @@ async def control_fan(
     direction: str | None = None,
 ) -> str:
     """Control a fan with flat parameters."""
+    logger.warning(
+        "DEPRECATED: %s() called — use %s() instead",
+        "control_fan", "do",
+    )
     try:
         svc_map = {
             "on": "turn_on",
@@ -1112,23 +833,23 @@ async def control_fan(
                 0, min(100, percentage)
             )
 
-        await call_ha_service(
-            "fan", service, entity_id, data or None
+        result = await do(
+            "fan",
+            service,
+            {"entity_id": entity_id},
+            data or None,
         )
 
         if direction is not None:
-            await call_ha_service(
+            result = await do(
                 "fan",
                 "set_direction",
-                entity_id,
+                {"entity_id": entity_id},
                 {"direction": direction},
             )
 
-        status = await verify_generic(entity_id)
-        return f"Done. {status}"
+        return result
 
-    except httpx.HTTPStatusError as e:
-        return format_ha_error(entity_id, "fan", e)
     except Exception as e:
         return f"Error controlling fan: {e}"
 
@@ -1200,6 +921,10 @@ async def control_area(
     color_temp_kelvin: int | None = None,
 ) -> str:
     """Control all devices of a domain in a named area."""
+    logger.warning(
+        "DEPRECATED: %s() called — use %s() instead",
+        "control_area", "do",
+    )
     try:
         # Step 1: Fetch all areas via template
         raw = await ha_request(
@@ -1246,7 +971,7 @@ async def control_area(
                 f"Known areas: {names_list}."
             )
 
-        # Step 3: Build service + service_data
+        # Step 3: Build service + data
         svc_map = {
             "on": "turn_on",
             "off": "turn_off",
@@ -1259,28 +984,23 @@ async def control_area(
                 "Use 'on', 'off', or 'toggle'."
             )
 
-        service_data: dict = {"area_id": matched_id}
+        data: dict = {}
         if action in ("on", "toggle"):
             if brightness_pct is not None:
-                service_data["brightness_pct"] = max(
+                data["brightness_pct"] = max(
                     0, min(100, brightness_pct)
                 )
             if color_temp_kelvin is not None:
-                service_data["color_temp_kelvin"] = (
+                data["color_temp_kelvin"] = (
                     color_temp_kelvin
                 )
 
-        logger.debug(
-            "control_area: domain=%s service=%s "
-            "area_id=%s data=%s",
-            domain, service, matched_id, service_data,
-        )
-
-        # Step 4: Call the service
-        await ha_request(
-            "POST",
-            f"/services/{domain}/{service}",
-            json_data=service_data,
+        # Step 4: Call the service via do()
+        await do(
+            domain,
+            service,
+            {"area_id": matched_id},
+            data or None,
         )
 
         # Step 5: Return confirmation
@@ -1306,8 +1026,6 @@ async def control_area(
             f"{human_name}{extra_str}."
         )
 
-    except httpx.HTTPStatusError as e:
-        return format_ha_error(area_name, domain, e)
     except Exception as e:
         return f"Error controlling area: {e}"
 
@@ -1369,14 +1087,16 @@ async def call_service(
     service_data: dict | None = None,
 ) -> str:
     """Generic HA service call; fallback."""
+    logger.warning(
+        "DEPRECATED: %s() called — use %s() instead",
+        "call_service", "do",
+    )
     try:
-        await call_ha_service(
-            domain, service, entity_id, service_data
+        return await do(
+            domain,
+            service,
+            {"entity_id": entity_id},
+            service_data,
         )
-        status = await verify_generic(entity_id)
-        return f"Done. {status}"
-
-    except httpx.HTTPStatusError as e:
-        return format_ha_error(entity_id, domain, e)
     except Exception as e:
         return f"Error calling service: {e}"
