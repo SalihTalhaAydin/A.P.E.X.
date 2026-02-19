@@ -136,3 +136,18 @@ def test_build_prompt_includes_automation_section():
     prompt = build_system_prompt()
     assert "list_automations" in prompt
     assert "activate_scene" in prompt
+
+
+def test_build_prompt_includes_area_control_rules():
+    """Area-based control instructions are in the template."""
+    prompt = build_system_prompt()
+    assert "AREA-BASED CONTROL" in prompt
+    assert "control_area" in prompt
+    assert "ENTIRE AREA" in prompt
+
+
+def test_build_prompt_includes_floor_instructions():
+    """Floor-based control instructions are in the template."""
+    prompt = build_system_prompt()
+    assert "floor_id" in prompt
+    assert "discover(what=\"floors\")" in prompt

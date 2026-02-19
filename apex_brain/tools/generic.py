@@ -45,8 +45,8 @@ PROTECTED_DOMAINS = frozenset(
 
 @tool(
     description=(
-        "Find entities, services, areas, devices, "
-        "integrations, or HA system info."
+        "Find entities, services, areas, floors, "
+        "devices, integrations, or HA system info."
     ),
     parameters={
         "type": "object",
@@ -57,20 +57,23 @@ PROTECTED_DOMAINS = frozenset(
                     "entities",
                     "services",
                     "areas",
+                    "floors",
                     "devices",
                     "integrations",
                     "info",
                 ],
                 "description": (
-                    "What to discover: entities, services, "
-                    "areas, devices, integrations, or info."
+                    "What to discover: entities, "
+                    "services, areas, floors, "
+                    "devices, integrations, or info."
                 ),
             },
             "filter": {
                 "type": "string",
                 "description": (
-                    "Optional filter: domain (e.g. 'light'), "
-                    "area name, keyword, or empty for all."
+                    "Optional filter: domain "
+                    "(e.g. 'light'), area name, "
+                    "keyword, or empty for all."
                 ),
                 "default": "",
             },
@@ -82,8 +85,8 @@ async def discover(
     what: str,
     filter: str = "",
 ) -> str:
-    """Find entities, services, areas, devices,
-    integrations, or HA system info."""
+    """Find entities, services, areas, floors,
+    devices, integrations, or HA system info."""
     try:
         if what == "entities":
             return await _discover_entities(filter)
@@ -91,17 +94,22 @@ async def discover(
             return await _discover_services(filter)
         elif what == "areas":
             return await _discover_areas(filter)
+        elif what == "floors":
+            return await _discover_floors(filter)
         elif what == "devices":
             return await _discover_devices(filter)
         elif what == "integrations":
-            return await _discover_integrations(filter)
+            return await _discover_integrations(
+                filter
+            )
         elif what == "info":
             return await _discover_info()
         else:
             return (
                 f"Unknown discover target: {what}. "
-                "Use: entities, services, areas, devices, "
-                "integrations, or info."
+                "Use: entities, services, areas, "
+                "floors, devices, integrations, "
+                "or info."
             )
     except Exception as e:
         return f"Error discovering {what}: {e}"
@@ -275,6 +283,60 @@ async def _discover_areas(filter_str: str) -> str:
         return "No areas found."
 
     return f"Areas ({len(lines)}):\n" + "\n".join(lines)
+
+
+async def _discover_floors(filter_str: str) -> str:
+    """List all floors and their areas via template."""
+    template = (
+        "{% for floor in floors() %}"
+        "{{ floor }}|{{ floor_name(floor) }}|"
+        "{{ floor_areas(floor) | join(',') }}\n"
+        "{% endfor %}"
+    )
+    try:
+        result = await ha_request(
+            "POST",
+            "/template",
+            json_data={"template": template},
+        )
+    except Exception:
+        return (
+            "Floors not available (requires "
+            "Home Assistant 2024.2+)."
+        )
+
+    if not result or not isinstance(result, str):
+        return "No floors found."
+
+    filt = filter_str.strip().lower()
+    lines = []
+    for line in result.strip().split("\n"):
+        if "|" not in line:
+            continue
+        parts = line.split("|", 2)
+        if len(parts) < 2:
+            continue
+        floor_id = parts[0].strip()
+        floor_nm = parts[1].strip()
+        areas = parts[2].strip() if len(parts) > 2 else ""
+        if filt and filt not in floor_nm.lower():
+            continue
+        entry = f"  - {floor_nm} ({floor_id})"
+        if areas:
+            entry += f" — areas: {areas}"
+        lines.append(entry)
+
+    if not lines:
+        if filter_str:
+            return (
+                f"No floors matching '{filter_str}'."
+            )
+        return "No floors found."
+
+    return (
+        f"Floors ({len(lines)}):\n"
+        + "\n".join(lines)
+    )
 
 
 async def _discover_devices(filter_str: str) -> str:
@@ -658,11 +720,20 @@ async def do(
 
         # Verify by reading back entity state
         entity_id = ""
+        area_id = ""
+        floor_id = ""
         if targets:
             entity_id = targets.get("entity_id", "")
+            area_id = targets.get("area_id", "")
+            floor_id = targets.get("floor_id", "")
         if entity_id:
             status = await verify_generic(entity_id)
             return f"Done. {status}"
+
+        if area_id or floor_id:
+            return await _verify_area_or_floor(
+                domain, service, area_id, floor_id
+            )
 
         return f"Done. Called {domain}.{service}."
 
@@ -672,6 +743,101 @@ async def do(
             entity_id = targets.get("entity_id", "")
         return format_ha_error(
             entity_id or f"{domain}.{service}", domain, e
+        )
+
+
+async def _verify_area_or_floor(
+    domain: str,
+    service: str,
+    area_id: str,
+    floor_id: str,
+) -> str:
+    """Verify area/floor-based service call by listing
+    affected entities."""
+    try:
+        # Build a Jinja2 template to list entities of the
+        # target domain in the area or on the floor
+        if area_id:
+            template = (
+                "{%- for e in area_entities('"
+                + area_id
+                + "') "
+                "if e.startswith('"
+                + domain
+                + ".') -%}"
+                "{{ e }}|"
+                "{{ states[e].state }}|"
+                "{{ state_attr(e, 'friendly_name')"
+                " or e }}\n"
+                "{%- endfor -%}"
+            )
+            label = area_id
+        else:
+            # Floor: get all areas on the floor,
+            # then entities in those areas
+            template = (
+                "{%- for a in floor_areas('"
+                + floor_id
+                + "') -%}"
+                "{%- for e in area_entities(a) "
+                "if e.startswith('"
+                + domain
+                + ".') -%}"
+                "{{ e }}|"
+                "{{ states[e].state }}|"
+                "{{ state_attr(e, 'friendly_name')"
+                " or e }}\n"
+                "{%- endfor -%}"
+                "{%- endfor -%}"
+            )
+            label = floor_id
+
+        raw = await ha_request(
+            "POST",
+            "/template",
+            json_data={"template": template},
+        )
+
+        if not isinstance(raw, str):
+            return (
+                f"Done. Called {domain}.{service} "
+                f"on {label}."
+            )
+
+        lines = [
+            l.strip()
+            for l in raw.strip().split("\n")
+            if l.strip() and "|" in l
+        ]
+        if not lines:
+            return (
+                f"Done. Called {domain}.{service} "
+                f"on {label} (no {domain} entities "
+                f"found in this area)."
+            )
+
+        parts = []
+        for line in lines:
+            segs = line.split("|", 2)
+            if len(segs) >= 3:
+                name = segs[2].strip()
+                state = segs[1].strip()
+                parts.append(f"{name}: {state}")
+            elif len(segs) == 2:
+                parts.append(
+                    f"{segs[0]}: {segs[1]}"
+                )
+
+        summary = ", ".join(parts)
+        return f"Done. {summary}"
+
+    except Exception:
+        logger.debug(
+            "Area/floor verify failed", exc_info=True
+        )
+        return (
+            f"Done. Called {domain}.{service} "
+            f"on {area_id or floor_id}."
         )
 
 

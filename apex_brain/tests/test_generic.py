@@ -51,6 +51,7 @@ class TestRegistration:
             "entities",
             "services",
             "areas",
+            "floors",
             "devices",
             "integrations",
             "info",
@@ -474,6 +475,67 @@ class TestDiscover:
         assert "Kitchen Light" in result
         assert "Bedroom Light" not in result
 
+    async def test_floors(self):
+        from tools.generic import discover
+
+        floor_response = (
+            "floor_1|First Floor|kitchen,living_room\n"
+            "floor_2|Basement|basement\n"
+        )
+        with patch(
+            "tools.generic.ha_request",
+            new_callable=AsyncMock,
+            return_value=floor_response,
+        ):
+            result = await discover(what="floors")
+
+        assert "First Floor" in result
+        assert "Basement" in result
+        assert "2" in result
+
+    async def test_floors_with_filter(self):
+        from tools.generic import discover
+
+        floor_response = (
+            "floor_1|First Floor|kitchen,living_room\n"
+            "floor_2|Basement|basement\n"
+        )
+        with patch(
+            "tools.generic.ha_request",
+            new_callable=AsyncMock,
+            return_value=floor_response,
+        ):
+            result = await discover(
+                what="floors", filter="basement"
+            )
+
+        assert "Basement" in result
+        assert "First Floor" not in result
+
+    async def test_floors_empty(self):
+        from tools.generic import discover
+
+        with patch(
+            "tools.generic.ha_request",
+            new_callable=AsyncMock,
+            return_value="",
+        ):
+            result = await discover(what="floors")
+
+        assert "No floors found" in result
+
+    async def test_floors_not_supported(self):
+        from tools.generic import discover
+
+        with patch(
+            "tools.generic.ha_request",
+            new_callable=AsyncMock,
+            side_effect=Exception("Template error"),
+        ):
+            result = await discover(what="floors")
+
+        assert "not available" in result.lower()
+
 
 # ==================================================================
 # query() tests
@@ -792,13 +854,23 @@ class TestDo:
         ):
             if "/services/" in path:
                 captured.update(json_data or {})
-            return {}
+                return {}
+            # Template call for verification
+            return (
+                "light.kitchen_ceiling|on|"
+                "Kitchen Ceiling\n"
+                "light.kitchen_lamp|on|"
+                "Kitchen Lamp\n"
+            )
 
         with patch(
             "tools.generic.ha_request",
             side_effect=mock_ha_request,
         ):
-            with patch("asyncio.sleep", new_callable=AsyncMock):
+            with patch(
+                "asyncio.sleep",
+                new_callable=AsyncMock,
+            ):
                 result = await do(
                     domain="light",
                     service="turn_on",
@@ -808,6 +880,79 @@ class TestDo:
         assert "Done" in result
         assert captured.get("area_id") == "kitchen"
         assert "entity_id" not in captured
+        # Verification should show entity states
+        assert "Kitchen Ceiling" in result
+        assert "Kitchen Lamp" in result
+
+    async def test_service_call_area_target_empty(self):
+        """Area call with no entities in area."""
+        from tools.generic import do
+
+        async def mock_ha_request(
+            method, path, json_data=None, **kw
+        ):
+            if "/services/" in path:
+                return {}
+            # Template returns empty (no entities)
+            return ""
+
+        with patch(
+            "tools.generic.ha_request",
+            side_effect=mock_ha_request,
+        ):
+            with patch(
+                "asyncio.sleep",
+                new_callable=AsyncMock,
+            ):
+                result = await do(
+                    domain="light",
+                    service="turn_on",
+                    targets={"area_id": "garage"},
+                )
+
+        assert "Done" in result
+        assert "no light entities" in result.lower()
+
+    async def test_service_call_floor_target(self):
+        """Floor-based targeting verifies entities."""
+        from tools.generic import do
+
+        captured = {}
+
+        async def mock_ha_request(
+            method, path, json_data=None, **kw
+        ):
+            if "/services/" in path:
+                captured.update(json_data or {})
+                return {}
+            return (
+                "light.basement_ceiling|on|"
+                "Basement Ceiling\n"
+                "light.basement_lamp|on|"
+                "Basement Lamp\n"
+            )
+
+        with patch(
+            "tools.generic.ha_request",
+            side_effect=mock_ha_request,
+        ):
+            with patch(
+                "asyncio.sleep",
+                new_callable=AsyncMock,
+            ):
+                result = await do(
+                    domain="light",
+                    service="turn_on",
+                    targets={
+                        "floor_id": "floor_basement"
+                    },
+                )
+
+        assert "Done" in result
+        assert captured.get("floor_id") == (
+            "floor_basement"
+        )
+        assert "Basement Ceiling" in result
 
     async def test_no_targets_no_data(self):
         from tools.generic import do

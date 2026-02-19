@@ -1,4 +1,4 @@
-"""Tests for vacuum tool and battery-level fallback."""
+"""Tests for vacuum tool — dynamic action resolution and status."""
 
 from unittest.mock import AsyncMock, patch
 
@@ -14,18 +14,20 @@ def _tools_loaded():
     discover_tools()
 
 
+# ---------------------------------------------------
+# Registration tests
+# ---------------------------------------------------
+
+
 def test_control_vacuum_registered():
-    """control_vacuum is registered with correct actions."""
+    """control_vacuum is registered with a free-form action (no enum)."""
     info = TOOL_REGISTRY.get("control_vacuum")
     assert info is not None
     props = info["parameters"]["properties"]
     assert "entity_id" in props
-    actions = props["action"]["enum"]
-    assert "start" in actions
-    assert "pause" in actions
-    assert "stop" in actions
-    assert "return_to_base" in actions
-    assert "locate" in actions
+    # Action is a free-form string — no hardcoded enum
+    assert props["action"]["type"] == "string"
+    assert "enum" not in props["action"]
 
 
 def test_control_vacuum_has_fan_speed():
@@ -761,18 +763,31 @@ async def test_clean_rooms_fallback_when_roborock_unavailable():
         "attributes": {"friendly_name": "Dusty"},
     }
 
+    # HA services list with vacuum.start available
+    services_list = [
+        {"domain": "vacuum", "services": {"start": {}, "stop": {}, "pause": {}}},
+    ]
+
+    call_count = {"read_state": 0}
+
+    async def _mock_read_state(eid):
+        call_count["read_state"] += 1
+        if call_count["read_state"] == 1:
+            return mock_state
+        return verify_state
+
     async def _mock_ha(method, path, json_data=None):
         if path == "/services/roborock/vacuum_clean_segment":
             raise Exception("service not found")
-        # Return empty list for /states (dock sensor discovery)
         if path == "/states":
             return []
+        if path == "/services":
+            return services_list
         return {}
 
     with patch(
         "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        side_effect=[mock_state, verify_state],
+        side_effect=_mock_read_state,
     ), patch(
         "tools.vacuum.ha_request",
         side_effect=_mock_ha,
@@ -789,3 +804,390 @@ async def test_clean_rooms_fallback_when_roborock_unavailable():
         )
 
     assert "unavailable" in result.lower() or "fallback" in result.lower() or "full clean" in result.lower()
+
+
+# ---------------------------------------------------
+# Dynamic action resolution tests
+# ---------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_resolve_action_uses_ha_vacuum_service():
+    """Standard actions (start, pause, stop) are resolved via HA services."""
+    from tools.vacuum import control_vacuum
+
+    services_list = [
+        {"domain": "vacuum", "services": {"start": {}, "stop": {}, "pause": {}, "return_to_base": {}, "locate": {}}},
+    ]
+    vac_state = {
+        "state": "cleaning",
+        "attributes": {"friendly_name": "Dusty"},
+    }
+
+    async def _mock_ha(method, path, json_data=None):
+        if path == "/services":
+            return services_list
+        if path == "/states":
+            return []
+        return {}
+
+    with patch(
+        "tools.vacuum.ha_request",
+        side_effect=_mock_ha,
+    ), patch(
+        "tools.vacuum.call_ha_service",
+        new_callable=AsyncMock,
+    ) as mock_svc, patch(
+        "tools.vacuum.read_state",
+        new_callable=AsyncMock,
+        return_value=vac_state,
+    ), patch(
+        "tools.vacuum.get_battery_level",
+        new_callable=AsyncMock,
+        return_value=80,
+    ):
+        result = await control_vacuum(
+            entity_id="vacuum.dusty", action="start"
+        )
+
+    mock_svc.assert_called_once_with(
+        "vacuum", "start", "vacuum.dusty"
+    )
+    assert "done" in result.lower()
+    assert "dusty" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_resolve_action_empty_dustbin_via_button():
+    """empty_dustbin is resolved by discovering and pressing a button entity."""
+    from tools.vacuum import control_vacuum
+
+    ha_states = [
+        {"entity_id": "button.dusty_empty_waste_bin", "state": "unknown", "attributes": {}},
+        {"entity_id": "sensor.dusty_status", "state": "charging", "attributes": {}},
+    ]
+    vac_state = {
+        "state": "docked",
+        "attributes": {"friendly_name": "Dusty"},
+    }
+
+    with patch(
+        "tools.vacuum.ha_request",
+        new_callable=AsyncMock,
+        return_value=ha_states,
+    ), patch(
+        "tools.vacuum.call_ha_service",
+        new_callable=AsyncMock,
+    ) as mock_svc, patch(
+        "tools.vacuum.read_state",
+        new_callable=AsyncMock,
+        return_value=vac_state,
+    ), patch(
+        "tools.vacuum.get_battery_level",
+        new_callable=AsyncMock,
+        return_value=100,
+    ):
+        result = await control_vacuum(
+            entity_id="vacuum.dusty", action="empty_dustbin"
+        )
+
+    mock_svc.assert_called_once_with(
+        "button", "press", "button.dusty_empty_waste_bin"
+    )
+    assert "pressed" in result.lower() or "done" in result.lower()
+    assert "dusty" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_resolve_action_empty_dustbin_fallback_send_command():
+    """empty_dustbin falls back to send_command when no button found."""
+    from tools.vacuum import control_vacuum
+
+    # No matching button entities
+    ha_states = [
+        {"entity_id": "sensor.dusty_status", "state": "charging", "attributes": {}},
+    ]
+    vac_state = {
+        "state": "docked",
+        "attributes": {"friendly_name": "Dusty"},
+    }
+
+    async def _mock_ha(method, path, json_data=None):
+        if path == "/states":
+            return ha_states
+        # send_command call succeeds
+        return {}
+
+    with patch(
+        "tools.vacuum.ha_request",
+        side_effect=_mock_ha,
+    ), patch(
+        "tools.vacuum.read_state",
+        new_callable=AsyncMock,
+        return_value=vac_state,
+    ), patch(
+        "tools.vacuum.get_battery_level",
+        new_callable=AsyncMock,
+        return_value=100,
+    ):
+        result = await control_vacuum(
+            entity_id="vacuum.dusty", action="empty_dustbin"
+        )
+
+    assert "send_command" in result.lower() or "command" in result.lower()
+    assert "dusty" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_resolve_action_empty_dustbin_all_fail():
+    """empty_dustbin reports clear failure when nothing works."""
+    from tools.vacuum import control_vacuum
+
+    ha_states = [
+        {"entity_id": "sensor.dusty_status", "state": "charging", "attributes": {}},
+    ]
+    vac_state = {
+        "state": "docked",
+        "attributes": {"friendly_name": "Dusty"},
+    }
+
+    async def _mock_ha(method, path, json_data=None):
+        if path == "/states":
+            return ha_states
+        raise Exception("service not available")
+
+    with patch(
+        "tools.vacuum.ha_request",
+        side_effect=_mock_ha,
+    ), patch(
+        "tools.vacuum.read_state",
+        new_callable=AsyncMock,
+        return_value=vac_state,
+    ), patch(
+        "tools.vacuum.get_battery_level",
+        new_callable=AsyncMock,
+        return_value=100,
+    ):
+        result = await control_vacuum(
+            entity_id="vacuum.dusty", action="empty_dustbin"
+        )
+
+    assert "could not" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_resolve_action_dust_collection_button_suffix():
+    """Button entities with _dust_collection suffix are discovered."""
+    from tools.vacuum import _try_button
+
+    ha_states = [
+        {"entity_id": "button.robo_vac_dust_collection", "state": "unknown", "attributes": {}},
+    ]
+
+    with patch(
+        "tools.vacuum.ha_request",
+        new_callable=AsyncMock,
+        return_value=ha_states,
+    ), patch(
+        "tools.vacuum.call_ha_service",
+        new_callable=AsyncMock,
+    ) as mock_svc:
+        result = await _try_button(
+            "vacuum.robo_vac", "empty_dustbin", ha_states
+        )
+
+    mock_svc.assert_called_once_with(
+        "button", "press", "button.robo_vac_dust_collection"
+    )
+    assert result is not None
+    assert "pressed" in result.lower() or "done" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_resolve_action_unknown_action_returns_error():
+    """Unknown actions that don't match anything return a helpful error."""
+    from tools.vacuum import _resolve_action
+
+    # No matching vacuum services
+    services_list = [
+        {"domain": "vacuum", "services": {"start": {}, "stop": {}}},
+    ]
+    # No matching button entities
+    ha_states = [
+        {"entity_id": "sensor.dusty_status", "state": "ok", "attributes": {}},
+    ]
+
+    async def _mock_ha(method, path, json_data=None):
+        if path == "/services":
+            return services_list
+        if path == "/states":
+            return ha_states
+        raise Exception("not found")
+
+    with patch(
+        "tools.vacuum.ha_request",
+        side_effect=_mock_ha,
+    ):
+        result = await _resolve_action(
+            "vacuum.dusty", "nonexistent_action"
+        )
+
+    assert "unknown" in result.lower() or "no matching" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_resolve_action_novel_vacuum_service():
+    """A vacuum service not in any hardcoded list still works
+    if HA reports it as available — the whole point of dynamic
+    resolution."""
+    from tools.vacuum import control_vacuum
+
+    # HA reports a custom service we've never heard of
+    services_list = [
+        {"domain": "vacuum", "services": {
+            "start": {},
+            "turbo_clean": {},  # novel service
+        }},
+    ]
+    vac_state = {
+        "state": "cleaning",
+        "attributes": {"friendly_name": "Dusty"},
+    }
+
+    async def _mock_ha(method, path, json_data=None):
+        if path == "/services":
+            return services_list
+        if path == "/states":
+            return []
+        return {}
+
+    with patch(
+        "tools.vacuum.ha_request",
+        side_effect=_mock_ha,
+    ), patch(
+        "tools.vacuum.call_ha_service",
+        new_callable=AsyncMock,
+    ) as mock_svc, patch(
+        "tools.vacuum.read_state",
+        new_callable=AsyncMock,
+        return_value=vac_state,
+    ), patch(
+        "tools.vacuum.get_battery_level",
+        new_callable=AsyncMock,
+        return_value=90,
+    ):
+        result = await control_vacuum(
+            entity_id="vacuum.dusty", action="turbo_clean"
+        )
+
+    mock_svc.assert_called_once_with(
+        "vacuum", "turbo_clean", "vacuum.dusty"
+    )
+    assert "done" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_resolve_action_novel_button_entity():
+    """A button entity we've never heard of still works if
+    it matches the vacuum name — the whole point of dynamic
+    resolution."""
+    from tools.vacuum import control_vacuum
+
+    # HA has a novel button entity for this vacuum
+    ha_states = [
+        {"entity_id": "button.dusty_self_clean", "state": "unknown", "attributes": {}},
+    ]
+    # No matching vacuum service
+    services_list = [
+        {"domain": "vacuum", "services": {"start": {}, "stop": {}}},
+    ]
+    vac_state = {
+        "state": "docked",
+        "attributes": {"friendly_name": "Dusty"},
+    }
+
+    async def _mock_ha(method, path, json_data=None):
+        if path == "/services":
+            return services_list
+        if path == "/states":
+            return ha_states
+        return {}
+
+    with patch(
+        "tools.vacuum.ha_request",
+        side_effect=_mock_ha,
+    ), patch(
+        "tools.vacuum.call_ha_service",
+        new_callable=AsyncMock,
+    ) as mock_svc, patch(
+        "tools.vacuum.read_state",
+        new_callable=AsyncMock,
+        return_value=vac_state,
+    ), patch(
+        "tools.vacuum.get_battery_level",
+        new_callable=AsyncMock,
+        return_value=100,
+    ):
+        result = await control_vacuum(
+            entity_id="vacuum.dusty", action="self_clean"
+        )
+
+    mock_svc.assert_called_once_with(
+        "button", "press", "button.dusty_self_clean"
+    )
+    assert "pressed" in result.lower() or "done" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_fan_speed_set_alongside_action():
+    """fan_speed is set after the main action succeeds."""
+    from tools.vacuum import control_vacuum
+
+    services_list = [
+        {"domain": "vacuum", "services": {"start": {}, "set_fan_speed": {}}},
+    ]
+    vac_state = {
+        "state": "cleaning",
+        "attributes": {"friendly_name": "Dusty", "fan_speed": "turbo"},
+    }
+
+    async def _mock_ha(method, path, json_data=None):
+        if path == "/services":
+            return services_list
+        if path == "/states":
+            return []
+        return {}
+
+    with patch(
+        "tools.vacuum.ha_request",
+        side_effect=_mock_ha,
+    ), patch(
+        "tools.vacuum.call_ha_service",
+        new_callable=AsyncMock,
+    ) as mock_svc, patch(
+        "tools.vacuum.read_state",
+        new_callable=AsyncMock,
+        return_value=vac_state,
+    ), patch(
+        "tools.vacuum.get_battery_level",
+        new_callable=AsyncMock,
+        return_value=80,
+    ):
+        result = await control_vacuum(
+            entity_id="vacuum.dusty",
+            action="start",
+            fan_speed="turbo",
+        )
+
+    # Should have two calls: start + set_fan_speed
+    assert mock_svc.call_count == 2
+    mock_svc.assert_any_call(
+        "vacuum", "start", "vacuum.dusty"
+    )
+    mock_svc.assert_any_call(
+        "vacuum",
+        "set_fan_speed",
+        "vacuum.dusty",
+        {"fan_speed": "turbo"},
+    )
+    assert "done" in result.lower()

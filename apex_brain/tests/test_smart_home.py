@@ -88,14 +88,13 @@ async def test_control_area_resolves_area_and_calls_service():
         side_effect=mock_template_request,
     ), patch(
         "tools.generic.ha_request", new_callable=AsyncMock,
+        return_value=[],
     ) as mock_do_ha, patch(
         "tools.generic.verify_generic", new_callable=AsyncMock,
-    ) as mock_verify, patch(
+        return_value="Kitchen lights: on",
+    ), patch(
         "tools.generic.asyncio.sleep", new_callable=AsyncMock,
     ):
-        mock_do_ha.return_value = []
-        mock_verify.return_value = "Kitchen lights: on"
-
         from tools.smart_home import control_area
 
         result = await control_area(
@@ -106,8 +105,8 @@ async def test_control_area_resolves_area_and_calls_service():
 
     assert "kitchen" in result.lower() or "Kitchen" in result
     assert "done" in result.lower()
-    # do() must have been called (which calls ha_request)
-    mock_do_ha.assert_awaited_once()
+    # do() calls ha_request at least once (service call)
+    assert mock_do_ha.await_count >= 1
 
 
 @pytest.mark.asyncio

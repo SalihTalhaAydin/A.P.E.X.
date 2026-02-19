@@ -1,7 +1,8 @@
 """
 Vacuum control tool for Home Assistant robot vacuums.
-Supports start, pause, stop, return-to-base, locate, fan speed,
-and room-level segment cleaning (Roborock and compatible vacuums).
+Dynamically resolves any action against HA services and
+companion entities — no hardcoded action list. Also supports
+room-level segment cleaning (Roborock and compatible vacuums).
 """
 
 from __future__ import annotations
@@ -108,6 +109,271 @@ async def _get_dock_status(entity_id: str) -> dict:
     return result
 
 
+# ------------------------------------------------------------------
+# Dynamic action resolution
+# ------------------------------------------------------------------
+
+# Normalised aliases map user-friendly names to the HA service or
+# companion-entity action they correspond to.  Keys are checked
+# against the normalised (lowercased, stripped) action string.
+_ACTION_ALIASES: dict[str, str] = {
+    "empty_dustbin": "_button",
+    "empty_waste_bin": "_button",
+    "empty_waste": "_button",
+    "empty_bin": "_button",
+    "empty": "_button",
+    "dust_collection": "_button",
+    "start_collect_dust": "_button",
+    "reset_filter": "_button",
+    "reset_main_brush": "_button",
+    "reset_side_brush": "_button",
+    "reset_sensor": "_button",
+}
+
+
+async def _get_all_states() -> list[dict]:
+    """Fetch all entity states from HA (cached per call chain)."""
+    try:
+        states = await ha_request("GET", "/states")
+        if isinstance(states, list):
+            return states
+    except Exception:
+        pass
+    return []
+
+
+async def _try_button(
+    entity_id: str,
+    action: str,
+    all_states: list[dict] | None = None,
+) -> str | None:
+    """Try to press a companion button entity matching the action.
+
+    Looks for ``button.<vacuum_name>_<action>`` and common
+    variations.  Returns a result string on success, None if no
+    matching button was found.
+    """
+    name = entity_id.split(".", 1)[-1]
+
+    if all_states is None:
+        all_states = await _get_all_states()
+
+    # Build a set of entity_ids for quick lookup
+    state_ids = {
+        s.get("entity_id", "")
+        for s in all_states
+        if isinstance(s, dict)
+    }
+
+    # Normalise the action for suffix matching
+    action_norm = action.lower().strip().lstrip("_")
+
+    # Candidate suffixes to try: the action itself, then
+    # common variations
+    candidates = [action_norm]
+    # e.g. "empty_dustbin" → also try "empty_waste_bin",
+    # "dust_collection"
+    if "empty" in action_norm or "dust" in action_norm:
+        candidates.extend(
+            [
+                "empty_waste_bin",
+                "dust_collection",
+                "empty_dustbin",
+            ]
+        )
+    if "reset" in action_norm:
+        # e.g. "reset_filter" stays as-is, also try
+        # "reset_filter_lifetime"
+        candidates.append(f"{action_norm}_lifetime")
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique: list[str] = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            unique.append(c)
+
+    for suffix in unique:
+        target = f"button.{name}_{suffix}"
+        if target in state_ids:
+            try:
+                await call_ha_service(
+                    "button", "press", target
+                )
+                return (
+                    f"Done — pressed {target}."
+                )
+            except Exception as e:
+                logger.warning(
+                    "button.press %s failed: %s",
+                    target,
+                    e,
+                )
+
+    return None
+
+
+async def _try_vacuum_service(
+    entity_id: str, action: str
+) -> str | None:
+    """Try to call vacuum.<action> as an HA service.
+
+    Queries HA for available vacuum-domain services and calls
+    the matching one.  Returns a result string on success,
+    None if the service does not exist.
+    """
+    # Normalise
+    action_norm = action.lower().strip()
+
+    # Query HA for available vacuum services
+    try:
+        services_raw = await ha_request("GET", "/services")
+    except Exception:
+        services_raw = []
+
+    vacuum_services: set[str] = set()
+    for entry in services_raw:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("domain") == "vacuum":
+            vacuum_services = set(
+                entry.get("services", {}).keys()
+            )
+            break
+
+    if action_norm not in vacuum_services:
+        return None
+
+    try:
+        await call_ha_service(
+            "vacuum", action_norm, entity_id
+        )
+        return f"Done — called vacuum.{action_norm}."
+    except Exception as e:
+        logger.warning(
+            "vacuum.%s failed for %s: %s",
+            action_norm,
+            entity_id,
+            e,
+        )
+        return None
+
+
+async def _try_send_command(
+    entity_id: str, action: str
+) -> str | None:
+    """Try vacuum.send_command as a last resort.
+
+    Useful for Roborock custom commands like
+    ``app_start_collect_dust``.
+    """
+    # Map friendly names to Roborock command strings
+    cmd_map: dict[str, str] = {
+        "empty_dustbin": "app_start_collect_dust",
+        "empty_waste_bin": "app_start_collect_dust",
+        "empty_waste": "app_start_collect_dust",
+        "empty_bin": "app_start_collect_dust",
+        "empty": "app_start_collect_dust",
+        "dust_collection": "app_start_collect_dust",
+        "start_collect_dust": "app_start_collect_dust",
+    }
+    action_norm = action.lower().strip()
+    command = cmd_map.get(action_norm, action_norm)
+
+    try:
+        await ha_request(
+            "POST",
+            "/services/vacuum/send_command",
+            json_data={
+                "entity_id": entity_id,
+                "command": command,
+            },
+        )
+        return (
+            f"Done — sent command '{command}' to "
+            f"{friendly_name(entity_id)}."
+        )
+    except Exception:
+        return None
+
+
+async def _resolve_action(
+    entity_id: str, action: str
+) -> str:
+    """Dynamically resolve and execute any vacuum action.
+
+    Resolution order:
+    1. If the action is a known vacuum-domain service in HA
+       (e.g. start, pause, stop, return_to_base, locate,
+        set_fan_speed, send_command, clean_spot, …),
+       call it directly.
+    2. If the action matches a companion ``button.*`` entity
+       (e.g. button.dusty_empty_waste_bin), press it.
+    3. Fall back to ``vacuum.send_command`` with the action
+       as the command string (works for Roborock custom cmds).
+    4. If nothing works, return a clear error with what was
+       tried.
+    """
+    action_norm = action.lower().strip()
+
+    # Check if this action is aliased to a button operation
+    is_button_action = action_norm in _ACTION_ALIASES
+
+    # For button-type actions, try button first (more
+    # reliable than send_command for dock operations)
+    if is_button_action:
+        all_states = await _get_all_states()
+
+        btn_result = await _try_button(
+            entity_id, action_norm, all_states
+        )
+        if btn_result:
+            return btn_result
+
+        # Then try send_command
+        cmd_result = await _try_send_command(
+            entity_id, action_norm
+        )
+        if cmd_result:
+            return cmd_result
+
+        fn = friendly_name(entity_id)
+        return (
+            f"Could not {action} for {fn}: no compatible "
+            f"button entity found and send_command failed. "
+            f"Check if the dock supports this operation."
+        )
+
+    # For non-button actions, try vacuum service first
+    svc_result = await _try_vacuum_service(
+        entity_id, action_norm
+    )
+    if svc_result:
+        return svc_result
+
+    # Maybe it's a button entity we didn't recognize
+    btn_result = await _try_button(entity_id, action_norm)
+    if btn_result:
+        return btn_result
+
+    # Last resort: send_command
+    cmd_result = await _try_send_command(
+        entity_id, action_norm
+    )
+    if cmd_result:
+        return cmd_result
+
+    fn = friendly_name(entity_id)
+    return (
+        f"Unknown action '{action}' for {fn}. "
+        f"No matching vacuum service, button entity, or "
+        f"send_command found. Use "
+        f"discover(what='services', filter='vacuum') to "
+        f"see available services."
+    )
+
+
 async def _verify_vacuum(entity_id: str) -> str:
     """Read back a vacuum's state + battery + fan speed
     + dock water status + overdue maintenance.
@@ -189,10 +455,13 @@ async def _verify_vacuum(entity_id: str) -> str:
 
 @tool(
     description=(
-        "Control a robot vacuum: start cleaning, pause, "
-        "stop, return to base, or locate. Optionally set "
-        "fan speed. Use list_entities(domain='vacuum') "
-        "to discover available vacuums."
+        "Control a robot vacuum. Any action is supported "
+        "— the tool dynamically discovers available HA "
+        "services and companion button entities. Common "
+        "actions: start, pause, stop, return_to_base, "
+        "locate, empty_dustbin, clean_spot. But any "
+        "vacuum service, button entity, or send_command "
+        "will be resolved automatically."
     ),
     parameters={
         "type": "object",
@@ -206,15 +475,12 @@ async def _verify_vacuum(entity_id: str) -> str:
             },
             "action": {
                 "type": "string",
-                "enum": [
-                    "start",
-                    "pause",
-                    "stop",
-                    "return_to_base",
-                    "locate",
-                ],
                 "description": (
-                    "Action to perform on the vacuum."
+                    "Action to perform. Any vacuum "
+                    "service, button entity action, or "
+                    "send_command is supported. Common: "
+                    "start, pause, stop, return_to_base, "
+                    "locate, empty_dustbin."
                 ),
             },
             "fan_speed": {
@@ -233,33 +499,24 @@ async def control_vacuum(
     action: str,
     fan_speed: str | None = None,
 ) -> str:
-    """Control a robot vacuum."""
+    """Control a robot vacuum — any action, dynamically
+    resolved."""
     try:
-        svc_map = {
-            "start": "start",
-            "pause": "pause",
-            "stop": "stop",
-            "return_to_base": "return_to_base",
-            "locate": "locate",
-        }
-        service = svc_map.get(action)
-        if not service:
-            return f"Unknown vacuum action: {action}"
-
-        await call_ha_service(
-            "vacuum", service, entity_id
-        )
+        result = await _resolve_action(entity_id, action)
 
         if fan_speed is not None:
-            await call_ha_service(
-                "vacuum",
-                "set_fan_speed",
-                entity_id,
-                {"fan_speed": fan_speed},
-            )
+            try:
+                await call_ha_service(
+                    "vacuum",
+                    "set_fan_speed",
+                    entity_id,
+                    {"fan_speed": fan_speed},
+                )
+            except Exception as e:
+                result += f" (fan_speed failed: {e})"
 
         status = await _verify_vacuum(entity_id)
-        return f"Done. {status}"
+        return f"{result} {status}"
 
     except httpx.HTTPStatusError as e:
         return format_ha_error(entity_id, "vacuum", e)
