@@ -3,7 +3,7 @@
 ## Project Overview
 - You are working on the **Apex Brain** Home Assistant add-on. See `README.md` for architecture, deployment, and conventions.
 - Source code lives in `apex_brain/`; helper scripts in `scripts/`; docs in `docs/`.
-- Run tasks in parallel when possible; complete implementations end-to-end without asking for confirmation unless critical.
+- Complete implementations end-to-end without asking for confirmation unless critical.
 
 ## Token & Credential Rules (CRITICAL)
 
@@ -15,33 +15,6 @@
 4. **Use the existing token as-is.** The token is loaded automatically by `brain/config.py` from the environment. Do not add token refresh, rotation, or renewal logic to the codebase.
 5. If a token appears invalid or expired, **tell the user** rather than attempting to fix it yourself. The user will rotate it manually in HA (Profile > Security) and update `.env`.
 6. The same rules apply to `SUPERVISOR_TOKEN` in the add-on runtime — it is managed by the HA Supervisor and must not be modified.
-
-## Parallel-First Execution (MANDATORY)
-
-**Every task MUST be parallelized by default.** This is not optional — it is the standard operating mode for this project.
-
-### Rules
-1. **Always decompose work into parallel sub-agents.** Before writing any code, break the task into independent units and spawn them simultaneously using the Task tool. Even seemingly "small" tasks should be evaluated for parallelization.
-2. **Minimum parallel agents: 3.** For any non-trivial task, spawn at least 3 sub-agents. For larger tasks (features, refactors, multi-file changes), use 4–6 agents.
-3. **Agent roles to consider for every task:**
-   - **Explore agent** — research the codebase, find relevant files, understand patterns
-   - **Implement agent(s)** — write the actual code changes (split by module/file)
-   - **Test agent** — write or run tests for the changes
-   - **Validate agent** — lint, type-check, or verify the changes work
-4. **Run independent work in parallel, dependent work sequentially.** If agents don't depend on each other's output, they run at the same time. Only serialize when one agent needs another's result.
-5. **Background agents for long-running tasks.** Use `run_in_background: true` for tasks like test suites or builds, and continue other work while they run.
-6. **Coordinate via files, not conversation.** Agents working on the same feature should read/write to the actual source files. The orchestrating agent (you) merges and resolves conflicts.
-7. **Never do sequentially what can be done in parallel.** If you catch yourself doing steps one-by-one that could be concurrent, stop and restructure.
-
-### Example Decomposition
-For a task like "add a new API endpoint":
-- Agent 1 (Explore): Find existing endpoint patterns, router setup, middleware
-- Agent 2 (Implement): Write the endpoint handler and route registration
-- Agent 3 (Implement): Write the data model / service layer changes
-- Agent 4 (Test): Write tests for the new endpoint
-- Agent 5 (Validate): Run linting and existing tests to check for regressions
-
-All 5 launch simultaneously. Agents 2–4 use Agent 1's findings if needed (Agent 1 runs as Explore type which is fast).
 
 ## Automatic Execution for Home Assistant Tasks (MANDATORY)
 
@@ -75,7 +48,6 @@ Every change MUST pass both layers before it is marked done:
    - Log or report the validation result so the user can see proof it works.
 
 ### Testing Rules
-- **A test agent must be part of every parallel decomposition.** Never skip the test agent.
 - **Tests run automatically** — do not ask the user "should I run tests?" Just run them.
 - **If tests fail, fix and re-run.** Do not report a task as complete with failing tests.
 - **Test results must be visible.** Always show the user test output (pass/fail counts, any errors).
