@@ -44,9 +44,9 @@ python -m brain.server
 ```
 
 ```bash
-# View these docs locally
-pip install mkdocs-material
-mkdocs serve
+# View these docs locally (or: ./scripts/serve-docs.sh)
+pip install -r requirements-docs.txt   # Zensical — Material team's MkDocs successor
+zensical serve
 # Open http://127.0.0.1:8000
 ```
 

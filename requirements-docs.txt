@@ -1,0 +1,3 @@
+# Docs tooling — Zensical (Material team's successor to MkDocs)
+# Reads mkdocs.yml; no MkDocs 2.0 / Material compatibility issues.
+zensical>=0.0.15
