@@ -153,6 +153,26 @@ async def main():
             else:
                 print("Add-on is already on the latest version.")
 
+        # 4. Restart add-on to apply config/code changes
+        if state in ("started", "started, watchdog"):
+            await ws.send(
+                json.dumps(
+                    {
+                        "id": 4,
+                        "type": "supervisor/api",
+                        "endpoint": f"/addons/{ADDON_SLUG}/restart",
+                        "method": "post",
+                    }
+                )
+            )
+            r4 = json.loads(await ws.recv())
+            if r4.get("success", True):
+                print("Add-on restarted.")
+            else:
+                print("Restart failed:", r4.get("error", r4))
+        elif state != "?":
+            print(f"Add-on not running (state: {state}). Start it from HA UI when ready.")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
