@@ -22,5 +22,8 @@ python-dotenv>=1.0.0
 google-api-python-client>=2.0.0
 google-auth>=2.0.0
 
+# MCP (Model Context Protocol) client
+mcp>=1.25,<2
+
 # Utilities
 numpy>=1.26.0

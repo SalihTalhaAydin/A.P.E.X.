@@ -238,8 +238,10 @@ class TestAIToolLoop:
         first_resp = _make_llm_response(content=None, tool_calls=[tc])
         second_resp = _make_llm_response(content="It's sunny in Austin")
 
+        fake_registry = {"get_weather": {}}
         with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.execute_tool", new_callable=AsyncMock) as mock_exec:
+             patch("brain.conversation.execute_tool", new_callable=AsyncMock) as mock_exec, \
+             patch("brain.conversation.TOOL_REGISTRY", fake_registry):
             mock_litellm.acompletion = AsyncMock(side_effect=[first_resp, second_resp])
             mock_exec.return_value = '{"temp": 85}'
 
@@ -260,8 +262,10 @@ class TestAIToolLoop:
         first_resp = _make_llm_response(content=None, tool_calls=[tc1, tc2])
         second_resp = _make_llm_response(content="Weather is 85F and it's 3pm")
 
+        fake_registry = {"get_weather": {}, "get_time": {}}
         with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.execute_tool", new_callable=AsyncMock) as mock_exec:
+             patch("brain.conversation.execute_tool", new_callable=AsyncMock) as mock_exec, \
+             patch("brain.conversation.TOOL_REGISTRY", fake_registry):
             mock_litellm.acompletion = AsyncMock(side_effect=[first_resp, second_resp])
             mock_exec.side_effect = ['{"temp": 85}', '{"time": "15:00"}']
 
@@ -309,8 +313,10 @@ class TestAIToolLoop:
         first_resp = _make_llm_response(content=None, tool_calls=[tc])
         second_resp = _make_llm_response(content="Handled it")
 
+        fake_registry = {"some_tool": {}}
         with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.execute_tool", new_callable=AsyncMock) as mock_exec:
+             patch("brain.conversation.execute_tool", new_callable=AsyncMock) as mock_exec, \
+             patch("brain.conversation.TOOL_REGISTRY", fake_registry):
             mock_litellm.acompletion = AsyncMock(side_effect=[first_resp, second_resp])
             mock_exec.return_value = "ok"
 

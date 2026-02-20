@@ -29,6 +29,7 @@ from pydantic import BaseModel
 from tools import discover_tools
 from tools.base import TOOL_REGISTRY
 from tools.knowledge import set_knowledge_store
+from tools.mcp_bridge import MCPBridge
 from tools.routines import (
     set_knowledge_store as set_routines_store,
 )
@@ -155,12 +156,31 @@ async def lifespan(_app: FastAPI):
         ", ".join(TOOL_REGISTRY.keys()),
     )
 
+    # Connect MCP bridge (optional)
+    mcp_bridge: MCPBridge | None = None
+    if settings.mcp_server_url:
+        mcp_bridge = MCPBridge(
+            url=settings.mcp_server_url,
+            transport=settings.mcp_transport,
+        )
+        await mcp_bridge.connect()
+        if mcp_bridge.connected:
+            await mcp_bridge.discover_tools(
+                skip_names=set(TOOL_REGISTRY.keys()),
+            )
+            logger.info(
+                "  MCP tools: %d from %s",
+                mcp_bridge.tool_count,
+                settings.mcp_server_url,
+            )
+
     # Create conversation handler
     conversation = Conversation(
         conversation_store=convo_store,
         knowledge_store=knowledge_store,
         fact_extractor=fact_extractor,
         context_builder=context_builder,
+        mcp_bridge=mcp_bridge,
     )
 
     # Create event handler (webhook reactions)
@@ -177,6 +197,8 @@ async def lifespan(_app: FastAPI):
     yield
 
     # Shutdown
+    if mcp_bridge and mcp_bridge.connected:
+        await mcp_bridge.disconnect()
     await convo_store.close()
     await knowledge_store.close()
     logger.info("Apex Brain shut down.")
@@ -314,6 +336,10 @@ async def health():
     }
     if ha_err:
         out["ha_error"] = ha_err
+    if conversation and conversation.mcp_bridge:
+        bridge = conversation.mcp_bridge
+        out["mcp_connected"] = bridge.connected
+        out["mcp_tools"] = bridge.tool_names
     return out
 
 

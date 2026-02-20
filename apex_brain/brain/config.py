@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     # Phone notification target (mobile_app entity name)
     phone_notify_target: str = "mobile_app_salih_iphone"
 
+    # MCP Server (optional - connect for expanded HA capabilities)
+    mcp_server_url: str = ""  # e.g. http://ha-ip:8080/sse
+    mcp_transport: str = "sse"  # "sse" or "streamable_http"
+
     # Server
     port: int = 8080
 

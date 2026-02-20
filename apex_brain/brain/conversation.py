@@ -15,7 +15,11 @@ from memory.context_builder import ContextBuilder
 from memory.conversation_store import ConversationStore
 from memory.fact_extractor import FactExtractor
 from memory.knowledge_store import KnowledgeStore
-from tools.base import execute_tool, get_openai_tool_definitions
+from tools.base import (
+    TOOL_REGISTRY,
+    execute_tool,
+    get_openai_tool_definitions,
+)
 
 from brain.config import settings
 
@@ -44,11 +48,13 @@ class Conversation:
         knowledge_store: KnowledgeStore,
         fact_extractor: FactExtractor,
         context_builder: ContextBuilder,
+        mcp_bridge=None,
     ):
         self.conversation_store = conversation_store
         self.knowledge_store = knowledge_store
         self.fact_extractor = fact_extractor
         self.context_builder = context_builder
+        self.mcp_bridge = mcp_bridge
 
         # Explainability: track action trace per session
         self._action_traces: dict[str, str] = {}
@@ -97,8 +103,13 @@ class Conversation:
             {"role": "user", "content": user_message},
         ]
 
-        # 4. Get tool definitions
+        # 4. Get tool definitions (native + MCP)
         tool_defs = get_openai_tool_definitions()
+        if self.mcp_bridge and self.mcp_bridge.connected:
+            tool_defs = (
+                tool_defs
+                + self.mcp_bridge.get_openai_tool_definitions()
+            )
 
         # 5. Call AI with tool loop
         response_text = await self._ai_tool_loop(
@@ -216,7 +227,24 @@ class Conversation:
                     json.dumps(args, default=str)[:500],
                 )
 
-                result = await execute_tool(fn_name, args)
+                # Route: native tool or MCP tool
+                if fn_name in TOOL_REGISTRY:
+                    result = await execute_tool(
+                        fn_name, args
+                    )
+                elif (
+                    self.mcp_bridge
+                    and self.mcp_bridge.has_tool(fn_name)
+                ):
+                    result = (
+                        await self.mcp_bridge.execute_tool(
+                            fn_name, args
+                        )
+                    )
+                else:
+                    result = (
+                        f"Unknown tool: {fn_name}"
+                    )
                 logger.debug(
                     "Tool result: %s -> %s",
                     fn_name,
