@@ -3,6 +3,9 @@
 !.env.encrypted
 !.env.example
 *.db
+*.db-shm
+*.db-wal
+*.db-journal
 
 # Local tool config
 .playwright-mcp/
