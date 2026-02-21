@@ -1,7 +1,9 @@
 """
 Routines Tool - Named multi-step sequences.
-Stores routine definitions in the knowledge store and
-lets the AI execute them by chaining tool calls naturally.
+
+Stores routine definitions in the dedicated RoutineStore with
+lifecycle tracking (use_count, last_used_at) and lets the AI
+execute them by chaining tool calls naturally.
 """
 
 import logging
@@ -10,14 +12,14 @@ from tools.base import tool
 
 logger = logging.getLogger(__name__)
 
-# Set during server startup (same pattern as knowledge.py)
-_knowledge_store = None
+# Set during server startup
+_routine_store = None
 
 
-def set_knowledge_store(store):
-    """Called during server startup."""
-    global _knowledge_store
-    _knowledge_store = store
+def set_routine_store(store):
+    """Called during server startup with the RoutineStore instance."""
+    global _routine_store
+    _routine_store = store
 
 
 @tool(
@@ -67,25 +69,32 @@ async def define_routine(
     trigger: str = "",
 ) -> str:
     """Store a routine definition."""
-    if not _knowledge_store:
-        return "Memory system not initialized."
+    if not _routine_store:
+        return "Routine system not initialized."
 
-    value = steps
-    if trigger:
-        value = f"[trigger: {trigger}] {steps}"
+    # Search-before-create: check for existing routine
+    existing = await _routine_store.get_routine(name)
+    if existing:
+        return (
+            f"A routine named '{name}' already exists "
+            f"(used {existing['use_count']} times). "
+            f"Steps: {', '.join(existing['steps'])}. "
+            f"Delete it first with delete_routine or use a different name."
+        )
 
-    await _knowledge_store.store_fact(
-        category="routine",
-        key=name.lower().strip(),
-        value=value,
-        confidence=1.0,
-        source="explicit",
+    step_list = [
+        s.strip()
+        for s in steps.replace("\n", ".").split(".")
+        if s.strip()
+    ]
+    await _routine_store.save_routine(
+        name, step_list, trigger=trigger
     )
-    return f"Got it. Routine '{name}' saved."
+    return f"Got it. Routine '{name}' saved with {len(step_list)} steps."
 
 
 @tool(
-    description="List all defined routines.",
+    description="List all defined routines with usage statistics.",
     parameters={
         "type": "object",
         "properties": {},
@@ -94,26 +103,24 @@ async def define_routine(
 )
 async def list_routines() -> str:
     """List all stored routines."""
-    if not _knowledge_store:
-        return "Memory system not initialized."
+    if not _routine_store:
+        return "Routine system not initialized."
 
-    facts = await _knowledge_store.get_all_facts(
-        category="routine", limit=50
-    )
+    routines = await _routine_store.list_routines()
 
-    if not facts:
+    if not routines:
         return "No routines defined yet."
 
     lines = []
-    for f in facts:
-        lines.append(
-            f"- {f['key']}: {f['value']}"
-        )
+    for r in routines:
+        steps_str = ", ".join(r["steps"])
+        used = f"(used {r['use_count']}x"
+        if r.get("last_used_at"):
+            used += f", last: {r['last_used_at'][:10]}"
+        used += ")"
+        lines.append(f"- {r['name']}: {steps_str} {used}")
 
-    return (
-        f"{len(lines)} routine(s):\n"
-        + "\n".join(lines)
-    )
+    return f"{len(lines)} routine(s):\n" + "\n".join(lines)
 
 
 @tool(
@@ -138,46 +145,30 @@ async def list_routines() -> str:
 )
 async def run_routine(name: str) -> str:
     """Retrieve routine steps for AI execution."""
-    if not _knowledge_store:
-        return "Memory system not initialized."
+    if not _routine_store:
+        return "Routine system not initialized."
 
-    name_lower = name.lower().strip()
+    routine = await _routine_store.get_routine(name)
 
-    # Try exact match first
-    facts = await _knowledge_store.get_all_facts(
-        category="routine", limit=50
-    )
-    match = None
-    for f in facts:
-        if f["key"] == name_lower:
-            match = f
-            break
-
-    if not match:
-        # Fuzzy: try keyword search
-        results = (
-            await _knowledge_store.search_keyword(
-                query=name_lower, limit=5
-            )
-        )
-        for r in results:
-            if r.get("category") == "routine":
-                match = r
-                break
-
-    if not match:
-        available = ", ".join(
-            f["key"] for f in facts
-        )
+    if not routine:
+        available = await _routine_store.list_routines()
+        names = ", ".join(r["name"] for r in available) or "none"
         return (
             f"No routine named '{name}' found. "
-            f"Available: {available or 'none'}"
+            f"Available: {names}"
         )
 
-    steps = match["value"]
+    # Track usage
+    await _routine_store.record_usage(name)
+
+    steps = routine["steps"]
+    use_count = routine["use_count"] + 1
+    steps_text = "\n".join(
+        f"  {i + 1}. {s}" for i, s in enumerate(steps)
+    )
     return (
-        f'Routine "{match["key"]}" steps:\n'
-        f"{steps}\n\n"
+        f'Routine "{routine["name"]}" (used {use_count} times) steps:\n'
+        f"{steps_text}\n\n"
         "Execute each step now using your tools."
     )
 
@@ -199,12 +190,10 @@ async def run_routine(name: str) -> str:
 )
 async def delete_routine(name: str) -> str:
     """Delete a routine."""
-    if not _knowledge_store:
-        return "Memory system not initialized."
+    if not _routine_store:
+        return "Routine system not initialized."
 
-    deleted = await _knowledge_store.delete_fact(
-        name.lower().strip()
-    )
+    deleted = await _routine_store.delete_routine(name)
     if deleted:
         return f"Done. Deleted routine '{name}'."
     return f"No routine named '{name}' found."

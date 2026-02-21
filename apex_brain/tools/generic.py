@@ -564,19 +564,19 @@ def _format_domain_attrs(
         if "hvac_action" in attrs:
             parts.append(f"action: {attrs['hvac_action']}")
     elif domain == "light":
-        if "brightness" in attrs:
+        if attrs.get("brightness") is not None:
             pct = round(attrs["brightness"] / 255 * 100)
             parts.append(f"brightness: {pct}%")
-        if "color_temp_kelvin" in attrs:
+        if attrs.get("color_temp_kelvin") is not None:
             parts.append(
                 f"color_temp: {attrs['color_temp_kelvin']}K"
             )
     elif domain == "media_player":
-        if "media_title" in attrs:
+        if attrs.get("media_title") is not None:
             parts.append(
                 f"playing: {attrs['media_title']}"
             )
-        if "volume_level" in attrs:
+        if attrs.get("volume_level") is not None:
             vol = round(attrs["volume_level"] * 100)
             parts.append(f"volume: {vol}%")
         if "source" in attrs:

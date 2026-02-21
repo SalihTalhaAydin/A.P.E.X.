@@ -195,36 +195,25 @@ class TestConnect:
         mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session_cm.__aexit__ = AsyncMock()
 
-        with (
-            patch(
-                "tools.mcp_bridge.sse_client",
-                return_value=mock_transport_cm,
-                create=True,
-            ),
-            patch(
-                "mcp.ClientSession",
-                return_value=mock_session_cm,
-            ),
-        ):
-            # Patch the lazy imports inside connect()
-            import tools.mcp_bridge as mod
+        # Monkey-patch connect() to bypass real mcp imports
+        import tools.mcp_bridge as mod
 
-            original_connect = mod.MCPBridge.connect
+        original_connect = mod.MCPBridge.connect
 
-            async def patched_connect(self):
-                self._transport_cm = mock_transport_cm
-                await mock_transport_cm.__aenter__()
-                self._session_cm = mock_session_cm
-                self._session = await mock_session_cm.__aenter__()
-                await self._session.initialize()
-                self._connected = True
+        async def patched_connect(self):
+            self._transport_cm = mock_transport_cm
+            await mock_transport_cm.__aenter__()
+            self._session_cm = mock_session_cm
+            self._session = await mock_session_cm.__aenter__()
+            await self._session.initialize()
+            self._connected = True
 
-            mod.MCPBridge.connect = patched_connect
-            try:
-                await bridge.connect()
-                assert bridge.connected
-            finally:
-                mod.MCPBridge.connect = original_connect
+        mod.MCPBridge.connect = patched_connect
+        try:
+            await bridge.connect()
+            assert bridge.connected
+        finally:
+            mod.MCPBridge.connect = original_connect
 
     @pytest.mark.asyncio
     async def test_connect_failure_graceful(self):

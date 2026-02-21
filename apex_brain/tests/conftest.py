@@ -36,3 +36,10 @@ def mock_embed():
         return [0.1, 0.2, 0.3, 0.4]
 
     return _embed
+
+
+# Import live-test fixtures and hooks so pytest discovers them.
+# conftest_live.py provides: live_settings, ha_url, ha_headers,
+# ha_client, register_tools, state_guard, any_light_entity,
+# any_sensor_entity, and the pytest_collection_modifyitems hook.
+from tests.conftest_live import *  # noqa: E402, F401, F403

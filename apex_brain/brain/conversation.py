@@ -7,6 +7,7 @@ Triggers background fact extraction after each conversation.
 import asyncio
 import json
 import logging
+import re
 
 import litellm
 
@@ -23,22 +24,87 @@ from tools.base import (
 
 from brain.config import settings
 
+# Maximum nudge retries when confabulation is detected
+_MAX_CONFAB_NUDGES = 2
+
+# ------------------------------------------------------------------
+# Confabulation & action-request detection
+# ------------------------------------------------------------------
+
+# AI response: claims a device action was performed without using tools
+_CONFAB_CLAIM_RE = re.compile(
+    r"(?:"
+    # Direct action verbs (past tense)
+    r"turned\s+(?:off|on|the)|switched\s+(?:off|on|the)|"
+    r"powered\s+(?:off|on|down|up)|shut\s+(?:off|down|it)|"
+    # State claims ("lights are now off", "should be off")
+    r"(?:is|are|should\s+be)\s+(?:now\s+)?(?:off|on|locked"
+    r"|unlocked|open(?:ed)?|closed|armed|disarmed|set"
+    r"|adjusted|dimmed)|"
+    # Completion claims ("it is done", "taken care of")
+    r"(?:it\s+is|it's|that's|all)\s+done|"
+    r"taken\s+care\s+of|all\s+set|"
+    r"that\s+should\s+have|corrected\s+the|"
+    # First-person past claims ("I've …", "I have …")
+    r"i've\s+|i\s+have\s+|"
+    # Specific device action verbs
+    r"cycled|adjusted\s+the|dimmed\s+the|brightened\s+the|"
+    r"activated\s+the|deactivated\s+the|"
+    r"locked\s+the|unlocked\s+the|"
+    r"opened\s+the|closed\s+the|"
+    r"set\s+the\s+.{1,30}\s+to"
+    r")",
+    re.IGNORECASE,
+)
+
+# User message: requests a device/service action
+_ACTION_REQUEST_RE = re.compile(
+    r"(?:"
+    r"turn\s+(?:on|off)|switch\s+(?:on|off)|"
+    r"(?:dim|brighten)\b|"
+    r"(?:lock|unlock)\b|"
+    r"(?:open|close)\s+(?:the|my|all)|"
+    r"set\s+.{1,40}\s+to\b|"
+    r"(?:arm|disarm)\b|"
+    r"shut\s+(?:off|down)|power\s+(?:on|off|down|up)|"
+    r"lights?\s+(?:on|off)"
+    r")",
+    re.IGNORECASE,
+)
+
+# User message: correction after a failed action
+_CORRECTION_RE = re.compile(
+    r"(?:"
+    r"still\s+(?:on|off|open|closed|locked|unlocked"
+    r"|running|not)|"
+    r"didn.t\s+(?:work|turn|change|happen)|"
+    r"(?:they|it|that).{0,3}\s+(?:still|not)\s+"
+    r"(?:on|off|done|working|changed)|"
+    r"(?:are|is)\s+(?:still|not)\s+"
+    r"(?:on|off|open|closed|locked|unlocked|changed)|"
+    r"try\s+again|do\s+it\s+again|"
+    r"you\s+didn|that\s+didn|"
+    r"(?:no|nope|um)[,.]?\s*(?:they|it|still)"
+    r")",
+    re.IGNORECASE,
+)
+
 
 def _looks_like_device_action_claim(content: str) -> bool:
     """Check if text claims a device action was performed."""
     if not content or not isinstance(content, str):
         return False
-    lower = content.lower()
-    phrases = (
-        "cycled",
-        "turned off",
-        "turned on",
-        "turned the light",
-        "turned the lamp",
-        "i've ",
-        "i have ",
+    return bool(_CONFAB_CLAIM_RE.search(content))
+
+
+def _user_expects_action(content: str) -> bool:
+    """Check if user message requests an action or corrects a failed one."""
+    if not content or not isinstance(content, str):
+        return False
+    return bool(
+        _ACTION_REQUEST_RE.search(content)
+        or _CORRECTION_RE.search(content)
     )
-    return any(p in lower for p in phrases)
 
 
 class Conversation:
@@ -139,8 +205,20 @@ class Conversation:
         session_id: str = "default",
     ) -> str:
         """Call AI, handle tool calls, repeat until text."""
-        retry_nudge_done = False
+        nudge_count = 0
         tools_called: list[str] = []
+
+        # Detect if user message expects a device action
+        user_msg = next(
+            (
+                m.get("content", "")
+                for m in messages
+                if m.get("role") == "user"
+            ),
+            "",
+        )
+        user_wants_action = _user_expects_action(user_msg)
+
         for _iteration in range(max_iterations):
             try:
                 kwargs = {
@@ -170,30 +248,51 @@ class Conversation:
                 )
                 if is_first_response:
                     logger.debug("First response had 0 tool calls.")
-                if _looks_like_device_action_claim(text):
-                    logger.warning(
-                        "Responded with text only (no tool calls); "
-                        "possible confabulation."
+
+                # Detect confabulation: AI claims action or user
+                # expects action, but no tools were called yet.
+                # If tools HAVE been called, the AI is just
+                # summarising — not confabulating.
+                if not tools_called:
+                    is_confab = _looks_like_device_action_claim(
+                        text
                     )
-                    # One retry: nudge the model to use tools
-                    if (
-                        tool_defs
-                        and not retry_nudge_done
-                        and is_first_response
-                    ):
-                        retry_nudge_done = True
-                        messages.append(msg.model_dump())
-                        messages.append(
-                            {
-                                "role": "user",
-                                "content": (
-                                    "You must use the tools to "
-                                    "perform the action. Do not "
-                                    "reply with a summary only."
-                                ),
-                            },
-                        )
-                        continue
+                    unmet_action = user_wants_action
+                else:
+                    is_confab = False
+                    unmet_action = False
+
+                if is_confab:
+                    logger.warning(
+                        "Responded with text only (no tool "
+                        "calls); possible confabulation."
+                    )
+                if unmet_action:
+                    logger.warning(
+                        "User expects device action but no "
+                        "tools were called."
+                    )
+
+                if (
+                    (is_confab or unmet_action)
+                    and tool_defs
+                    and nudge_count < _MAX_CONFAB_NUDGES
+                ):
+                    nudge_count += 1
+                    messages.append(msg.model_dump())
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "You MUST call a tool to perform "
+                                "the action — do not describe or "
+                                "claim it; actually call 'do', "
+                                "'control_area', or the appropriate "
+                                "tool right now."
+                            ),
+                        },
+                    )
+                    continue
 
                 # Build and store action trace for explainability
                 facts_used = self._extract_facts_from_system(messages)

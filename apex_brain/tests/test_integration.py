@@ -774,7 +774,7 @@ class TestConfabulationGuardWithGenericTools:
         assert result == "Kitchen light is now on."
         # The nudge message was injected
         nudge_msg = messages[3]  # system, user, confab, nudge
-        assert "must use the tools" in nudge_msg["content"]
+        assert "MUST call a tool" in nudge_msg["content"]
         # do() was eventually called
         mock_ha.assert_awaited_once()
 

@@ -30,18 +30,21 @@ from tools import discover_tools
 from tools.base import TOOL_REGISTRY
 from tools.knowledge import set_knowledge_store
 from tools.mcp_bridge import MCPBridge
-from tools.routines import (
-    set_knowledge_store as set_routines_store,
-)
+from tools.routines import set_routine_store
 
 from brain.config import settings
 from brain.conversation import Conversation
+from brain.curator import Curator
+from brain.decision_engine import DecisionEngine
 from brain.event_handler import (
     EventHandler,
     WebhookEvent,
     WebhookResponse,
 )
+from brain.event_subscriber import EventSubscriber
+from brain.scheduler import Scheduler
 from brain.version import __version__
+from memory.routine_store import RoutineStore
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +53,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------
 conversation: Conversation | None = None
 event_handler: EventHandler | None = None
+scheduler: Scheduler | None = None
+event_subscriber: EventSubscriber | None = None
 startup_time: float = 0
 
 
@@ -147,10 +152,15 @@ async def lifespan(_app: FastAPI):
         max_facts=settings.max_facts_in_context,
     )
 
+    # Initialize routine store (dedicated table with lifecycle tracking)
+    routine_store = RoutineStore(settings.db_path)
+    await routine_store.initialize()
+    await routine_store.migrate_from_knowledge_store(knowledge_store)
+
     # Discover and register tools
     discover_tools()
     set_knowledge_store(knowledge_store)
-    set_routines_store(knowledge_store)
+    set_routine_store(routine_store)
     logger.info(
         "  Tools loaded: %s",
         ", ".join(TOOL_REGISTRY.keys()),
@@ -191,14 +201,55 @@ async def lifespan(_app: FastAPI):
         )
         logger.info("  Webhook endpoint: enabled")
 
+    # Create curator for self-maintenance
+    curator = None
+    if settings.curator_enabled:
+        curator = Curator(
+            conversation=conversation,
+            knowledge_store=knowledge_store,
+        )
+        logger.info("  Curator: enabled")
+
+    # Start scheduler (autonomous loop)
+    if settings.scheduler_enabled:
+        scheduler = Scheduler(
+            conversation=conversation,
+            knowledge_store=knowledge_store,
+            curator=curator,
+        )
+        await scheduler.start()
+        logger.info(
+            "  Scheduler: %d tasks registered",
+            scheduler.task_count,
+        )
+
+    # Start event subscriber (real-time HA events via WebSocket)
+    if settings.event_subscription_enabled:
+        decision_engine = DecisionEngine(
+            cooldown_seconds=settings.webhook_cooldown_seconds,
+            significance_threshold=settings.event_significance_threshold,
+            knowledge_store=knowledge_store,
+        )
+        event_subscriber = EventSubscriber(
+            conversation=conversation,
+            decision_engine=decision_engine,
+        )
+        await event_subscriber.start()
+        logger.info("  Event subscriber: enabled")
+
     logger.info("  Apex Brain is online.")
     logger.info("=" * 50)
 
     yield
 
     # Shutdown
+    if event_subscriber:
+        await event_subscriber.stop()
+    if scheduler:
+        await scheduler.stop()
     if mcp_bridge and mcp_bridge.connected:
         await mcp_bridge.disconnect()
+    await routine_store.close()
     await convo_store.close()
     await knowledge_store.close()
     logger.info("Apex Brain shut down.")
@@ -340,6 +391,11 @@ async def health():
         bridge = conversation.mcp_bridge
         out["mcp_connected"] = bridge.connected
         out["mcp_tools"] = bridge.tool_names
+    if scheduler:
+        out["scheduler_running"] = scheduler.running
+        out["scheduler_tasks"] = scheduler.task_names
+    if event_subscriber:
+        out["event_subscriber_connected"] = event_subscriber.connected
     return out
 
 

@@ -67,6 +67,24 @@ class Settings(BaseSettings):
     mcp_server_url: str = ""  # e.g. http://ha-ip:8080/sse
     mcp_transport: str = "sse"  # "sse" or "streamable_http"
 
+    # Autonomous Loop - Scheduler
+    scheduler_enabled: bool = True
+    morning_briefing_hour: int = 7  # 7 AM in configured timezone
+    evening_briefing_hour: int = 21  # 9 PM
+    health_check_interval_minutes: int = 60
+
+    # Autonomous Loop - Event Subscription
+    event_subscription_enabled: bool = True
+    event_significance_threshold: float = 0.3
+    event_reconnect_delay: int = 5  # seconds, initial backoff
+    event_max_reconnect_delay: int = 300  # 5 minutes max backoff
+
+    # Self-Curation
+    curator_enabled: bool = True
+    fact_min_confidence_prune: float = 0.35
+    automation_stale_days: int = 90
+    routine_stale_days: int = 90
+
     # Server
     port: int = 8080
 

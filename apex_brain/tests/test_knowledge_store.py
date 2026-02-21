@@ -14,7 +14,7 @@ def test_serialize_deserialize_embedding_roundtrip():
     blob = _serialize_embedding(vec)
     back = _deserialize_embedding(blob)
     assert len(back) == len(vec)
-    for a, b in zip(back.tolist(), vec, strict=False):
+    for a, b in zip(back.tolist(), vec):
         assert abs(a - b) < 1e-5
 
 

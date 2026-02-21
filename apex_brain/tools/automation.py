@@ -309,6 +309,43 @@ async def create_automation(
     try:
         import secrets
 
+        # Search-before-create: warn about similar automations
+        similar_warning = ""
+        try:
+            states = await ha_request("GET", "/states")
+            existing = [
+                s for s in states
+                if s["entity_id"].startswith("automation.")
+            ]
+            alias_lower = alias.lower()
+            alias_words = set(alias_lower.split())
+            similar = []
+            for a in existing:
+                name = a.get("attributes", {}).get(
+                    "friendly_name", ""
+                ).lower()
+                name_words = set(name.split())
+                # Match if 50%+ words overlap or name is substring
+                overlap = alias_words & name_words
+                if (
+                    (overlap and len(overlap) >= len(alias_words) * 0.5)
+                    or alias_lower in name
+                    or name in alias_lower
+                ):
+                    similar.append(
+                        a.get("attributes", {}).get(
+                            "friendly_name", a["entity_id"]
+                        )
+                    )
+            if similar:
+                names = ", ".join(similar[:3])
+                similar_warning = (
+                    f" Note: similar automation(s) already exist: "
+                    f"{names}. Consider updating those instead."
+                )
+        except Exception:
+            pass  # Don't block creation on search failure
+
         auto_id = secrets.token_hex(6)
 
         payload = {
@@ -332,7 +369,7 @@ async def create_automation(
 
         return (
             f"Done. Created automation '{alias}' "
-            f"(id: {auto_id}). It is now active."
+            f"(id: {auto_id}). It is now active.{similar_warning}"
         )
     except httpx.HTTPStatusError as e:
         return format_ha_error(

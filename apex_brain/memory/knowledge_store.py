@@ -657,6 +657,95 @@ class KnowledgeStore:
         await self._db.commit()
         return True
 
+    async def get_low_confidence_facts(
+        self, threshold: float = 0.4, limit: int = 50
+    ) -> list[dict]:
+        """Get facts with confidence below threshold (candidates for pruning)."""
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = await self._db.execute(
+            "SELECT id, category, key, value, confidence, "
+            "created_at, updated_at FROM facts "
+            "WHERE confidence < ? "
+            "AND (expires_at IS NULL OR expires_at >= ?) "
+            "ORDER BY confidence ASC LIMIT ?",
+            (threshold, now, limit),
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "id": r[0],
+                "category": r[1],
+                "key": r[2],
+                "value": r[3],
+                "confidence": r[4],
+                "created_at": r[5],
+                "updated_at": r[6],
+            }
+            for r in rows
+        ]
+
+    async def get_stale_facts(
+        self, days: int = 90, limit: int = 50
+    ) -> list[dict]:
+        """Get facts not mentioned in N days."""
+        cursor = await self._db.execute(
+            "SELECT id, category, key, value, confidence, "
+            "created_at, updated_at, last_mentioned_at FROM facts "
+            "WHERE last_mentioned_at IS NOT NULL "
+            "AND julianday('now') - julianday(last_mentioned_at) > ? "
+            "ORDER BY last_mentioned_at ASC LIMIT ?",
+            (days, limit),
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "id": r[0],
+                "category": r[1],
+                "key": r[2],
+                "value": r[3],
+                "confidence": r[4],
+                "created_at": r[5],
+                "updated_at": r[6],
+                "last_mentioned_at": r[7],
+            }
+            for r in rows
+        ]
+
+    async def get_contradictory_facts(self) -> list[tuple[dict, dict]]:
+        """Find facts with the same (category, key) but different values."""
+        cursor = await self._db.execute(
+            "SELECT a.id, a.category, a.key, a.value, a.confidence, "
+            "a.created_at, a.updated_at, "
+            "b.id, b.category, b.key, b.value, b.confidence, "
+            "b.created_at, b.updated_at "
+            "FROM facts a JOIN facts b "
+            "ON a.category = b.category AND a.key = b.key "
+            "AND a.id < b.id AND a.value != b.value"
+        )
+        rows = await cursor.fetchall()
+        results = []
+        for r in rows:
+            fact_a = {
+                "id": r[0], "category": r[1], "key": r[2],
+                "value": r[3], "confidence": r[4],
+                "created_at": r[5], "updated_at": r[6],
+            }
+            fact_b = {
+                "id": r[7], "category": r[8], "key": r[9],
+                "value": r[10], "confidence": r[11],
+                "created_at": r[12], "updated_at": r[13],
+            }
+            results.append((fact_a, fact_b))
+        return results
+
+    async def delete_fact_by_id(self, fact_id: int) -> bool:
+        """Delete a fact by its ID."""
+        cursor = await self._db.execute(
+            "DELETE FROM facts WHERE id = ?", (fact_id,)
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
     async def close(self):
         if self._db:
             await self._db.close()

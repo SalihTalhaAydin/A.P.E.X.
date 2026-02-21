@@ -1,6 +1,6 @@
 [project]
 name = "apex-brain"
-version = "0.5.2"
+version = "0.7.1"
 description = "Apex Brain - HA add-on and local dev"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -28,6 +28,9 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["apex_brain/tests"]
 addopts = "-v --tb=short"
+markers = [
+    "live: tests that hit a real Home Assistant instance (deselect with '-m not live')",
+]
 
 [tool.coverage.run]
 source = ["apex_brain"]

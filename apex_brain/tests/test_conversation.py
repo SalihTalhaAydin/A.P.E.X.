@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from brain.conversation import Conversation, _looks_like_device_action_claim
+from brain.conversation import (
+    Conversation,
+    _looks_like_device_action_claim,
+    _user_expects_action,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +102,7 @@ class TestLooksLikeDeviceActionClaim:
     @pytest.mark.parametrize(
         "text",
         [
+            # Original patterns
             "I've turned on the kitchen light.",
             "I turned off the fan.",
             "I have cycled the switch.",
@@ -106,6 +111,23 @@ class TestLooksLikeDeviceActionClaim:
             "I've done it for you.",
             "I have completed the action.",
             "The system cycled the breaker.",
+            # JARVIS-style phrasings (the actual bug)
+            "Very well. The basement lights are now off.",
+            "The lights are off.",
+            "Done — kitchen lights are now on.",
+            "The thermostat is set to 72.",
+            "It is done. The basement lights are now off.",
+            "That's done. All lights are off.",
+            "The door is now locked.",
+            "All set — the garage is closed.",
+            "It's done.",
+            "Adjusted the thermostat for you.",
+            "The fan should be on now.",
+            "Switched off the bedroom lights.",
+            "That should have corrected the issue.",
+            "Taken care of — all lights are off.",
+            "Dimmed the living room lights.",
+            "Activated the scene for you.",
         ],
     )
     def test_positive_cases(self, text):
@@ -119,6 +141,10 @@ class TestLooksLikeDeviceActionClaim:
             "Here are your calendar events.",
             "I don't have access to that device.",
             "",
+            "Your schedule for today looks clear.",
+            "Good evening. How may I help?",
+            "I'll need to check on that.",
+            "The current temperature outside is 72 degrees.",
         ],
     )
     def test_negative_cases(self, text):
@@ -129,6 +155,57 @@ class TestLooksLikeDeviceActionClaim:
 
     def test_non_string_input(self):
         assert _looks_like_device_action_claim(123) is False
+
+
+class TestUserExpectsAction:
+    """Tests for the user-side action/correction detection."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # Action requests
+            "Turn off the basement lights",
+            "Can you turn on the kitchen light?",
+            "Switch off the fan please",
+            "Dim the living room",
+            "Lock the front door",
+            "Open the garage door",
+            "Set the thermostat to 72",
+            "Lights off",
+            # Correction requests
+            "No, they are not. They are still on.",
+            "Um, still no.",
+            "That didn't work.",
+            "They're still on.",
+            "It's not off yet.",
+            "Try again please.",
+            "You didn't do it.",
+            "The lights are still on.",
+        ],
+    )
+    def test_positive_cases(self, text):
+        assert _user_expects_action(text) is True
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "What's the weather?",
+            "Hello",
+            "Tell me about my calendar",
+            "Who is home?",
+            "",
+            "Thank you!",
+            "What time is it?",
+        ],
+    )
+    def test_negative_cases(self, text):
+        assert _user_expects_action(text) is False
+
+    def test_none_input(self):
+        assert _user_expects_action(None) is False
+
+    def test_non_string_input(self):
+        assert _user_expects_action(123) is False
 
 
 # ===================================================================
@@ -413,10 +490,7 @@ class TestConfabulationGuard:
 
     @pytest.mark.asyncio
     async def test_detects_turned_on(self, conv):
-        """Text claiming 'turned on' is flagged when it's the first response."""
-        # First response: confabulation claim (first response, messages len==2)
-        # Second response after nudge: proper tool call
-        # Third response: text answer
+        """Text claiming 'turned on' triggers nudge and retries with tools."""
         confab_resp = _make_llm_response("I've turned on the lights for you.")
         tc = _make_tool_call("call_service", {"entity_id": "light.living"}, call_id="tc_1")
         tool_resp = _make_llm_response(content=None, tool_calls=[tc])
@@ -440,42 +514,49 @@ class TestConfabulationGuard:
         assert result == "Lights are now on."
         # The nudge added a user message telling the model to use tools
         nudge_msg = messages[3]  # system, user, assistant(confab), user(nudge)
-        assert "must use the tools" in nudge_msg["content"]
+        assert "MUST call a tool" in nudge_msg["content"]
 
     @pytest.mark.asyncio
-    async def test_nudge_retry_once(self, conv):
-        """Confabulation nudge only happens once (retry_nudge_done flag)."""
-        # First: confabulation -> nudge
-        # Second: still confabulation -> should NOT nudge again, returns the text
-        confab_resp1 = _make_llm_response("I've turned on the lights.")
-        confab_resp2 = _make_llm_response("I turned off the fan.")
+    async def test_detects_jarvis_style_confab(self, conv):
+        """JARVIS-style phrasing ('lights are now off') triggers nudge."""
+        confab_resp = _make_llm_response(
+            "Very well. The basement lights are now off."
+        )
+        tc = _make_tool_call(
+            "control_area", {"area_name": "basement", "action": "off"},
+            call_id="tc_1",
+        )
+        tool_resp = _make_llm_response(content=None, tool_calls=[tc])
+        final_resp = _make_llm_response("Done — basement lights off.")
 
-        with patch("brain.conversation.litellm") as mock_litellm:
+        with patch("brain.conversation.litellm") as mock_litellm, \
+             patch("brain.conversation.execute_tool", new_callable=AsyncMock) as mock_exec:
             mock_litellm.acompletion = AsyncMock(
-                side_effect=[confab_resp1, confab_resp2]
+                side_effect=[confab_resp, tool_resp, final_resp]
             )
+            mock_exec.return_value = "ok"
+
             messages = [
                 {"role": "system", "content": "sys"},
-                {"role": "user", "content": "turn on lights"},
+                {"role": "user", "content": "turn off the basement lights"},
             ]
             result = await conv._ai_tool_loop(
                 messages, tool_defs=[{"type": "function"}]
             )
 
-        # After the first nudge, the second confabulation text is returned as-is
-        # because is_first_response is now False (messages has grown beyond 2)
-        assert result == "I turned off the fan."
-        assert mock_litellm.acompletion.await_count == 2
+        assert result == "Done — basement lights off."
+        assert mock_litellm.acompletion.await_count == 3
 
     @pytest.mark.asyncio
-    async def test_no_double_retry(self, conv):
-        """Even if conditions appear to match again, only one nudge happens."""
+    async def test_nudge_retries_up_to_max(self, conv):
+        """Confabulation nudge happens up to _MAX_CONFAB_NUDGES times."""
         confab1 = _make_llm_response("I've turned on the lights.")
         confab2 = _make_llm_response("I turned off the fan.")
+        confab3 = _make_llm_response("Done, lights are set.")
 
         with patch("brain.conversation.litellm") as mock_litellm:
             mock_litellm.acompletion = AsyncMock(
-                side_effect=[confab1, confab2]
+                side_effect=[confab1, confab2, confab3]
             )
             messages = [
                 {"role": "system", "content": "sys"},
@@ -485,8 +566,31 @@ class TestConfabulationGuard:
                 messages, tool_defs=[{"type": "function"}]
             )
 
-        # Only 2 LLM calls: first confab -> nudge -> second confab -> return
-        assert mock_litellm.acompletion.await_count == 2
+        # After 2 nudges (max), the third confabulation is returned
+        assert result == "Done, lights are set."
+        assert mock_litellm.acompletion.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_no_excessive_retry(self, conv):
+        """Nudge retries are capped; no infinite loop."""
+        responses = [
+            _make_llm_response("I've turned on the lights."),
+            _make_llm_response("I turned off the fan."),
+            _make_llm_response("All set — lights are on."),
+        ]
+
+        with patch("brain.conversation.litellm") as mock_litellm:
+            mock_litellm.acompletion = AsyncMock(side_effect=responses)
+            messages = [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "turn on lights"},
+            ]
+            result = await conv._ai_tool_loop(
+                messages, tool_defs=[{"type": "function"}]
+            )
+
+        # Exactly 3 LLM calls: confab -> nudge -> confab -> nudge -> return
+        assert mock_litellm.acompletion.await_count == 3
 
     @pytest.mark.asyncio
     async def test_allows_normal_text(self, conv):
@@ -523,6 +627,62 @@ class TestConfabulationGuard:
         # Returns the confabulated text since there are no tools to nudge toward
         assert result == "I've turned on the lights."
         assert mock_litellm.acompletion.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_user_action_request_triggers_nudge(self, conv):
+        """When user asks for action and AI responds text-only, nudge fires."""
+        # AI gives a vague non-action-claim response to an action request
+        vague_resp = _make_llm_response("Sure, I'll take care of that for you.")
+        tc = _make_tool_call("do", {"domain": "light", "service": "turn_off"}, call_id="tc_1")
+        tool_resp = _make_llm_response(content=None, tool_calls=[tc])
+        final_resp = _make_llm_response("Done — lights off.")
+
+        with patch("brain.conversation.litellm") as mock_litellm, \
+             patch("brain.conversation.execute_tool", new_callable=AsyncMock) as mock_exec:
+            mock_litellm.acompletion = AsyncMock(
+                side_effect=[vague_resp, tool_resp, final_resp]
+            )
+            mock_exec.return_value = "ok"
+
+            messages = [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "turn off all the basement lights"},
+            ]
+            result = await conv._ai_tool_loop(
+                messages, tool_defs=[{"type": "function"}]
+            )
+
+        # Nudge triggered because user expected action, not because AI claimed one
+        assert result == "Done — lights off."
+        assert mock_litellm.acompletion.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_user_correction_triggers_nudge(self, conv):
+        """When user says 'still on' and AI doesn't use tools, nudge fires."""
+        confab_resp = _make_llm_response(
+            "Apologies, the lights should be off now."
+        )
+        tc = _make_tool_call("control_area", {"area_name": "basement"}, call_id="tc_1")
+        tool_resp = _make_llm_response(content=None, tool_calls=[tc])
+        final_resp = _make_llm_response("There — basement is off.")
+
+        with patch("brain.conversation.litellm") as mock_litellm, \
+             patch("brain.conversation.execute_tool", new_callable=AsyncMock) as mock_exec:
+            mock_litellm.acompletion = AsyncMock(
+                side_effect=[confab_resp, tool_resp, final_resp]
+            )
+            mock_exec.return_value = "ok"
+
+            messages = [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "No, they are not. They are still on."},
+            ]
+            result = await conv._ai_tool_loop(
+                messages, tool_defs=[{"type": "function"}]
+            )
+
+        assert result == "There — basement is off."
+        assert mock_litellm.acompletion.await_count == 3
 
 
 # ===================================================================
