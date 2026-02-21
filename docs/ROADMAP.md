@@ -35,6 +35,7 @@ The most important architectural change. Replace 40+ hardcoded tools with ~5 gen
 - [x] WebSocket API helper — transient WS connections for config/registry operations (entity_registry, device_registry, area_registry, config_entries) — `tools/ws_helpers.py`
 - [x] Tiered confirmation system — Tier 0 (safe) executes immediately, Tier 1 (disruptive) requires confirmation, Tier 2 (destructive) requires confirmation + impact summary; webhook sessions restricted to Tier 0
 - [x] Audit logging for all `manage()` and `configure()` calls — `memory/audit_store.py`, system_audit_log table with timestamp, tool, action, target, config_json, result, session_id, user_approved; 9 tests
+- [x] MCP Bridge integration — `tools/mcp_bridge.py` (254 lines): connects to remote MCP server via SSE or Streamable HTTP, discovers tools, converts schemas to OpenAI format (with Gemini property type enforcement), routes tool calls from conversation loop. Integrated into `server.py` startup, `conversation.py` tool routing, and `config.py` settings (`MCP_SERVER_URL`, `MCP_TRANSPORT`). Dependency: `mcp>=1.25,<2` in `requirements.txt`. 17 tests in `test_mcp_bridge.py`.
 
 ---
 
@@ -80,6 +81,14 @@ The most important architectural change. Replace 40+ hardcoded tools with ~5 gen
 - [ ] Write a `tests/test_live.py` integration test suite that runs against real HA (skipped in CI, run manually with `--live` flag) — covers: entity query, service call, template evaluation, history fetch, area discovery
 - [ ] Document the live test procedure in CONTRIBUTING.md so future sessions know how to run it
 
+### MCP Bridge Live Validation
+- [ ] Install and configure the `ha-mcp` add-on (from `homeassistant-ai/ha-mcp`) in the HA instance — this provides a real MCP server exposing HA entities and services
+- [ ] Set `MCP_SERVER_URL` in `.env` to point to the running MCP server (e.g., `http://ha-ip:8080/sse`)
+- [ ] Start Apex with MCP enabled and verify `MCPBridge.connect()` succeeds (log: "MCP bridge connected to...")
+- [ ] Verify `discover_tools()` returns the expected HA tools from the MCP server and correctly skips native tool collisions
+- [ ] Execute an MCP tool through a real conversation (e.g., ask Apex to perform an action that routes through MCP) and verify the result
+- [ ] Verify graceful degradation: stop the MCP server, restart Apex, confirm it falls back to native tools only with no errors
+
 ### Documentation & Score Update
 - [ ] Update VISION.md Jarvis Standard scorecard with honest, evidence-based scores after live validation
 - [ ] Update ARCHITECTURE.md deployment section with verified local dev setup instructions
@@ -97,6 +106,9 @@ Apex becomes the caretaker of the Home Assistant instance — not just a device 
 - [ ] Integration health monitoring — check integration diagnostics, detect degraded or failing integrations, report with actionable recommendations
 - [ ] Self-healing — for known-fixable issues (e.g., Zigbee network heal, MQTT broker reconnect, integration reload), attempt automatic repair before alerting the user
 - [ ] System dashboard context — inject HA system health (CPU/memory/disk, uptime, update status) into Apex's context so it can proactively mention issues ("Sir, disk usage is at 85% — shall I clean up old backups?")
+- [ ] MCP tool documentation in system prompt — inject descriptions of available MCP tools into the system prompt alongside native tool instructions, so the LLM knows when and how to use them
+- [ ] Remove legacy deprecated tool wrappers — delete the ~56 thin wrappers in `smart_home.py`, `lock.py`, `switch.py`, etc. now that generic tools are stable and proven in production
+- [ ] MCP multi-server support — allow configuring multiple MCP servers (e.g., one for HA, one for Spotify, one for custom APIs) with per-server URL and transport settings
 
 ---
 
@@ -110,6 +122,7 @@ Move from reactive (user asks, Apex answers) to proactive (Apex notices things a
 - [ ] Sensor watch capabilities ("tell me when the garage opens" -- subscribe to state changes and notify on match)
 - [ ] Pattern learning ("you always turn on office lights at 8am" --> suggest creating an automation)
 - [ ] Anomaly detection (door open at 3am --> alert + camera snapshot if available)
+- [ ] MCP persistent subscriptions — upgrade MCPBridge from transient connections to persistent sessions that subscribe to real-time state changes and events from the MCP server, enabling instant reactions without polling
 
 ---
 
@@ -196,4 +209,4 @@ Shipped milestones for historical reference.
 
 ---
 
-*Last updated: 2026-02-19 (Phase 1 complete — 423 tests passing. Phase 1.5 added: Live Deployment & Battlefield Testing. Full audit revealed all tests are mocked; Apex has never made a live HA API call. HA_TOKEN is empty in .env. Phase numbers bumped: old 1.5→2, old 2→3, old 3→4, old 4→5, old 5→6.)*
+*Last updated: 2026-02-21 (MCP Bridge integration documented across all phases. Phase 1: MCPBridge class complete with 17 tests. Phase 1.5: MCP live validation tasks added. Phase 2: MCP prompt injection, multi-server support, legacy wrapper removal. Phase 3: persistent MCP subscriptions for real-time events.)*

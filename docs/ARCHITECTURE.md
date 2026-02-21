@@ -1,15 +1,15 @@
 # Apex Brain -- Architecture Document
 
 > **Version:** 0.7.0
-> **Last updated:** 2026-02-18
-> **Scope:** Current architecture with Phase 1 Generic Tools COMPLETE (do, query, discover, history, manage, configure)
+> **Last updated:** 2026-02-21
+> **Scope:** Current architecture with Phase 1 Generic Tools COMPLETE (do, query, discover, history, manage, configure) + MCP Bridge integration
 
 ---
 
 ## Table of Contents
 
 1. [System Overview](#1-system-overview)
-2. [Key Components](#2-key-components)
+2. [Key Components](#2-key-components) (incl. 2.7 MCP Bridge)
 3. [Generic Tools Architecture (Phase 1 -- COMPLETE)](#3-generic-tools-architecture-phase-1----complete)
 4. [Voice Pipeline Architecture](#4-voice-pipeline-architecture)
 5. [Data Flow Diagrams](#5-data-flow-diagrams)
@@ -61,6 +61,7 @@ APEX/                               # Git root
     │   ├── manage.py               # PRIMARY: manage() — Supervisor API ops + tiered confirmation
     │   ├── configure.py            # PRIMARY: configure() — registry ops via WebSocket + tiered confirmation
     │   ├── ws_helpers.py           # WebSocket helper (transient connections, no @tool)
+    │   ├── mcp_bridge.py           # MCP server integration (SSE/HTTP, tool discovery + execution)
     │   ├── smart_home.py           # [DEPRECATED] thin wrapper delegating to generic tools
     │   ├── ha_helpers.py           # Shared HA API client + helpers (no @tool)
     │   ├── automation.py           # Automation CRUD, scenes
@@ -99,6 +100,7 @@ APEX/                               # Git root
         ├── test_manage.py            # 53 tests — manage() + tiered confirmation
         ├── test_configure.py         # 49 tests — configure() + dry-run + WS mocks
         ├── test_audit_store.py       # 9 tests — audit logging
+        ├── test_mcp_bridge.py       # 17 tests — MCP bridge integration
         └── ...
 ```
 
@@ -134,6 +136,7 @@ APEX/                               # Git root
                     │  │  httpx ──► Core REST API (states, services)     │     │
                     │  │  httpx ──► Supervisor API (backups, addons, OS) │     │
                     │  │  websocket ──► WS API (registry, config ops)    │     │
+                    │  │  MCP bridge ──► Remote MCP servers (optional)   │     │
                     │  │                                                  │     │
                     │  │  :8080  ◄──────── Wyoming Protocol              │     │
                     │  │                   (voice satellites)             │     │
@@ -151,12 +154,15 @@ APEX/                               # Git root
                     └──────────────┘  └──────────────┘  └──────────────┘
 ```
 
-> **Note on API surfaces:** Apex communicates with three distinct HA APIs.
+> **Note on API surfaces:** Apex communicates with three distinct HA APIs, plus optional MCP servers.
 > The **Core REST API** handles entity state reads and service calls (the primary interface for `do()` and `query()`).
 > The **Supervisor API** (`http://supervisor/<endpoint>`) handles system operations via `manage()` -- backups,
 > add-on management, OS/core updates, and hardware/network info. The **WebSocket API**
 > (`ws://supervisor/core/websocket`) is used by `configure()` via `ws_helpers.py` for config/registry operations
 > (entity rename, area management, device registry, config entries) that are not exposed via REST.
+> The **MCP Bridge** (optional) connects to remote MCP servers via SSE or Streamable HTTP, enabling
+> dynamic tool discovery and execution from external sources (e.g., `ha-mcp` for richer HA integrations,
+> or third-party MCP servers for Spotify, custom APIs, etc.).
 
 ### Deployment Modes
 
@@ -186,17 +192,20 @@ The entry point. Exposes four endpoint groups:
 **Startup lifecycle** (via FastAPI `lifespan`):
 
 ```
-1. Configure logging
-2. Set API keys in environment
-3. Initialize ConversationStore (SQLite)
-4. Initialize KnowledgeStore (SQLite + embeddings)
-5. Initialize FactExtractor (background AI)
-6. Initialize ContextBuilder
-7. discover_tools() -- auto-import all tool modules
-8. Inject KnowledgeStore into tools that need it
-9. Create Conversation orchestrator
-10. Create EventHandler (if webhooks enabled)
-11. Server ready
+1.  Configure logging
+2.  Set API keys in environment
+3.  Initialize ConversationStore (SQLite)
+4.  Initialize KnowledgeStore (SQLite + embeddings)
+5.  Initialize FactExtractor (background AI)
+6.  Initialize ContextBuilder
+7.  discover_tools() -- auto-import all tool modules
+8.  Inject KnowledgeStore into tools that need it
+9.  Connect MCP Bridge (if MCP_SERVER_URL configured)
+    a. MCPBridge.connect() -- open SSE or Streamable HTTP transport
+    b. MCPBridge.discover_tools() -- fetch remote tools, skip native collisions
+10. Create Conversation orchestrator (with MCP bridge reference)
+11. Create EventHandler (if webhooks enabled)
+12. Server ready
 ```
 
 **Rate limiting** is applied via middleware:
@@ -246,8 +255,13 @@ User message
 │    ┌─── Has tool_calls? ───┐                      │
 │    │ YES                   │ NO                    │
 │    ▼                       ▼                       │
-│  Execute each tool     Return text response        │
-│  via execute_tool()    (with confabulation check)  │
+│  Route each tool call  Return text response        │
+│  ┌─ TOOL_REGISTRY? ─┐ (with confabulation check)  │
+│  │ YES → native      │                             │
+│  │ NO  → MCP bridge? │                             │
+│  │   YES → remote    │                             │
+│  │   NO  → error     │                             │
+│  └───────────────────┘                             │
 │    │                                               │
 │    ▼                                               │
 │  Append tool results                               │
@@ -519,7 +533,81 @@ WebhookResponse {status, message, actions_taken}
 
 **Optional shared-secret auth**: Webhook requests can include a `secret` in attributes, validated with `hmac.compare_digest` against the configured `webhook_secret`.
 
-### 2.7 Configuration (`brain/config.py`)
+### 2.7 MCP Bridge (`tools/mcp_bridge.py`)
+
+The MCP (Model Context Protocol) Bridge connects Apex to external MCP servers, enabling tool discovery and execution from remote sources. This allows Apex to extend its capabilities beyond native tools — for example, connecting to an HA MCP server for richer integrations or third-party services (Spotify, custom APIs, community tools).
+
+#### Architecture
+
+```
+                  ┌──────────────────────────────────────┐
+                  │          Conversation Loop            │
+                  │                                      │
+                  │  LLM generates tool_call             │
+                  │         │                            │
+                  │    ┌────┴──────────────┐             │
+                  │    │                   │             │
+                  │    ▼                   ▼             │
+                  │  TOOL_REGISTRY?    MCP bridge?       │
+                  │  (native tools)    (remote tools)    │
+                  │    │                   │             │
+                  │    ▼                   ▼             │
+                  │  execute_tool()   mcp_bridge.        │
+                  │  (local)          execute_tool()     │
+                  │                   (remote via SSE)   │
+                  └──────────────────────────────────────┘
+                                       │
+                                       ▼
+                  ┌──────────────────────────────────────┐
+                  │         Remote MCP Server             │
+                  │  (e.g. ha-mcp, Spotify MCP, etc.)    │
+                  │                                      │
+                  │  SSE or Streamable HTTP transport     │
+                  │  Tool discovery (list_tools)          │
+                  │  Tool execution (call_tool)           │
+                  └──────────────────────────────────────┘
+```
+
+#### Connection Lifecycle
+
+1. **Startup**: If `MCP_SERVER_URL` is configured, `MCPBridge` initializes with the URL and transport type
+2. **Connect**: Opens an SSE or Streamable HTTP transport, creates a `ClientSession`, calls `session.initialize()`
+3. **Discover**: Requests `list_tools()` from the server, filters out tools that collide with `TOOL_REGISTRY` names (native tools always take priority)
+4. **Schema conversion**: Converts MCP tool input schemas to OpenAI function-calling format, with Gemini compatibility enforcement (every property must have an explicit `type` field)
+5. **Runtime**: Tool calls route through `conversation.py` — native first (`TOOL_REGISTRY`), then MCP (`mcp_bridge.has_tool()`)
+6. **Shutdown**: Clean disconnect of session and transport on server shutdown
+
+#### Key Design Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| **Native tools take priority** | If a tool name exists in both `TOOL_REGISTRY` and MCP, the native version is used. Prevents MCP servers from silently overriding tested, audited tools. |
+| **Persistent session** | MCPBridge maintains a single session for the server lifetime (connect once at startup, disconnect at shutdown). Avoids per-call connection overhead. |
+| **Graceful degradation** | If MCP connection fails, Apex continues with native tools only. No hard dependency on MCP availability. |
+| **Gemini property type enforcement** | `_ensure_property_types()` adds `"type": "string"` to any schema property missing a type field. Gemini (via LiteLLM) rejects schemas without explicit types. |
+
+#### Implementation
+
+```python
+# tools/mcp_bridge.py — MCPBridge class (254 lines)
+
+class MCPBridge:
+    async def connect()           # Open transport + session
+    async def disconnect()        # Clean up on shutdown
+    async def discover_tools()    # List tools, skip collisions
+    def get_openai_tool_definitions()  # Convert to OpenAI format
+    def has_tool(name)            # Check if name is an MCP tool
+    async def execute_tool(name, args)  # Forward call to MCP server
+```
+
+**Integration points:**
+- `brain/server.py` (startup/shutdown): Creates MCPBridge, connects, discovers tools, passes to Conversation
+- `brain/conversation.py` (tool routing): Merges MCP tool definitions with native; routes execution by checking `TOOL_REGISTRY` first, then `mcp_bridge.has_tool()`
+- `brain/config.py`: `mcp_server_url` and `mcp_transport` settings
+
+**Tests:** 17 test classes in `tests/test_mcp_bridge.py` covering initialization, connection, discovery, schema conversion, tool execution, error handling, and graceful degradation. All mocked (no live MCP server required).
+
+### 2.8 Configuration (`brain/config.py`)
 
 Uses Pydantic Settings for type-safe configuration from environment variables:
 
@@ -543,6 +631,8 @@ Uses Pydantic Settings for type-safe configuration from environment variables:
 | `ANNOUNCE_ON_EVENTS` | true | Voice announcements on events |
 | `ANNOUNCE_TARGET` | `alexa_all` | Default announcement target |
 | `PHONE_NOTIFY_TARGET` | `mobile_app_salih_iphone` | Phone notification entity name |
+| `MCP_SERVER_URL` | (empty) | MCP server endpoint (e.g., `http://ha-ip:8080/sse`) |
+| `MCP_TRANSPORT` | `sse` | Transport type: `sse` or `streamable_http` |
 | `PORT` | 8080 | Server port |
 
 Auth token resolution order:
@@ -1257,7 +1347,54 @@ WebhookResponse
 {status: "processed", message: "...", actions_taken: [...]}
 ```
 
-### 5.3 Memory Cycle (Conversation --> Fact Extraction --> Future Context)
+### 5.3 MCP Tool Execution Flow
+
+```
+LLM generates tool_call(name="mcp_tool_x", args={...})
+        │
+        ▼
+┌───────────────────────┐
+│  conversation.py      │
+│  Tool routing          │
+│                        │
+│  1. Check TOOL_REGISTRY│──► Found? Execute native tool
+│                        │
+│  2. Check MCP bridge   │──► Found? Forward to MCP server
+│     mcp_bridge.has_tool│
+│                        │
+│  3. Neither?           │──► Return "Unknown tool: ..."
+└───────────┬────────────┘
+            │ (MCP path)
+            ▼
+┌───────────────────────┐
+│  mcp_bridge.           │
+│  execute_tool()        │
+│                        │
+│  session.call_tool(    │
+│    name, arguments)    │
+│                        │
+│  Over existing SSE     │
+│  session (persistent)  │
+└───────────┬────────────┘
+            │
+            ▼
+┌───────────────────────┐
+│  Remote MCP Server     │
+│  Processes tool call   │
+│  Returns CallToolResult│
+│  (TextContent, Image,  │
+│   EmbeddedResource)    │
+└───────────┬────────────┘
+            │
+            ▼
+┌───────────────────────┐
+│  _extract_text()       │
+│  Parse result content  │
+│  into string for LLM   │
+└───────────────────────┘
+```
+
+### 5.4 Memory Cycle (Conversation --> Fact Extraction --> Future Context)
 
 ```
 Turn N: User says "My sister Sarah is visiting next Thursday"
@@ -1339,6 +1476,7 @@ Turn N+5: User says "What's happening this week?"
 | **Embeddings** | numpy | latest | Cosine similarity computation |
 | **Config** | Pydantic Settings | latest | Type-safe env var config |
 | **Validation** | Pydantic | v2 | Request/response models |
+| **MCP client** | mcp | >=1.25,<2 | Model Context Protocol client (SSE + Streamable HTTP) |
 
 ### Deployment
 
@@ -1397,6 +1535,7 @@ Overall coverage: **423 tests, 0 failing.** Phase 0 and Phase 1 modules have str
 | `tools/manage.py` | **High** | 53 | **DONE** -- manage() + all tiered confirmation paths |
 | `tools/configure.py` | **High** | 49 | **DONE** -- configure() + dry-run + WS mocks |
 | `memory/audit_store.py` | **Medium** | 9 | **DONE** -- audit logging |
+| `tools/mcp_bridge.py` | **Medium** | 17 | **DONE** -- connection, discovery, schema conversion, execution, graceful degradation |
 
 **Phase 0 gate: PASSED.** Phase 1 gate: PASSED. All critical modules have regression tests protecting them.
 
@@ -1476,10 +1615,13 @@ The ROADMAP phases are not independent -- each phase depends on the one before i
 
 ```
 Phase 0 (Stabilize)     -- COMPLETE
-  └──► Phase 1 (Generic Tools)     -- COMPLETE
-        └──► Phase 2 (Proactive)   -- needs generic do()/query() to act autonomously
-              └──► Phase 3 (Voice) -- proactive behavior drives most voice interactions
-                    └──► Phase 4 (Multi-User) -- voice ID feeds into per-user routing
+  └──► Phase 1 (Generic Tools + MCP Bridge) -- COMPLETE
+        └──► Phase 1.5 (Live Deployment)    -- validate everything against real HA + MCP server
+              └──► Phase 2 (System Intelligence) -- needs generic do()/query() to act autonomously
+                    │                               + MCP multi-server + legacy wrapper removal
+                    └──► Phase 3 (Proactive)     -- persistent MCP subscriptions for real-time events
+                          └──► Phase 4 (Voice)   -- proactive behavior drives most voice interactions
+                                └──► Phase 5 (Multi-User) -- voice ID feeds into per-user routing
 ```
 
 **Mitigation:** Treat phase boundaries as hard gates. A phase is not complete until:
@@ -1488,7 +1630,7 @@ Phase 0 (Stabilize)     -- COMPLETE
 3. Live HA validation confirms no regressions
 4. The architecture doc is updated to reflect what was actually built (not just what was planned)
 
-**Status:** Phase 0 is complete. Phase 1 is complete -- generic tools (`do`, `query`, `discover`, `history`), system management (`manage`, `configure`), WebSocket helpers (`ws_helpers`), and audit logging (`audit_store`) are all implemented with 423 tests passing.
+**Status:** Phase 0 is complete. Phase 1 is complete -- generic tools (`do`, `query`, `discover`, `history`), system management (`manage`, `configure`), WebSocket helpers (`ws_helpers`), audit logging (`audit_store`), and MCP Bridge (`mcp_bridge`) are all implemented with 423 tests passing. Phase 1.5 (Live Deployment) is next.
 
 ### 7.7 Operational Risk: System-Level Access via manage() and configure()
 
@@ -1584,6 +1726,7 @@ These are the tools the LLM is instructed to use. They provide full coverage of 
 | Module | Description |
 |--------|-------------|
 | `ws_helpers.py` | Transient WebSocket connections for HA registry operations (auth, send command, receive result, close). Used by `configure.py`. |
+| `mcp_bridge.py` | MCP server integration (254 lines, 17 tests). Connects via SSE or Streamable HTTP, discovers remote tools, converts schemas to OpenAI format, routes execution from conversation loop. Graceful degradation if server unreachable. |
 | `memory/audit_store.py` | SQLite WAL-mode audit log for all manage/configure calls (timestamp, tool, action, target, result, session). 9 tests. |
 
 ### LEGACY TOOLS [DEPRECATED]
@@ -1681,4 +1824,4 @@ These tools have no generic equivalent yet or are already clean single-purpose t
 | `webhook.py` | `fire_webhook` + `fire_event` + `fire_custom_event` | Trigger webhooks and custom events |
 | `wait_tool.py` | `wait_seconds` | Timed delay between tool calls |
 
-**Total: ~68 registered tools across 22 modules (6 primary + ~56 deprecated wrappers + ~6 standalone)**
+**Total: ~68 registered native tools across 22 modules (6 primary + ~56 deprecated wrappers + ~6 standalone) + dynamic MCP tools from remote servers**
