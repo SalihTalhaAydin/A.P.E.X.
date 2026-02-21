@@ -1,0 +1,6 @@
+# Required OpenSSL major version for encrypt/decrypt scripts.
+# All contributors must use a compatible OpenSSL version.
+# Update this file when upgrading the project's OpenSSL baseline.
+OPENSSL_MAJOR=3
+OPENSSL_MINOR=6
+OPENSSL_PBKDF2_ITER=100000

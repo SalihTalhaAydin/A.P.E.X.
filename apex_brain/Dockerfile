@@ -9,7 +9,8 @@ FROM ${BUILD_FROM}
 
 # jq is required because init: false disables S6 overlay and bashio.
 # We read /data/options.json with jq in run.sh instead.
-RUN apk add --no-cache jq
+# openssl is pinned explicitly — version tracked in .openssl-version at repo root.
+RUN apk add --no-cache jq openssl
 
 # Set working directory
 WORKDIR /app
