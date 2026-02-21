@@ -460,6 +460,54 @@ class TestAIToolLoop:
         assert call_kwargs["tool_choice"] == "auto"
 
     @pytest.mark.asyncio
+    async def test_tool_choice_required_for_action_requests(self, conv):
+        """tool_choice='required' when user requests a device action."""
+        tc = _make_tool_call("do", {"domain": "light"}, call_id="tc_1")
+        tool_resp = _make_llm_response(content=None, tool_calls=[tc])
+        final_resp = _make_llm_response("Lights off.")
+
+        fake_registry = {"do": {}}
+        with patch("brain.conversation.litellm") as mock_litellm, \
+             patch("brain.conversation.execute_tool", new_callable=AsyncMock) as mock_exec, \
+             patch("brain.conversation.TOOL_REGISTRY", fake_registry):
+            mock_litellm.acompletion = AsyncMock(
+                side_effect=[tool_resp, final_resp]
+            )
+            mock_exec.return_value = "ok"
+
+            messages = [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "turn off the lights"},
+            ]
+            tool_defs = [{"type": "function", "function": {"name": "do"}}]
+            await conv._ai_tool_loop(messages, tool_defs=tool_defs)
+
+        # First call: action request, no tools called yet → required
+        first_call_kwargs = mock_litellm.acompletion.call_args_list[0].kwargs
+        assert first_call_kwargs["tool_choice"] == "required"
+        # Second call: tools already called → auto (let model summarise)
+        second_call_kwargs = mock_litellm.acompletion.call_args_list[1].kwargs
+        assert second_call_kwargs["tool_choice"] == "auto"
+
+    @pytest.mark.asyncio
+    async def test_tool_choice_auto_for_non_action(self, conv):
+        """tool_choice='auto' for normal non-action queries."""
+        tool_defs = [{"type": "function", "function": {"name": "foo"}}]
+
+        with patch("brain.conversation.litellm") as mock_litellm:
+            mock_litellm.acompletion = AsyncMock(
+                return_value=_make_llm_response("The weather is sunny.")
+            )
+            messages = [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "what's the weather?"},
+            ]
+            await conv._ai_tool_loop(messages, tool_defs=tool_defs)
+
+        call_kwargs = mock_litellm.acompletion.call_args.kwargs
+        assert call_kwargs["tool_choice"] == "auto"
+
+    @pytest.mark.asyncio
     async def test_none_content_becomes_done(self, conv):
         """If msg.content is None and no tool_calls, the fallback is 'Done.'."""
         with patch("brain.conversation.litellm") as mock_litellm:

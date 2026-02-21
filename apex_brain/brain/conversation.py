@@ -229,7 +229,17 @@ class Conversation:
                 }
                 if tool_defs:
                     kwargs["tools"] = tool_defs
-                    kwargs["tool_choice"] = "auto"
+                    # Force tool use when user expects a device
+                    # action and no tools have been called yet.
+                    # After tools run, switch back to auto so
+                    # the model can summarise the result.
+                    if (
+                        (user_wants_action or nudge_count > 0)
+                        and not tools_called
+                    ):
+                        kwargs["tool_choice"] = "required"
+                    else:
+                        kwargs["tool_choice"] = "auto"
 
                 response = await litellm.acompletion(**kwargs)
             except Exception as e:
