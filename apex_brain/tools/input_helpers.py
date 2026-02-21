@@ -76,11 +76,18 @@ async def set_input_helper(entity_id: str, value: str) -> str:
             )
 
         elif domain == "input_number":
+            try:
+                numeric = float(value)
+            except (ValueError, TypeError):
+                return (
+                    f"Invalid number: '{value}'. "
+                    "Provide a numeric value."
+                )
             return await do(
                 domain,
                 "set_value",
                 {"entity_id": entity_id},
-                {"value": float(value)},
+                {"value": numeric},
             )
 
         elif domain == "input_select":

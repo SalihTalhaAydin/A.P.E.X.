@@ -142,7 +142,7 @@ def test_build_prompt_includes_area_control_rules():
     """Area-based control instructions are in the template."""
     prompt = build_system_prompt()
     assert "AREA-BASED CONTROL" in prompt
-    assert "control_area" in prompt
+    assert "area_id" in prompt
     assert "ENTIRE AREA" in prompt
 
 
@@ -151,3 +151,19 @@ def test_build_prompt_includes_floor_instructions():
     prompt = build_system_prompt()
     assert "floor_id" in prompt
     assert "discover(what=\"floors\")" in prompt
+
+
+def test_build_prompt_includes_scope_constraint():
+    """Scope constraint prevents over-broad actions."""
+    prompt = build_system_prompt()
+    assert "SCOPE CONSTRAINT" in prompt
+    assert "ONLY perform the EXACT action" in prompt
+    assert "NEVER take additional" in prompt
+
+
+def test_build_prompt_no_legacy_tool_instructions():
+    """Legacy tool instructions should NOT be in the prompt."""
+    prompt = build_system_prompt()
+    assert "LEGACY SMART HOME TOOLS" not in prompt
+    assert "control_light" not in prompt
+    assert "control_climate" not in prompt

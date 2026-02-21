@@ -562,17 +562,23 @@ class KnowledgeStore:
     ) -> list[dict]:
         """Fallback keyword search using LIKE."""
         now = datetime.now(timezone.utc).isoformat()
+        # Escape LIKE wildcards in user input
+        escaped = (
+            query.replace("%", "\\%")
+            .replace("_", "\\_")
+        )
         cursor = await self._db.execute(
             "SELECT id, category, key, value, "
             "confidence, created_at, updated_at "
             "FROM facts "
-            "WHERE (key LIKE ? OR value LIKE ?) "
+            "WHERE (key LIKE ? ESCAPE '\\' "
+            "OR value LIKE ? ESCAPE '\\') "
             "AND (expires_at IS NULL "
             "OR expires_at >= ?) "
             "ORDER BY updated_at DESC LIMIT ?",
             (
-                f"%{query}%",
-                f"%{query}%",
+                f"%{escaped}%",
+                f"%{escaped}%",
                 now,
                 limit,
             ),

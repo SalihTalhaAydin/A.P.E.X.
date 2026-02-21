@@ -95,8 +95,8 @@ async def get_weather(
                     f"\n{forecast_type.title()} forecast:"
                 )
                 for f in forecasts[:cap]:
-                    dt = f.get(
-                        "datetime", ""
+                    dt = (
+                        f.get("datetime") or ""
                     )[:16]
                     cond = f.get(
                         "condition", "?"

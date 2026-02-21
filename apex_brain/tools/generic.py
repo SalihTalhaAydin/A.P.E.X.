@@ -755,6 +755,24 @@ async def _verify_area_or_floor(
     """Verify area/floor-based service call by listing
     affected entities."""
     try:
+        # Sanitize inputs to prevent Jinja2 template
+        # injection — only allow alphanumerics, underscores,
+        # and hyphens in area/floor/domain identifiers
+        import re
+
+        _ID_RE = re.compile(r"^[a-zA-Z0-9_\-]+$")
+        for name, val in [
+            ("domain", domain),
+            ("area_id", area_id),
+            ("floor_id", floor_id),
+        ]:
+            if val and not _ID_RE.match(val):
+                return (
+                    f"Invalid {name}: '{val}'. "
+                    "Only letters, digits, underscores, "
+                    "and hyphens are allowed."
+                )
+
         # Build a Jinja2 template to list entities of the
         # target domain in the area or on the floor
         if area_id:
@@ -805,9 +823,9 @@ async def _verify_area_or_floor(
             )
 
         lines = [
-            l.strip()
-            for l in raw.strip().split("\n")
-            if l.strip() and "|" in l
+            ln.strip()
+            for ln in raw.strip().split("\n")
+            if ln.strip() and "|" in ln
         ]
         if not lines:
             return (
@@ -920,6 +938,7 @@ async def _history_changes(
     if (
         not result
         or not isinstance(result, list)
+        or len(result) == 0
         or not result[0]
     ):
         return (

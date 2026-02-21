@@ -6,10 +6,9 @@ Includes cooldown to prevent reaction storms.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 from pydantic import BaseModel
 
@@ -122,8 +121,10 @@ class EventHandler:
             msg += f" Time: {event.timestamp}."
 
         msg += (
-            " Assess the situation and take "
-            "appropriate action if needed."
+            " Report this event to the user. "
+            "Do NOT take any device actions unless "
+            "the event clearly requires an immediate "
+            "safety response."
         )
         return msg
 
@@ -196,6 +197,18 @@ class EventHandler:
 
         msg = self._build_event_message(event)
 
+        # Check if this event warrants a voice announcement
+        now = datetime.now(timezone.utc)
+        high_priority = _is_high_priority(
+            event.event_type, now.hour
+        )
+        if high_priority:
+            logger.info(
+                "High-priority event: %s on %s",
+                event.event_type,
+                event.entity_id,
+            )
+
         try:
             response = await self.conversation.handle(
                 msg, session_id="apex_events"
@@ -203,6 +216,11 @@ class EventHandler:
             return WebhookResponse(
                 status="processed",
                 message=response,
+                actions_taken=(
+                    ["high_priority_alert"]
+                    if high_priority
+                    else []
+                ),
             )
         except Exception as e:
             logger.exception(

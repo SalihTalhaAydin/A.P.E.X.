@@ -574,7 +574,7 @@ class TestManageAuditLogging:
             )
             mock_store.log.assert_called_once()
             call_kw = mock_store.log.call_args.kwargs
-            assert call_kw["result"] == "confirmed"
+            assert call_kw["result"] == "confirmation_prompted"
             assert call_kw["user_approved"] is False
         finally:
             set_audit_store(None)

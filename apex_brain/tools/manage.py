@@ -511,7 +511,7 @@ async def manage(
                 action=action,
                 target=target,
                 config=config,
-                result="confirmed",
+                result="confirmation_prompted",
                 session_id=session_id,
                 user_approved=False,
             )

@@ -19,7 +19,7 @@ TOOL_REGISTRY: dict[str, dict] = {}
 def tool(
     description: str,
     parameters: dict | None = None,
-    deprecated: bool = False,
+    hidden: bool = False,
 ):
     """
     Decorator to register a function as an Apex tool.
@@ -30,8 +30,9 @@ def tool(
             ...
 
     Parameters schema is auto-generated from type hints if not provided.
-    Set deprecated=True to keep the tool callable but hide it from the
-    model's tool list (it won't be included in get_openai_tool_definitions).
+
+    Set hidden=True for deprecated tools that should remain callable
+    but not be advertised to the LLM (reduces tool count confusion).
     """
 
     def decorator(func: Callable) -> Callable:
@@ -43,7 +44,7 @@ def tool(
             "description": description,
             "parameters": schema,
             "is_async": inspect.iscoroutinefunction(func),
-            "deprecated": deprecated,
+            "hidden": hidden,
         }
         return func
 
@@ -111,15 +112,14 @@ def _python_type_to_json(hint) -> str:
 
 
 def get_openai_tool_definitions() -> list[dict]:
-    """Convert registered tools to OpenAI function-calling format.
+    """Convert visible (non-hidden) tools to OpenAI function-calling format.
 
-    Deprecated tools are excluded from the list so the model cannot
-    select them.  They remain callable via execute_tool() for backward
-    compatibility.
+    Hidden tools (deprecated wrappers) are still callable via execute_tool()
+    but are not advertised to the LLM, reducing tool count and confusion.
     """
     definitions = []
     for name, info in TOOL_REGISTRY.items():
-        if info.get("deprecated"):
+        if info.get("hidden"):
             continue
         definitions.append(
             {
@@ -132,6 +132,65 @@ def get_openai_tool_definitions() -> list[dict]:
             }
         )
     return definitions
+
+
+def hide_tools(*names: str) -> None:
+    """Mark tools as hidden (not advertised to LLM but still callable).
+
+    Used to suppress deprecated wrapper tools that create confusion
+    when the LLM sees 70+ overlapping tool definitions.
+    """
+    for name in names:
+        if name in TOOL_REGISTRY:
+            TOOL_REGISTRY[name]["hidden"] = True
+
+
+# Deprecated wrapper tools that delegate to the 6 generic tools.
+# Kept callable for backward compatibility but hidden from the LLM
+# to reduce tool count from ~70 to ~30 and prevent confusion.
+DEPRECATED_TOOLS = (
+    # smart_home.py wrappers → do/query/discover
+    "list_entities",
+    "get_entity_state",
+    "get_areas",
+    "query_sensors",
+    "control_light",
+    "control_climate",
+    "control_media",
+    "control_cover",
+    "control_fan",
+    "control_area",
+    "call_service",
+    # history.py → history()
+    "get_history",
+    "get_logbook",
+    # lock.py → do()
+    "control_lock",
+    # switch.py → do()
+    "control_switch",
+    # security.py → do()
+    "control_alarm",
+    "get_camera_snapshot",
+    # template.py → query()
+    "evaluate_template",
+    # script.py → do/discover()
+    "list_scripts",
+    "execute_script",
+    # system_info.py → discover()
+    "get_ha_info",
+    "list_devices",
+    "list_integrations",
+    "list_services",
+    # presence.py → query()
+    "get_presence",
+    # config_reload.py → do()
+    "reload_config",
+    # input_helpers.py → do/query()
+    "set_input_helper",
+    "list_input_helpers",
+    # energy.py → query()
+    "get_energy_summary",
+)
 
 
 async def execute_tool(name: str, arguments: dict) -> str:

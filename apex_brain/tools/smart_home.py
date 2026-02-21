@@ -101,7 +101,7 @@ _MAX_ENTITIES_WITH_DOMAIN = 200
         },
         "required": [],
     },
-    deprecated=True,
+    hidden=True,
 )
 async def list_entities(domain: str = "") -> str:
     """List all entities, optionally filtered by domain."""
@@ -135,7 +135,7 @@ async def list_entities(domain: str = "") -> str:
         },
         "required": ["entity_id"],
     },
-    deprecated=True,
+    hidden=True,
 )
 async def get_entity_state(entity_id: str) -> str:
     """Get detailed state of a specific entity."""
@@ -159,7 +159,7 @@ async def get_entity_state(entity_id: str) -> str:
         "properties": {},
         "required": [],
     },
-    deprecated=True,
+    hidden=True,
 )
 async def get_areas() -> str:
     """List all areas (rooms) in Home Assistant."""
@@ -210,7 +210,7 @@ async def get_areas() -> str:
         },
         "required": [],
     },
-    deprecated=True,
+    hidden=True,
 )
 async def query_sensors(
     sensor_type: str = "",
@@ -292,7 +292,7 @@ async def query_sensors(
         },
         "required": ["entity_id", "action"],
     },
-    deprecated=True,
+    hidden=True,
 )
 async def control_light(
     entity_id: str,
@@ -484,7 +484,7 @@ async def cycle_light_timed(
         },
         "required": ["entity_id"],
     },
-    deprecated=True,
+    hidden=True,
 )
 async def control_climate(
     entity_id: str,
@@ -608,7 +608,7 @@ async def control_climate(
         },
         "required": ["entity_id", "action"],
     },
-    deprecated=True,
+    hidden=True,
 )
 async def control_media(
     entity_id: str,
@@ -717,7 +717,7 @@ async def control_media(
         },
         "required": ["entity_id", "action"],
     },
-    deprecated=True,
+    hidden=True,
 )
 async def control_cover(
     entity_id: str,
@@ -812,7 +812,7 @@ async def control_cover(
         },
         "required": ["entity_id", "action"],
     },
-    deprecated=True,
+    hidden=True,
 )
 async def control_fan(
     entity_id: str,
@@ -1088,7 +1088,7 @@ async def control_area(
         },
         "required": ["domain", "service", "entity_id"],
     },
-    deprecated=True,
+    hidden=True,
 )
 async def call_service(
     domain: str,

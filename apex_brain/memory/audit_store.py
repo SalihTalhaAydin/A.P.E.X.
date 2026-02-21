@@ -97,7 +97,7 @@ class AuditStore:
                 "tool": r[2],
                 "action": r[3],
                 "target": r[4],
-                "config": json.loads(r[5]),
+                "config": self._safe_json_loads(r[5]),
                 "result": r[6],
                 "session_id": r[7],
                 "user_approved": bool(r[8]),
@@ -125,13 +125,21 @@ class AuditStore:
                 "tool": r[2],
                 "action": r[3],
                 "target": r[4],
-                "config": json.loads(r[5]),
+                "config": self._safe_json_loads(r[5]),
                 "result": r[6],
                 "session_id": r[7],
                 "user_approved": bool(r[8]),
             }
             for r in rows
         ]
+
+    @staticmethod
+    def _safe_json_loads(raw: str) -> dict:
+        """Parse JSON, returning empty dict on error."""
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return {}
 
     async def close(self):
         if self._db:

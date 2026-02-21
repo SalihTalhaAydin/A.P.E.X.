@@ -7,6 +7,7 @@ from tools.base import (
     _schema_from_hints,
     execute_tool,
     get_openai_tool_definitions,
+    hide_tools,
     tool,
 )
 
@@ -77,21 +78,55 @@ async def test_execute_tool_unknown():
     assert "Unknown tool" in result
 
 
-def test_deprecated_tool_hidden_from_definitions():
-    """Deprecated tools are excluded from get_openai_tool_definitions
-    but remain callable via execute_tool."""
+def test_hidden_tool_not_in_definitions():
+    """Hidden tools should not appear in OpenAI tool definitions."""
 
-    @tool(description="Old tool", deprecated=True)
-    def _deprecated_echo(msg: str) -> str:
+    @tool(description="Hidden test tool")
+    def _hidden_test(msg: str) -> str:
         return msg
 
-    name = "_deprecated_echo"
+    name = "_hidden_test"
     try:
-        # Should be in the registry
-        assert name in TOOL_REGISTRY
-        assert TOOL_REGISTRY[name]["deprecated"] is True
+        # Verify it's visible initially
+        defs = get_openai_tool_definitions()
+        names = [d["function"]["name"] for d in defs]
+        assert name in names
 
-        # Should NOT appear in tool definitions sent to the model
+        # Hide it
+        hide_tools(name)
+        defs = get_openai_tool_definitions()
+        names = [d["function"]["name"] for d in defs]
+        assert name not in names
+
+        # But still callable
+        import asyncio
+
+        result = asyncio.get_event_loop().run_until_complete(
+            execute_tool(name, {"msg": "test"})
+        )
+        assert result == "test"
+    finally:
+        TOOL_REGISTRY.pop(name, None)
+
+
+def test_hide_tools_ignores_unknown():
+    """hide_tools should not raise for unknown tool names."""
+    hide_tools("totally_nonexistent_tool_xyz")  # no error
+
+
+def test_hidden_decorator_flag():
+    """Tools registered with hidden=True are excluded from definitions
+    but remain callable via execute_tool."""
+
+    @tool(description="Old tool", hidden=True)
+    def _hidden_decorator_echo(msg: str) -> str:
+        return msg
+
+    name = "_hidden_decorator_echo"
+    try:
+        assert name in TOOL_REGISTRY
+        assert TOOL_REGISTRY[name]["hidden"] is True
+
         defs = get_openai_tool_definitions()
         names = [d["function"]["name"] for d in defs]
         assert name not in names
@@ -100,14 +135,14 @@ def test_deprecated_tool_hidden_from_definitions():
 
 
 @pytest.mark.asyncio
-async def test_deprecated_tool_still_callable():
-    """Deprecated tools can still be executed via execute_tool."""
+async def test_hidden_tool_still_callable():
+    """Hidden tools can still be executed via execute_tool."""
 
-    @tool(description="Old callable tool", deprecated=True)
-    def _deprecated_callable(msg: str) -> str:
+    @tool(description="Old callable tool", hidden=True)
+    def _hidden_callable(msg: str) -> str:
         return f"got: {msg}"
 
-    name = "_deprecated_callable"
+    name = "_hidden_callable"
     try:
         result = await execute_tool(name, {"msg": "hello"})
         assert result == "got: hello"

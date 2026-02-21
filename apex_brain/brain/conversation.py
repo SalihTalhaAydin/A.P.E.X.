@@ -224,7 +224,7 @@ class Conversation:
                 kwargs = {
                     "model": settings.litellm_model,
                     "messages": messages,
-                    "temperature": 0.7,
+                    "temperature": 0.2,
                     "max_tokens": 2000,
                 }
                 if tool_defs:
@@ -316,11 +316,14 @@ class Conversation:
                 return text
 
             # Process tool calls
-            if is_first_response:
-                logger.debug(
-                    "First response had %d tool calls.",
-                    len(msg.tool_calls),
-                )
+            tool_names_this_turn = [
+                tc.function.name for tc in msg.tool_calls
+            ]
+            logger.info(
+                "LLM requested %d tool call(s): %s",
+                len(msg.tool_calls),
+                ", ".join(tool_names_this_turn),
+            )
             messages.append(msg.model_dump())
 
             for tc in msg.tool_calls:
@@ -330,7 +333,7 @@ class Conversation:
                 except json.JSONDecodeError:
                     args = {}
 
-                logger.debug(
+                logger.info(
                     "Tool call: %s(%s)",
                     fn_name,
                     json.dumps(args, default=str)[:500],
