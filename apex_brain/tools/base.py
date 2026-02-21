@@ -16,7 +16,11 @@ logger = logging.getLogger(__name__)
 TOOL_REGISTRY: dict[str, dict] = {}
 
 
-def tool(description: str, parameters: dict | None = None):
+def tool(
+    description: str,
+    parameters: dict | None = None,
+    deprecated: bool = False,
+):
     """
     Decorator to register a function as an Apex tool.
 
@@ -26,6 +30,8 @@ def tool(description: str, parameters: dict | None = None):
             ...
 
     Parameters schema is auto-generated from type hints if not provided.
+    Set deprecated=True to keep the tool callable but hide it from the
+    model's tool list (it won't be included in get_openai_tool_definitions).
     """
 
     def decorator(func: Callable) -> Callable:
@@ -37,6 +43,7 @@ def tool(description: str, parameters: dict | None = None):
             "description": description,
             "parameters": schema,
             "is_async": inspect.iscoroutinefunction(func),
+            "deprecated": deprecated,
         }
         return func
 
@@ -104,9 +111,16 @@ def _python_type_to_json(hint) -> str:
 
 
 def get_openai_tool_definitions() -> list[dict]:
-    """Convert all registered tools to OpenAI function-calling format."""
+    """Convert registered tools to OpenAI function-calling format.
+
+    Deprecated tools are excluded from the list so the model cannot
+    select them.  They remain callable via execute_tool() for backward
+    compatibility.
+    """
     definitions = []
     for name, info in TOOL_REGISTRY.items():
+        if info.get("deprecated"):
+            continue
         definitions.append(
             {
                 "type": "function",

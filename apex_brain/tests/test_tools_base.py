@@ -75,3 +75,41 @@ async def test_execute_tool_unknown():
     """execute_tool returns error message for unknown tool."""
     result = await execute_tool("nonexistent_tool", {})
     assert "Unknown tool" in result
+
+
+def test_deprecated_tool_hidden_from_definitions():
+    """Deprecated tools are excluded from get_openai_tool_definitions
+    but remain callable via execute_tool."""
+
+    @tool(description="Old tool", deprecated=True)
+    def _deprecated_echo(msg: str) -> str:
+        return msg
+
+    name = "_deprecated_echo"
+    try:
+        # Should be in the registry
+        assert name in TOOL_REGISTRY
+        assert TOOL_REGISTRY[name]["deprecated"] is True
+
+        # Should NOT appear in tool definitions sent to the model
+        defs = get_openai_tool_definitions()
+        names = [d["function"]["name"] for d in defs]
+        assert name not in names
+    finally:
+        TOOL_REGISTRY.pop(name, None)
+
+
+@pytest.mark.asyncio
+async def test_deprecated_tool_still_callable():
+    """Deprecated tools can still be executed via execute_tool."""
+
+    @tool(description="Old callable tool", deprecated=True)
+    def _deprecated_callable(msg: str) -> str:
+        return f"got: {msg}"
+
+    name = "_deprecated_callable"
+    try:
+        result = await execute_tool(name, {"msg": "hello"})
+        assert result == "got: hello"
+    finally:
+        TOOL_REGISTRY.pop(name, None)
