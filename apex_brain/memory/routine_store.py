@@ -4,10 +4,12 @@ Routine Store - Dedicated storage for named multi-step routines.
 Stores routines with lifecycle metadata (use_count, last_used_at)
 in a dedicated SQLite table, separate from the knowledge store.
 """
+
 from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 
 import aiosqlite
@@ -96,11 +98,15 @@ class RoutineStore:
             return None
         return self._row_to_dict(row)
 
-    async def list_routines(self, include_disabled: bool = False) -> list[dict]:
+    async def list_routines(
+        self, include_disabled: bool = False
+    ) -> list[dict]:
         """List all routines with metadata."""
-        query = "SELECT id, name, steps, trigger_hint, created_at, " \
-                "updated_at, last_used_at, use_count, source, enabled " \
-                "FROM routines"
+        query = (
+            "SELECT id, name, steps, trigger_hint, created_at, "
+            "updated_at, last_used_at, use_count, source, enabled "
+            "FROM routines"
+        )
         if not include_disabled:
             query += " WHERE enabled = 1"
         query += " ORDER BY use_count DESC, updated_at DESC"
@@ -126,10 +132,10 @@ class RoutineStore:
             "updated_at, last_used_at, use_count, source, enabled "
             "FROM routines WHERE enabled = 1 AND ("
             "  last_used_at IS NULL AND "
-            "  julianday('now') - julianday(created_at) > ? "
+            "  julianday('now', 'utc') - julianday(created_at) > ? "
             "  OR "
             "  last_used_at IS NOT NULL AND "
-            "  julianday('now') - julianday(last_used_at) > ?"
+            "  julianday('now', 'utc') - julianday(last_used_at) > ?"
             ")",
             (days, days),
         )
@@ -159,13 +165,23 @@ class RoutineStore:
                     value = fact["value"]
                     # Remove trigger hint prefix if present
                     if value.startswith("[trigger:"):
-                        idx = value.index("]")
-                        value = value[idx + 1:].strip()
-                    steps = [s.strip() for s in value.replace("\n", ".").split(".") if s.strip()]
-                    await self.save_routine(fact["key"], steps, source="migrated")
+                        idx = value.find("]")
+                        if idx != -1:
+                            value = value[idx + 1 :].strip()
+                    # Split on newlines or sentence-ending
+                    # periods followed by a space (legacy format)
+                    parts = re.split(r"\n|(?<=\.)\s+", value)
+                    steps = [
+                        s.strip().rstrip(".") for s in parts if s.strip()
+                    ]
+                    await self.save_routine(
+                        fact["key"], steps, source="migrated"
+                    )
                     migrated += 1
             if migrated:
-                logger.info("Migrated %d routines from knowledge store", migrated)
+                logger.info(
+                    "Migrated %d routines from knowledge store", migrated
+                )
         except Exception as e:
             logger.warning("Routine migration error: %s", e)
         return migrated

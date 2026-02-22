@@ -5,6 +5,7 @@ Simple, portable, no extensions needed.
 
 v0.3.0: deduplication, conflict resolution, temporal metadata.
 """
+
 from __future__ import annotations
 
 import logging
@@ -21,9 +22,7 @@ def _serialize_embedding(
     embedding: list[float],
 ) -> bytes:
     """Convert a list of floats to bytes."""
-    return struct.pack(
-        f"{len(embedding)}f", *embedding
-    )
+    return struct.pack(f"{len(embedding)}f", *embedding)
 
 
 def _deserialize_embedding(
@@ -37,9 +36,7 @@ def _deserialize_embedding(
     )
 
 
-def _cosine_similarity(
-    a: np.ndarray, b: np.ndarray
-) -> float:
+def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     """Cosine similarity between two vectors."""
     norm_a = np.linalg.norm(a)
     norm_b = np.linalg.norm(b)
@@ -56,6 +53,7 @@ class KnowledgeStore:
         self.db_path = db_path
         self._db: aiosqlite.Connection | None = None
         self._embed_fn = None
+        self._embed_warned = False
 
     def set_embed_function(self, fn):
         """Set the embedding function."""
@@ -63,9 +61,7 @@ class KnowledgeStore:
 
     async def initialize(self):
         """Create tables if they don't exist."""
-        self._db = await aiosqlite.connect(
-            self.db_path
-        )
+        self._db = await aiosqlite.connect(self.db_path)
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA busy_timeout=5000")
 
@@ -98,55 +94,57 @@ class KnowledgeStore:
 
     async def _migrate_add_columns(self):
         """Add new columns if missing."""
-        cursor = await self._db.execute(
-            "PRAGMA table_info(facts)"
-        )
-        cols = {
-            row[1] for row in await cursor.fetchall()
-        }
+        cursor = await self._db.execute("PRAGMA table_info(facts)")
+        cols = {row[1] for row in await cursor.fetchall()}
 
         if "last_mentioned_at" not in cols:
             await self._db.execute(
-                "ALTER TABLE facts "
-                "ADD COLUMN last_mentioned_at TEXT"
+                "ALTER TABLE facts ADD COLUMN last_mentioned_at TEXT"
             )
         if "expires_at" not in cols:
             await self._db.execute(
-                "ALTER TABLE facts "
-                "ADD COLUMN expires_at TEXT"
+                "ALTER TABLE facts ADD COLUMN expires_at TEXT"
             )
 
-    async def _embed_text(
-        self, text: str
-    ) -> np.ndarray | None:
+        # Unique constraint on (category, key) to prevent duplicates
+        await self._db.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS
+            idx_facts_cat_key ON facts(category, key)
+        """)
+
+    async def _embed_text(self, text: str) -> np.ndarray | None:
         """Get embedding vector for text."""
         if not self._embed_fn:
+            if not self._embed_warned:
+                logger.warning(
+                    "No embedding function set — semantic "
+                    "search and deduplication are disabled. "
+                    "Call set_embed_function() to enable."
+                )
+                self._embed_warned = True
             return None
         try:
             response = await self._embed_fn(text)
             if response:
                 # Support both object-style (response.data) and
                 # dict-style (response["data"]) LiteLLM responses.
-                data = (
-                    getattr(response, "data", None)
-                    or response.get("data")
-                    if not hasattr(response, "data")
-                    else response.data
-                )
+                if hasattr(response, "data"):
+                    data = response.data
+                elif isinstance(response, dict):
+                    data = response.get("data")
+                else:
+                    data = None
                 if not data:
                     # _embed_fn may return the embedding list directly
                     return np.array(response, dtype=np.float32)
                 item = data[0]
-                emb = (
-                    getattr(item, "embedding", None)
-                    or item.get("embedding")
+                emb = getattr(item, "embedding", None) or item.get(
+                    "embedding"
                 )
                 if emb is not None:
                     return np.array(emb, dtype=np.float32)
         except Exception as e:
-            logger.error(
-                "[KnowledgeStore] Embedding error: %s", e
-            )
+            logger.error("[KnowledgeStore] Embedding error: %s", e)
         return None
 
     async def _check_duplicate(
@@ -166,18 +164,15 @@ class KnowledgeStore:
         cursor = await self._db.execute(
             "SELECT id, embedding FROM facts "
             "WHERE category = ? "
-            "AND embedding IS NOT NULL",
+            "AND embedding IS NOT NULL "
+            "ORDER BY updated_at DESC LIMIT 200",
             (category,),
         )
         rows = await cursor.fetchall()
 
         for row in rows:
-            existing = _deserialize_embedding(
-                row[1]
-            )
-            sim = _cosine_similarity(
-                new_embedding, existing
-            )
+            existing = _deserialize_embedding(row[1])
+            sim = _cosine_similarity(new_embedding, existing)
             if sim >= threshold:
                 return row[0]
         return None
@@ -205,106 +200,110 @@ class KnowledgeStore:
 
         # Generate embedding
         embedding_blob = None
-        embedding_vec = await self._embed_text(
-            f"{key}: {value}"
-        )
+        embedding_vec = await self._embed_text(f"{key}: {value}")
         if embedding_vec is not None:
-            embedding_blob = _serialize_embedding(
-                embedding_vec.tolist()
+            embedding_blob = _serialize_embedding(embedding_vec.tolist())
+
+        # Use BEGIN IMMEDIATE for write-lock to
+        # prevent TOCTOU race on (category, key)
+        await self._db.execute("BEGIN IMMEDIATE")
+        try:
+            # 1. Check exact key match (conflict)
+            cursor = await self._db.execute(
+                "SELECT id, value, confidence "
+                "FROM facts "
+                "WHERE category = ? AND key = ?",
+                (category, key),
             )
+            existing = await cursor.fetchone()
 
-        # 1. Check exact key match (conflict)
-        cursor = await self._db.execute(
-            "SELECT id, value, confidence "
-            "FROM facts "
-            "WHERE category = ? AND key = ?",
-            (category, key),
-        )
-        existing = await cursor.fetchone()
+            if existing:
+                fact_id = existing[0]
+                old_value = existing[1]
+                old_conf = existing[2]
 
-        if existing:
-            fact_id = existing[0]
-            old_value = existing[1]
-            old_conf = existing[2]
+                # Same value → just touch timestamp
+                if old_value == value:
+                    await self._db.execute(
+                        "UPDATE facts "
+                        "SET last_mentioned_at = ?, "
+                        "updated_at = ? "
+                        "WHERE id = ?",
+                        (now, now, fact_id),
+                    )
+                    await self._db.commit()
+                    return fact_id
 
-            # Same value → just touch timestamp
-            if old_value == value:
+                # Different value → higher conf wins
+                # (force=True skips comparison)
+                if force or confidence >= old_conf:
+                    await self._db.execute(
+                        "UPDATE facts SET value = ?, "
+                        "confidence = ?, "
+                        "embedding = ?, "
+                        "updated_at = ?, "
+                        "last_mentioned_at = ?, "
+                        "expires_at = ? "
+                        "WHERE id = ?",
+                        (
+                            value,
+                            confidence,
+                            embedding_blob,
+                            now,
+                            now,
+                            expires_at,
+                            fact_id,
+                        ),
+                    )
+                    await self._db.commit()
+                    return fact_id
+                else:
+                    # Lower confidence → skip
+                    await self._db.commit()
+                    return fact_id
+
+            # 2. Semantic dedup: similar value?
+            dup_id = await self._check_duplicate(
+                category, value, embedding_vec
+            )
+            if dup_id is not None:
                 await self._db.execute(
                     "UPDATE facts "
                     "SET last_mentioned_at = ?, "
-                    "updated_at = ? "
-                    "WHERE id = ?",
-                    (now, now, fact_id),
+                    "updated_at = ? WHERE id = ?",
+                    (now, now, dup_id),
                 )
                 await self._db.commit()
-                return fact_id
+                return dup_id
 
-            # Different value → higher conf wins
-            # (force=True skips comparison)
-            if force or confidence >= old_conf:
-                await self._db.execute(
-                    "UPDATE facts SET value = ?, "
-                    "confidence = ?, "
-                    "embedding = ?, "
-                    "updated_at = ?, "
-                    "last_mentioned_at = ?, "
-                    "expires_at = ? "
-                    "WHERE id = ?",
-                    (
-                        value,
-                        confidence,
-                        embedding_blob,
-                        now,
-                        now,
-                        expires_at,
-                        fact_id,
-                    ),
-                )
-                await self._db.commit()
-                return fact_id
-            else:
-                # Lower confidence → skip
-                return fact_id
-
-        # 2. Semantic dedup: similar value stored?
-        dup_id = await self._check_duplicate(
-            category, value, embedding_vec
-        )
-        if dup_id is not None:
-            await self._db.execute(
-                "UPDATE facts "
-                "SET last_mentioned_at = ?, "
-                "updated_at = ? WHERE id = ?",
-                (now, now, dup_id),
+            # 3. New fact → insert
+            cursor = await self._db.execute(
+                "INSERT INTO facts "
+                "(category, key, value, confidence, "
+                "source, embedding, created_at, "
+                "updated_at, last_mentioned_at, "
+                "expires_at) "
+                "VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    category,
+                    key,
+                    value,
+                    confidence,
+                    source,
+                    embedding_blob,
+                    now,
+                    now,
+                    now,
+                    expires_at,
+                ),
             )
+            fact_id = cursor.lastrowid
             await self._db.commit()
-            return dup_id
-
-        # 3. New fact → insert
-        cursor = await self._db.execute(
-            "INSERT INTO facts "
-            "(category, key, value, confidence, "
-            "source, embedding, created_at, "
-            "updated_at, last_mentioned_at, "
-            "expires_at) "
-            "VALUES "
-            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                category,
-                key,
-                value,
-                confidence,
-                source,
-                embedding_blob,
-                now,
-                now,
-                now,
-                expires_at,
-            ),
-        )
-        fact_id = cursor.lastrowid
-        await self._db.commit()
-        return fact_id
+            return fact_id
+        except Exception:
+            await self._db.execute("ROLLBACK")
+            raise
 
     async def correct_fact(
         self,
@@ -320,8 +319,7 @@ class KnowledgeStore:
 
         # Find existing fact by (category, key)
         cursor = await self._db.execute(
-            "SELECT id FROM facts "
-            "WHERE category = ? AND key = ?",
+            "SELECT id FROM facts WHERE category = ? AND key = ?",
             (category, key),
         )
         existing = await cursor.fetchone()
@@ -331,14 +329,10 @@ class KnowledgeStore:
 
             # Re-embed the new value
             embedding_blob = None
-            embedding_vec = await self._embed_text(
-                f"{key}: {new_value}"
-            )
+            embedding_vec = await self._embed_text(f"{key}: {new_value}")
             if embedding_vec is not None:
-                embedding_blob = (
-                    _serialize_embedding(
-                        embedding_vec.tolist()
-                    )
+                embedding_blob = _serialize_embedding(
+                    embedding_vec.tolist()
                 )
 
             await self._db.execute(
@@ -358,9 +352,7 @@ class KnowledgeStore:
                 ),
             )
             await self._db.commit()
-            return (
-                f"Updated: {key} → {new_value}"
-            )
+            return f"Updated: {key} → {new_value}"
 
         # No existing fact found → store as new
         await self.store_fact(
@@ -376,9 +368,7 @@ class KnowledgeStore:
         """Update last_mentioned_at to now."""
         now = datetime.now(timezone.utc).isoformat()
         await self._db.execute(
-            "UPDATE facts "
-            "SET last_mentioned_at = ? "
-            "WHERE id = ?",
+            "UPDATE facts SET last_mentioned_at = ? WHERE id = ?",
             (now, fact_id),
         )
         await self._db.commit()
@@ -414,38 +404,32 @@ class KnowledgeStore:
         for row in rows:
             fact_id = row[0]
             confidence = row[1]
-            last_mentioned = datetime.fromisoformat(
-                row[2]
-            )
+            last_mentioned = datetime.fromisoformat(row[2])
 
             # Ensure timezone-aware comparison
             if last_mentioned.tzinfo is None:
-                last_mentioned = (
-                    last_mentioned.replace(tzinfo=timezone.utc)
+                logger.debug(
+                    "Fact %s has naive timestamp, assuming UTC",
+                    fact_id,
+                )
+                last_mentioned = last_mentioned.replace(
+                    tzinfo=timezone.utc
                 )
 
-            age_secs = (
-                now - last_mentioned
-            ).total_seconds()
+            age_secs = (now - last_mentioned).total_seconds()
 
             if age_secs < thirty_days_secs:
                 continue  # Not old enough to decay
 
             # Number of 30-day periods elapsed
-            periods = int(
-                age_secs // thirty_days_secs
-            )
+            periods = int(age_secs // thirty_days_secs)
 
-            new_conf = confidence * (
-                (1 - decay_rate) ** periods
-            )
+            new_conf = confidence * ((1 - decay_rate) ** periods)
             new_conf = max(new_conf, min_confidence)
 
             if new_conf < confidence:
                 await self._db.execute(
-                    "UPDATE facts "
-                    "SET confidence = ? "
-                    "WHERE id = ?",
+                    "UPDATE facts SET confidence = ? WHERE id = ?",
                     (new_conf, fact_id),
                 )
                 decayed_count += 1
@@ -472,24 +456,16 @@ class KnowledgeStore:
     ) -> list[dict]:
         """Search by semantic similarity."""
         if not self._embed_fn:
-            return await self.search_keyword(
-                query, limit
-            )
+            return await self.search_keyword(query, limit)
 
         try:
-            query_vec = await self._embed_text(
-                query
-            )
+            query_vec = await self._embed_text(query)
             if query_vec is None:
-                return await self.search_keyword(
-                    query, limit
-                )
+                return await self.search_keyword(query, limit)
 
             query_norm = np.linalg.norm(query_vec)
             if query_norm == 0:
-                return await self.search_keyword(
-                    query, limit
-                )
+                return await self.search_keyword(query, limit)
 
             # Exclude expired facts
             now = datetime.now(timezone.utc).isoformat()
@@ -506,23 +482,15 @@ class KnowledgeStore:
             rows = await cursor.fetchall()
 
             if not rows:
-                return await self.search_keyword(
-                    query, limit
-                )
+                return await self.search_keyword(query, limit)
 
             scored = []
             for row in rows:
-                fact_emb = _deserialize_embedding(
-                    row[7]
-                )
-                sim = _cosine_similarity(
-                    query_vec, fact_emb
-                )
+                fact_emb = _deserialize_embedding(row[7])
+                sim = _cosine_similarity(query_vec, fact_emb)
                 scored.append((sim, row))
 
-            scored.sort(
-                key=lambda x: x[0], reverse=True
-            )
+            scored.sort(key=lambda x: x[0], reverse=True)
 
             results = []
             for similarity, row in scored[:limit]:
@@ -535,16 +503,22 @@ class KnowledgeStore:
                         "confidence": row[4],
                         "created_at": row[5],
                         "updated_at": row[6],
-                        "similarity": round(
-                            similarity, 4
-                        ),
+                        "similarity": round(similarity, 4),
                     }
                 )
 
-            # Touch returned facts so they
+            # Batch-touch returned facts so they
             # don't decay while still relevant
-            for r in results:
-                await self.touch_fact(r["id"])
+            if results:
+                ids = [r["id"] for r in results]
+                placeholders = ",".join("?" * len(ids))
+                touch_now = datetime.now(timezone.utc).isoformat()
+                await self._db.execute(
+                    f"UPDATE facts SET last_mentioned_at = ? "
+                    f"WHERE id IN ({placeholders})",
+                    [touch_now] + ids,
+                )
+                await self._db.commit()
 
             return results
 
@@ -553,9 +527,7 @@ class KnowledgeStore:
                 "[KnowledgeStore] Semantic search error (%s), falling back.",
                 e,
             )
-            return await self.search_keyword(
-                query, limit
-            )
+            return await self.search_keyword(query, limit)
 
     async def search_keyword(
         self, query: str, limit: int = 10
@@ -564,7 +536,8 @@ class KnowledgeStore:
         now = datetime.now(timezone.utc).isoformat()
         # Escape LIKE wildcards in user input
         escaped = (
-            query.replace("%", "\\%")
+            query.replace("\\", "\\\\")
+            .replace("%", "\\%")
             .replace("_", "\\_")
         )
         cursor = await self._db.execute(
@@ -597,10 +570,18 @@ class KnowledgeStore:
             for r in rows
         ]
 
-        # Touch returned facts so they
+        # Batch-touch returned facts so they
         # don't decay while still relevant
-        for r in results:
-            await self.touch_fact(r["id"])
+        if results:
+            ids = [r["id"] for r in results]
+            placeholders = ",".join("?" * len(ids))
+            touch_now = datetime.now(timezone.utc).isoformat()
+            await self._db.execute(
+                f"UPDATE facts SET last_mentioned_at = ? "
+                f"WHERE id IN ({placeholders})",
+                [touch_now] + ids,
+            )
+            await self._db.commit()
 
         return results
 
@@ -648,8 +629,7 @@ class KnowledgeStore:
     async def delete_fact(self, key: str) -> bool:
         """Delete a fact by key (exact match only)."""
         cursor = await self._db.execute(
-            "SELECT id FROM facts "
-            "WHERE key = ?",
+            "SELECT id FROM facts WHERE key = ?",
             (key,),
         )
         row = await cursor.fetchone()
@@ -698,7 +678,7 @@ class KnowledgeStore:
             "SELECT id, category, key, value, confidence, "
             "created_at, updated_at, last_mentioned_at FROM facts "
             "WHERE last_mentioned_at IS NOT NULL "
-            "AND julianday('now') - julianday(last_mentioned_at) > ? "
+            "AND julianday('now', 'utc') - julianday(last_mentioned_at) > ? "
             "ORDER BY last_mentioned_at ASC LIMIT ?",
             (days, limit),
         )
@@ -732,14 +712,22 @@ class KnowledgeStore:
         results = []
         for r in rows:
             fact_a = {
-                "id": r[0], "category": r[1], "key": r[2],
-                "value": r[3], "confidence": r[4],
-                "created_at": r[5], "updated_at": r[6],
+                "id": r[0],
+                "category": r[1],
+                "key": r[2],
+                "value": r[3],
+                "confidence": r[4],
+                "created_at": r[5],
+                "updated_at": r[6],
             }
             fact_b = {
-                "id": r[7], "category": r[8], "key": r[9],
-                "value": r[10], "confidence": r[11],
-                "created_at": r[12], "updated_at": r[13],
+                "id": r[7],
+                "category": r[8],
+                "key": r[9],
+                "value": r[10],
+                "confidence": r[11],
+                "created_at": r[12],
+                "updated_at": r[13],
             }
             results.append((fact_a, fact_b))
         return results

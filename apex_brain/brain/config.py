@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class Settings(BaseSettings):
     # AI model -- change this one string to swap providers
     # Examples: gpt-4o, gpt-4o-mini, claude-sonnet-4-20250514, gemini/gemini-2.5-pro
-    litellm_model: str = "gemini/gemini-2.5-pro"
+    litellm_model: str = "gpt-4o"
 
     # API keys (only need the one matching your model)
     openai_api_key: str = ""

@@ -137,8 +137,8 @@ async def _get_all_states() -> list[dict]:
         states = await ha_request("GET", "/states")
         if isinstance(states, list):
             return states
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Failed to fetch all states: %s", exc)
     return []
 
 
@@ -160,9 +160,7 @@ async def _try_button(
 
     # Build a set of entity_ids for quick lookup
     state_ids = {
-        s.get("entity_id", "")
-        for s in all_states
-        if isinstance(s, dict)
+        s.get("entity_id", "") for s in all_states if isinstance(s, dict)
     }
 
     # Normalise the action for suffix matching
@@ -198,12 +196,8 @@ async def _try_button(
         target = f"button.{name}_{suffix}"
         if target in state_ids:
             try:
-                await call_ha_service(
-                    "button", "press", target
-                )
-                return (
-                    f"Done — pressed {target}."
-                )
+                await call_ha_service("button", "press", target)
+                return f"Done — pressed {target}."
             except Exception as e:
                 logger.warning(
                     "button.press %s failed: %s",
@@ -214,9 +208,7 @@ async def _try_button(
     return None
 
 
-async def _try_vacuum_service(
-    entity_id: str, action: str
-) -> str | None:
+async def _try_vacuum_service(entity_id: str, action: str) -> str | None:
     """Try to call vacuum.<action> as an HA service.
 
     Queries HA for available vacuum-domain services and calls
@@ -237,18 +229,14 @@ async def _try_vacuum_service(
         if not isinstance(entry, dict):
             continue
         if entry.get("domain") == "vacuum":
-            vacuum_services = set(
-                entry.get("services", {}).keys()
-            )
+            vacuum_services = set(entry.get("services", {}).keys())
             break
 
     if action_norm not in vacuum_services:
         return None
 
     try:
-        await call_ha_service(
-            "vacuum", action_norm, entity_id
-        )
+        await call_ha_service("vacuum", action_norm, entity_id)
         return f"Done — called vacuum.{action_norm}."
     except Exception as e:
         logger.warning(
@@ -260,9 +248,7 @@ async def _try_vacuum_service(
         return None
 
 
-async def _try_send_command(
-    entity_id: str, action: str
-) -> str | None:
+async def _try_send_command(entity_id: str, action: str) -> str | None:
     """Try vacuum.send_command as a last resort.
 
     Useful for Roborock custom commands like
@@ -298,9 +284,7 @@ async def _try_send_command(
         return None
 
 
-async def _resolve_action(
-    entity_id: str, action: str
-) -> str:
+async def _resolve_action(entity_id: str, action: str) -> str:
     """Dynamically resolve and execute any vacuum action.
 
     Resolution order:
@@ -325,16 +309,12 @@ async def _resolve_action(
     if is_button_action:
         all_states = await _get_all_states()
 
-        btn_result = await _try_button(
-            entity_id, action_norm, all_states
-        )
+        btn_result = await _try_button(entity_id, action_norm, all_states)
         if btn_result:
             return btn_result
 
         # Then try send_command
-        cmd_result = await _try_send_command(
-            entity_id, action_norm
-        )
+        cmd_result = await _try_send_command(entity_id, action_norm)
         if cmd_result:
             return cmd_result
 
@@ -346,9 +326,7 @@ async def _resolve_action(
         )
 
     # For non-button actions, try vacuum service first
-    svc_result = await _try_vacuum_service(
-        entity_id, action_norm
-    )
+    svc_result = await _try_vacuum_service(entity_id, action_norm)
     if svc_result:
         return svc_result
 
@@ -358,9 +336,7 @@ async def _resolve_action(
         return btn_result
 
     # Last resort: send_command
-    cmd_result = await _try_send_command(
-        entity_id, action_norm
-    )
+    cmd_result = await _try_send_command(entity_id, action_norm)
     if cmd_result:
         return cmd_result
 
@@ -391,9 +367,7 @@ async def _verify_vacuum(entity_id: str) -> str:
     try:
         state = await read_state(entity_id)
         attrs = state.get("attributes", {})
-        fn = attrs.get(
-            "friendly_name", friendly_name(entity_id)
-        )
+        fn = attrs.get("friendly_name", friendly_name(entity_id))
         vac_state = state.get("state", "unknown")
         parts = [f"{fn}: {vac_state}"]
 
@@ -402,9 +376,7 @@ async def _verify_vacuum(entity_id: str) -> str:
             parts.append(f"battery {battery}%")
 
         if "fan_speed" in attrs:
-            parts.append(
-                f"fan speed: {attrs['fan_speed']}"
-            )
+            parts.append(f"fan speed: {attrs['fan_speed']}")
 
         # Water level / mop mode — try entity attrs first,
         # then fall back to dock sensor (Roborock 2024+)
@@ -416,9 +388,7 @@ async def _verify_vacuum(entity_id: str) -> str:
         ):
             if _wattr in attrs:
                 label = _wattr.replace("_", " ")
-                parts.append(
-                    f"{label}: {attrs[_wattr]}"
-                )
+                parts.append(f"{label}: {attrs[_wattr]}")
                 water_shown = True
                 break
 
@@ -441,16 +411,12 @@ async def _verify_vacuum(entity_id: str) -> str:
 
         if dock["overdue"]:
             parts.append(
-                "maintenance overdue: "
-                + ", ".join(dock["overdue"])
+                "maintenance overdue: " + ", ".join(dock["overdue"])
             )
 
         return ", ".join(parts)
     except Exception:
-        return (
-            f"{friendly_name(entity_id)}: "
-            "(state unconfirmed)"
-        )
+        return f"{friendly_name(entity_id)}: (state unconfirmed)"
 
 
 @tool(
@@ -469,8 +435,7 @@ async def _verify_vacuum(entity_id: str) -> str:
             "entity_id": {
                 "type": "string",
                 "description": (
-                    "Vacuum entity ID (use "
-                    "list_entities to discover)."
+                    "Vacuum entity ID (use list_entities to discover)."
                 ),
             },
             "action": {
@@ -574,8 +539,8 @@ async def _discover_vacuum() -> str | None:
         for s in states:
             if s.get("entity_id", "").startswith("vacuum."):
                 return s["entity_id"]
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Vacuum discovery failed: %s", exc)
     return None
 
 
@@ -642,7 +607,10 @@ def _match_rooms(
         found = False
         for seg_id, room_name in room_map.items():
             if req_lower in room_name.lower():
-                matched_ids.append(int(seg_id))
+                try:
+                    matched_ids.append(int(seg_id))
+                except (ValueError, TypeError):
+                    matched_ids.append(seg_id)
                 found = True
                 break
         if not found:
@@ -744,17 +712,13 @@ async def clean_rooms(
                 "segments": matched_ids,
             },
         )
-        fn = attributes.get(
-            "friendly_name", friendly_name(entity_id)
-        )
+        fn = attributes.get("friendly_name", friendly_name(entity_id))
         rooms_cleaned = ", ".join(
-            f"'{room_map[str(sid)]}'" for sid in matched_ids
+            f"'{room_map.get(str(sid), str(sid))}'" for sid in matched_ids
         )
         msg = f"Cleaning {rooms_cleaned} with {fn}."
         if unmatched:
-            msg += (
-                f" Note: {unmatched!r} did not match any known room."
-            )
+            msg += f" Note: {unmatched!r} did not match any known room."
         return msg
 
     except Exception as robo_err:

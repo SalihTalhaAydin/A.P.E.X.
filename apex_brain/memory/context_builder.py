@@ -41,51 +41,47 @@ class ContextBuilder:
         Returns the complete system prompt string.
         """
         # 1. Current date/time + time context
-        now = datetime.datetime.now(
-            tz=ZoneInfo(settings.timezone)
-        )
+        try:
+            tz = ZoneInfo(settings.timezone)
+        except (KeyError, Exception):
+            logger.warning(
+                "Invalid timezone '%s', falling back to UTC",
+                settings.timezone,
+            )
+            tz = datetime.timezone.utc
+        now = datetime.datetime.now(tz=tz)
         time_context = _build_time_context(now)
 
         # 2. Recent conversation turns (for continuity)
-        recent_turns = (
-            await self.conversation_store.get_recent(
-                n=self.recent_turns_count
-            )
+        recent_turns = await self.conversation_store.get_recent(
+            n=self.recent_turns_count
         )
 
         # 3. Semantically relevant facts
         relevant_facts = []
         if user_message:
-            results = (
-                await self.knowledge_store.search_semantic(
-                    query=user_message,
-                    limit=self.max_facts,
-                )
+            results = await self.knowledge_store.search_semantic(
+                query=user_message,
+                limit=self.max_facts,
             )
             if not results:
-                results = (
-                    await self.knowledge_store.search_keyword(
-                        query=user_message,
-                        limit=self.max_facts,
-                    )
+                results = await self.knowledge_store.search_keyword(
+                    query=user_message,
+                    limit=self.max_facts,
                 )
             relevant_facts = results
 
         # 4. High-confidence core facts
-        core_facts = (
-            await self.knowledge_store.get_all_facts(
-                limit=50
-            )
-        )
+        core_facts = await self.knowledge_store.get_all_facts(limit=50)
         core_set = {f["id"] for f in relevant_facts}
         for fact in core_facts:
+            if len(relevant_facts) >= self.max_facts:
+                break
             if (
                 fact["id"] not in core_set
                 and fact.get("confidence", 0) >= 0.9
             ):
                 relevant_facts.append(fact)
-                if len(relevant_facts) >= self.max_facts:
-                    break
 
         # 4.5. Presence: who is home?
         presence_summary = ""
@@ -94,11 +90,11 @@ class ContextBuilder:
                 get_presence_summary,
             )
 
-            presence_summary = (
-                await get_presence_summary()
-            )
+            presence_summary = await get_presence_summary()
         except Exception:
-            logger.warning("context_builder: Failed to fetch presence", exc_info=True)
+            logger.warning(
+                "context_builder: Failed to fetch presence", exc_info=True
+            )
 
         # 4.6. Device discovery: current entity names
         device_summary = ""
@@ -109,14 +105,15 @@ class ContextBuilder:
 
             device_summary = await get_device_summary()
         except Exception:
-            logger.warning("context_builder: Failed to fetch device summary", exc_info=True)
+            logger.warning(
+                "context_builder: Failed to fetch device summary",
+                exc_info=True,
+            )
 
         # 4.7. Service schemas for top domains
         service_schemas = ""
         try:
-            service_schemas = (
-                await fetch_service_schemas()
-            )
+            service_schemas = await fetch_service_schemas()
         except Exception:
             logger.warning(
                 "context_builder: Failed to fetch service schemas",
@@ -131,11 +128,11 @@ class ContextBuilder:
                     get_today_schedule,
                 )
 
-                calendar_summary = (
-                    await get_today_schedule()
-                )
+                calendar_summary = await get_today_schedule()
         except Exception:
-            logger.warning("context_builder: Failed to fetch calendar", exc_info=True)
+            logger.warning(
+                "context_builder: Failed to fetch calendar", exc_info=True
+            )
 
         # 6. Build the system prompt
         return build_system_prompt(

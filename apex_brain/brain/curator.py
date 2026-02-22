@@ -4,9 +4,11 @@ Curator - Self-curation logic for Apex's managed artifacts.
 Provides audit functions that the scheduler calls periodically to
 keep facts, automations, and entities clean and consolidated.
 """
+
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -48,12 +50,20 @@ class Curator:
             from brain.config import settings
 
             threshold = settings.fact_min_confidence_prune
-            low_conf = await self._knowledge_store.get_low_confidence_facts(
-                threshold, limit=50
+            low_conf = (
+                await self._knowledge_store.get_low_confidence_facts(
+                    threshold, limit=50
+                )
             )
             if low_conf:
                 for fact in low_conf:
-                    await self._knowledge_store.delete_fact_by_id(fact["id"])
+                    fact_id = fact.get("id")
+                    if fact_id is None:
+                        logger.warning(
+                            "Fact missing 'id', skipping: %s", fact
+                        )
+                        continue
+                    await self._knowledge_store.delete_fact_by_id(fact_id)
                 report_parts.append(
                     f"Pruned {len(low_conf)} very low confidence facts"
                 )
@@ -62,16 +72,22 @@ class Curator:
 
         # 4. Find and resolve contradictions
         try:
-            contradictions = await self._knowledge_store.get_contradictory_facts()
+            contradictions = (
+                await self._knowledge_store.get_contradictory_facts()
+            )
             if contradictions:
-                resolved = await self._resolve_contradictions(contradictions)
+                resolved = await self._resolve_contradictions(
+                    contradictions
+                )
                 report_parts.append(
                     f"Resolved {resolved} contradictory fact pairs"
                 )
         except Exception as e:
             logger.error("Contradiction resolution failed: %s", e)
 
-        result = "; ".join(report_parts) if report_parts else "Facts healthy"
+        result = (
+            "; ".join(report_parts) if report_parts else "Facts healthy"
+        )
         logger.info("Fact audit: %s", result)
         return result
 
@@ -82,19 +98,38 @@ class Curator:
         resolved = 0
         for fact_a, fact_b in contradictions:
             try:
+                id_a = fact_a.get("id")
+                id_b = fact_b.get("id")
+                if id_a is None or id_b is None:
+                    logger.warning(
+                        "Contradiction fact missing 'id', skipping: %s vs %s",
+                        fact_a,
+                        fact_b,
+                    )
+                    continue
                 # Higher confidence wins
-                if fact_a["confidence"] > fact_b["confidence"]:
-                    await self._knowledge_store.delete_fact_by_id(fact_b["id"])
-                elif fact_b["confidence"] > fact_a["confidence"]:
-                    await self._knowledge_store.delete_fact_by_id(fact_a["id"])
+                if fact_a.get("confidence", 0) > fact_b.get(
+                    "confidence", 0
+                ):
+                    await self._knowledge_store.delete_fact_by_id(id_b)
+                elif fact_b.get("confidence", 0) > fact_a.get(
+                    "confidence", 0
+                ):
+                    await self._knowledge_store.delete_fact_by_id(id_a)
                 else:
-                    # Same confidence: keep more recent
-                    if (fact_a.get("updated_at") or "") >= (
-                        fact_b.get("updated_at") or ""
-                    ):
-                        await self._knowledge_store.delete_fact_by_id(fact_b["id"])
+                    # Same confidence: keep more recent (parse timestamps)
+                    ts_a = fact_a.get("updated_at") or ""
+                    ts_b = fact_b.get("updated_at") or ""
+                    try:
+                        keep_a = datetime.fromisoformat(
+                            ts_a
+                        ) >= datetime.fromisoformat(ts_b)
+                    except (ValueError, TypeError):
+                        keep_a = ts_a >= ts_b
+                    if keep_a:
+                        await self._knowledge_store.delete_fact_by_id(id_b)
                     else:
-                        await self._knowledge_store.delete_fact_by_id(fact_a["id"])
+                        await self._knowledge_store.delete_fact_by_id(id_a)
                 resolved += 1
             except Exception as e:
                 logger.error("Failed to resolve contradiction: %s", e)
@@ -135,7 +170,9 @@ class Curator:
     async def consolidate_facts(self) -> str:
         """Find and resolve contradictory facts (standalone call)."""
         try:
-            contradictions = await self._knowledge_store.get_contradictory_facts()
+            contradictions = (
+                await self._knowledge_store.get_contradictory_facts()
+            )
             if not contradictions:
                 return "No contradictions found"
             resolved = await self._resolve_contradictions(contradictions)

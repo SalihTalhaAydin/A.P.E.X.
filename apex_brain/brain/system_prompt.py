@@ -6,6 +6,7 @@ Rebuilt for every conversation turn with live context
 
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
 import logging
 import time
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 # Service schema cache (refreshed every hour)
 # ---------------------------------------------------------------------------
 _schema_cache: dict = {"schemas": "", "timestamp": 0.0}
+_schema_lock = asyncio.Lock()
 _SCHEMA_REFRESH_SECONDS = 3600  # 1 hour
 _TOP_DOMAINS = ("light", "climate", "cover", "fan", "switch")
 
@@ -208,73 +210,98 @@ async def fetch_service_schemas() -> str:
     ):
         return _schema_cache["schemas"]
 
-    try:
-        from tools.ha_helpers import ha_request
-        from tools.generic import _selector_to_type
+    async with _schema_lock:
+        # Re-check after acquiring lock (another coroutine
+        # may have refreshed while we waited)
+        now = time.monotonic()
+        if (
+            _schema_cache["schemas"]
+            and (now - _schema_cache["timestamp"])
+            < _SCHEMA_REFRESH_SECONDS
+        ):
+            return _schema_cache["schemas"]
 
-        services_raw = await ha_request("GET", "/services")
-        if not isinstance(services_raw, list):
-            return _schema_cache.get("schemas", "")
+        try:
+            from tools.ha_helpers import ha_request
+            from tools.generic import _selector_to_type
 
-        # Build a lookup: domain -> services dict
-        domain_map: dict = {}
-        for entry in services_raw:
-            domain_map[entry.get("domain", "")] = entry.get(
-                "services", {}
+            services_raw = await ha_request(
+                "GET", "/services"
+            )
+            if not isinstance(services_raw, list):
+                return _schema_cache.get("schemas", "")
+
+            # Build a lookup: domain -> services dict
+            domain_map: dict = {}
+            for entry in services_raw:
+                if not isinstance(entry, dict):
+                    continue
+                domain = entry.get("domain", "")
+                if not domain:
+                    continue
+                domain_map[domain] = entry.get(
+                    "services", {}
+                )
+
+            lines: list[str] = []
+            for domain in _TOP_DOMAINS:
+                svc_dict = domain_map.get(domain)
+                if not svc_dict:
+                    continue
+                lines.append(f"## {domain}")
+                for svc_name, svc_info in svc_dict.items():
+                    fields = svc_info.get("fields", {})
+                    # Build compact field list
+                    parts: list[str] = []
+                    for fname, finfo in fields.items():
+                        selector = finfo.get(
+                            "selector", {}
+                        )
+                        type_str = (
+                            _selector_to_type(selector)
+                            if selector
+                            else "any"
+                        )
+                        parts.append(
+                            f"{fname}({type_str})"
+                        )
+                    field_str = (
+                        ", ".join(parts)
+                        if parts
+                        else ""
+                    )
+                    lines.append(
+                        f"- {domain}.{svc_name}:"
+                        f" {field_str}"
+                    )
+
+            schema_text = "\n".join(lines)
+
+            # Measure approximate token count and log it
+            token_estimate = len(schema_text) // 4
+            logger.info(
+                "Service schemas refreshed: %d domains,"
+                " ~%d tokens",
+                len(
+                    [
+                        d
+                        for d in _TOP_DOMAINS
+                        if d in domain_map
+                    ]
+                ),
+                token_estimate,
             )
 
-        lines: list[str] = []
-        for domain in _TOP_DOMAINS:
-            svc_dict = domain_map.get(domain)
-            if not svc_dict:
-                continue
-            lines.append(f"## {domain}")
-            for svc_name, svc_info in svc_dict.items():
-                fields = svc_info.get("fields", {})
-                # Build compact field list
-                parts: list[str] = []
-                for fname, finfo in fields.items():
-                    selector = finfo.get("selector", {})
-                    type_str = (
-                        _selector_to_type(selector)
-                        if selector
-                        else "any"
-                    )
-                    parts.append(f"{fname}({type_str})")
-                field_str = (
-                    ", ".join(parts) if parts else ""
-                )
-                lines.append(
-                    f"- {domain}.{svc_name}: {field_str}"
-                )
+            _schema_cache["schemas"] = schema_text
+            _schema_cache["timestamp"] = now
+            return schema_text
 
-        schema_text = "\n".join(lines)
-
-        # Measure approximate token count and log it
-        token_estimate = len(schema_text) // 4
-        logger.info(
-            "Service schemas refreshed: %d domains, "
-            "~%d tokens",
-            len(
-                [
-                    d
-                    for d in _TOP_DOMAINS
-                    if d in domain_map
-                ]
-            ),
-            token_estimate,
-        )
-
-        _schema_cache["schemas"] = schema_text
-        _schema_cache["timestamp"] = now
-        return schema_text
-
-    except Exception:
-        logger.warning(
-            "Failed to fetch service schemas",
-            exc_info=True,
-        )
-        return _schema_cache.get("schemas", "")
+        except Exception:
+            logger.warning(
+                "Failed to fetch service schemas",
+                exc_info=True,
+            )
+            return _schema_cache.get("schemas", "")
 
 
 def _build_proactive_hints(

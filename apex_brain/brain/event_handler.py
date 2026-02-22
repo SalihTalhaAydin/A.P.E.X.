@@ -4,15 +4,16 @@ Converts events to natural language, passes to the
 conversation pipeline, and returns actions taken.
 Includes cooldown to prevent reaction storms.
 """
+
 from __future__ import annotations
 
 import logging
-import time
 from datetime import datetime, timezone
 
 from pydantic import BaseModel
 
 from brain.config import settings
+from brain.cooldown import CooldownTracker
 
 logger = logging.getLogger(__name__)
 
@@ -53,40 +54,14 @@ class EventHandler:
 
     def __init__(self, conversation, cooldown: int = 60):
         self.conversation = conversation
-        self._cooldown_sec = cooldown
-        self._cooldowns: dict[str, float] = {}
+        self._cooldown = CooldownTracker(cooldown)
 
-    def _cleanup_cooldowns(self) -> None:
-        """Remove stale cooldown entries (older than 2x cooldown period)."""
-        now = time.time()
-        max_age = self._cooldown_sec * 2
-        stale = [
-            k
-            for k, ts in self._cooldowns.items()
-            if now - ts > max_age
-        ]
-        for k in stale:
-            del self._cooldowns[k]
-
-    def _check_cooldown(self, key: str) -> bool:
-        """True if cooldown elapsed (ok to act)."""
-        now = time.time()
-        last = self._cooldowns.get(key, 0)
-        if now - last < self._cooldown_sec:
-            return False
-        self._cooldowns[key] = now
-        return True
-
-    def _build_event_message(
-        self, event: WebhookEvent
-    ) -> str:
+    def _build_event_message(self, event: WebhookEvent) -> str:
         """Convert event to natural language."""
         entity = event.entity_id
         name = (
             event.attributes.get("friendly_name")
-            or entity.split(".")[-1]
-            .replace("_", " ")
-            .title()
+            or entity.split(".")[-1].replace("_", " ").title()
         )
 
         templates = {
@@ -136,34 +111,26 @@ class EventHandler:
 
         Filters out:
         - identical old/new state (no real change)
-        - transitions to/from 'unavailable' (connectivity
-          bounces from flaky integrations like Kasa)
+        - transitions to/from 'unavailable'
+          (connectivity bounces)
         """
         old = event.old_state.strip().lower()
         new = event.new_state.strip().lower()
 
         # Same state repeated — not a real change
         if old and new and old == new:
-            return (
-                f"redundant: state unchanged ({new})"
-            )
+            return f"redundant: state unchanged ({new})"
 
         # Unavailable bounces — device connectivity noise
         if new == "unavailable":
             return "device went unavailable"
         if old == "unavailable" and new:
-            return (
-                f"recovery from unavailable to {new}"
-            )
+            return f"recovery from unavailable to {new}"
 
         return ""
 
-    async def process_event(
-        self, event: WebhookEvent
-    ) -> WebhookResponse:
+    async def process_event(self, event: WebhookEvent) -> WebhookResponse:
         """Process an incoming event."""
-        self._cleanup_cooldowns()
-
         # Filter redundant / noisy state transitions
         skip_reason = self._is_redundant(event)
         if skip_reason:
@@ -176,32 +143,33 @@ class EventHandler:
             return WebhookResponse(
                 status="ignored",
                 message=(
-                    f"Filtered: {skip_reason} "
-                    f"for {event.entity_id}."
+                    f"Filtered: {skip_reason} for {event.entity_id}."
                 ),
             )
 
-        cooldown_key = (
-            f"{event.event_type}:{event.entity_id}"
-        )
+        cooldown_key = f"{event.event_type}:{event.entity_id}"
 
-        if not self._check_cooldown(cooldown_key):
+        if not self._cooldown.check_and_set(cooldown_key):
             return WebhookResponse(
                 status="ignored",
-                message=(
-                    f"Cooldown active for "
-                    f"{cooldown_key} "
-                    f"({self._cooldown_sec}s)."
-                ),
+                message=(f"Cooldown active for {cooldown_key}."),
             )
 
         msg = self._build_event_message(event)
 
-        # Check if this event warrants a voice announcement
-        now = datetime.now(timezone.utc)
-        high_priority = _is_high_priority(
-            event.event_type, now.hour
-        )
+        # Check if event warrants a voice announcement
+        try:
+            from zoneinfo import ZoneInfo
+
+            tz = ZoneInfo(settings.timezone)
+        except Exception:
+            tz = timezone.utc
+            logger.debug(
+                "Could not load timezone '%s', using UTC",
+                settings.timezone,
+            )
+        now = datetime.now(tz)
+        high_priority = _is_high_priority(event.event_type, now.hour)
         if high_priority:
             logger.info(
                 "High-priority event: %s on %s",
@@ -217,12 +185,10 @@ class EventHandler:
                 status="processed",
                 message=response,
                 actions_taken=(
-                    ["high_priority_alert"]
-                    if high_priority
-                    else []
+                    ["high_priority_alert"] if high_priority else []
                 ),
             )
-        except Exception as e:
+        except Exception:
             logger.exception(
                 "Error processing event %s on %s",
                 event.event_type,

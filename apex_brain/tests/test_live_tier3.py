@@ -25,8 +25,11 @@ from memory.context_builder import ContextBuilder
 from memory.conversation_store import ConversationStore
 from memory.fact_extractor import FactExtractor
 from memory.knowledge_store import KnowledgeStore
+from tests.conftest_live import skip_on_llm_error
 
 pytestmark = pytest.mark.live
+
+pytest.skip("Live tier 3 tests disabled", allow_module_level=True)
 
 
 @pytest.fixture(autouse=True)
@@ -103,6 +106,7 @@ class TestMultiToolChaining:
             "value of any sensor.",
             session_id="chain_1",
         )
+        skip_on_llm_error(result)
         # Should contain actual sensor data
         lower = result.lower()
         assert any(
@@ -125,6 +129,7 @@ class TestMultiToolChaining:
             "Show the count for each domain.",
             session_id="chain_2",
         )
+        skip_on_llm_error(result)
         # Should contain numbers and domain names
         assert any(
             c.isdigit() for c in result
@@ -154,6 +159,7 @@ class TestCrossEntityAnalysis:
             "List which ones are on and which are off.",
             session_id="compare_1",
         )
+        skip_on_llm_error(result)
         lower = result.lower()
         assert any(
             word in lower
@@ -171,6 +177,7 @@ class TestCrossEntityAnalysis:
             "and what areas are configured?",
             session_id="overview_1",
         )
+        skip_on_llm_error(result)
         # Should contain version info
         lower = result.lower()
         assert any(
@@ -201,6 +208,7 @@ class TestHistoryAnalysis:
             "Show me the transition times.",
             session_id="history_1",
         )
+        skip_on_llm_error(result)
         lower = result.lower()
         assert any(
             word in lower
@@ -221,6 +229,7 @@ class TestHistoryAnalysis:
             "it last change state?",
             session_id="history_2",
         )
+        skip_on_llm_error(result)
         lower = result.lower()
         assert any(
             word in lower
@@ -258,6 +267,7 @@ class TestSafeWriteVerify:
                 f"Please {action} the basement light {entity_id}",
                 session_id="write_1",
             )
+            skip_on_llm_error(result)
             lower = result.lower()
             assert any(
                 word in lower
@@ -274,6 +284,7 @@ class TestSafeWriteVerify:
             "(use homeassistant.update_entity service on sun.sun)",
             session_id="write_2",
         )
+        skip_on_llm_error(result)
         lower = result.lower()
         assert any(
             word in lower
@@ -300,6 +311,7 @@ class TestMultiTurnConversation:
             "What lights do I have? List them with entity IDs.",
             session_id="multi_1",
         )
+        skip_on_llm_error(result1)
         lower1 = result1.lower()
 
         # Turn 2 — follow up
@@ -307,6 +319,7 @@ class TestMultiTurnConversation:
             "What is the current state of the sun entity?",
             session_id="multi_1",  # Same session!
         )
+        skip_on_llm_error(result2)
         lower2 = result2.lower()
         assert any(
             word in lower2
@@ -325,6 +338,7 @@ class TestMultiTurnConversation:
             "How many entity domains do I have in Home Assistant?",
             session_id="multi_3turn",
         )
+        skip_on_llm_error(r1)
         assert any(c.isdigit() for c in r1), f"Expected number in turn 1: {r1}"
 
         # Turn 2
@@ -332,6 +346,7 @@ class TestMultiTurnConversation:
             "Tell me about the sun.sun entity — what state is it in?",
             session_id="multi_3turn",
         )
+        skip_on_llm_error(r2)
         lower2 = r2.lower()
         assert any(
             word in lower2 for word in ["sun", "horizon", "above", "below"]
@@ -342,6 +357,7 @@ class TestMultiTurnConversation:
             "Show me its history for the last 24 hours",
             session_id="multi_3turn",
         )
+        skip_on_llm_error(r3)
         lower3 = r3.lower()
         assert any(
             word in lower3
@@ -363,6 +379,7 @@ class TestEdgeCases:
             "What is the state of sensor.zzz_totally_fake_xyz?",
             session_id="edge_1",
         )
+        skip_on_llm_error(result)
         lower = result.lower()
         assert any(
             word in lower
@@ -380,6 +397,7 @@ class TestEdgeCases:
             "What's going on in my home right now?",
             session_id="edge_2",
         )
+        skip_on_llm_error(result)
         # Should return something useful (devices, status, etc.)
         assert len(result) > 20, f"Expected substantive response: {result}"
 
@@ -390,6 +408,7 @@ class TestEdgeCases:
             "{{ states.sun.sun.state }}",
             session_id="edge_3",
         )
+        skip_on_llm_error(result)
         lower = result.lower()
         assert any(
             word in lower

@@ -6,6 +6,7 @@ Uses a cheap/fast model to keep costs low.
 
 import json
 import logging
+from datetime import datetime
 
 from memory.knowledge_store import KnowledgeStore
 
@@ -60,13 +61,14 @@ class FactExtractor:
 
     async def extract_from_conversation(
         self, turns: list[dict], litellm_completion
-    ):
-        """
-        Extract facts from recent conversation turns.
-        litellm_completion: the litellm.acompletion function (passed to avoid circular imports).
+    ) -> list[dict]:
+        """Extract facts from recent conversation turns.
+
+        litellm_completion: the litellm.acompletion function
+        (passed to avoid circular imports).
         """
         if not turns:
-            return
+            return []
 
         # Format conversation for the extraction prompt
         convo_text = "\n".join(
@@ -76,7 +78,7 @@ class FactExtractor:
         )
 
         if len(convo_text) < 20:
-            return  # Too short, nothing to extract
+            return []
 
         try:
             response = await litellm_completion(
@@ -93,6 +95,8 @@ class FactExtractor:
                 max_tokens=1000,
             )
 
+            if not response.choices:
+                return []
             content = response.choices[0].message.content
             if not content:
                 return []
@@ -100,31 +104,38 @@ class FactExtractor:
 
             # Clean up common AI response quirks
             if raw.startswith("```"):
-                raw = raw.split("\n", 1)[-1]  # remove ```json line
-                raw = raw.rsplit("```", 1)[0]  # remove closing ```
+                raw = raw.split("\n", 1)[-1]
+                raw = raw.rsplit("```", 1)[0]
             raw = raw.strip()
 
             if not raw or raw == "[]":
-                return
+                return []
 
             facts = json.loads(raw)
 
             if not isinstance(facts, list):
-                return
+                return []
 
             stored_count = 0
             for fact in facts:
                 if not isinstance(fact, dict):
                     continue
-                category = fact.get("category", "fact")
-                key = fact.get("key", "")
-                value = fact.get("value", "")
-                confidence = fact.get("confidence", 0.7)
-                is_correction = fact.get(
-                    "correction", False
-                )
+                try:
+                    category = fact.get("category", "fact")
+                    key = fact.get("key", "")
+                    value = fact.get("value", "")
+                    confidence = max(
+                        0.0,
+                        min(
+                            1.0,
+                            fact.get("confidence", 0.7),
+                        ),
+                    )
+                    is_correction = fact.get("correction", False)
 
-                if key and value:
+                    if not (key and value):
+                        continue
+
                     if is_correction:
                         await self.knowledge_store.correct_fact(
                             category=category,
@@ -133,14 +144,23 @@ class FactExtractor:
                             confidence=confidence,
                         )
                         logger.debug(
-                            "Corrected fact: %s = %s "
-                            "(confidence=%.2f)",
+                            "Corrected fact: %s = %s (confidence=%.2f)",
                             key,
                             value,
                             confidence,
                         )
                     else:
                         expires = fact.get("expires")
+                        # Validate expires format
+                        if expires:
+                            try:
+                                datetime.fromisoformat(expires)
+                            except (ValueError, TypeError):
+                                logger.warning(
+                                    "Invalid expires date '%s', ignoring",
+                                    expires,
+                                )
+                                expires = None
                         await self.knowledge_store.store_fact(
                             category=category,
                             key=key,
@@ -150,20 +170,36 @@ class FactExtractor:
                             expires_at=expires,
                         )
                         logger.debug(
-                            "Extracted fact: %s = %s "
-                            "(confidence=%.2f)",
+                            "Extracted fact: %s = %s (confidence=%.2f)",
                             key,
                             value,
                             confidence,
                         )
                     stored_count += 1
+                except Exception as e:
+                    logger.warning(
+                        "Failed to store fact '%s': %s",
+                        fact.get("key", "?"),
+                        e,
+                    )
+                    continue
 
-            logger.info("Extracted %d facts from conversation", stored_count)
+            logger.info(
+                "Extracted %d facts from conversation",
+                stored_count,
+            )
+            return facts
 
         except json.JSONDecodeError:
             logger.warning(
                 "Failed to parse fact extraction response as JSON: %s",
                 raw,
             )
+            return []
         except Exception as e:
-            logger.error("Fact extraction error: %s", e, exc_info=True)
+            logger.error(
+                "Fact extraction error: %s",
+                e,
+                exc_info=True,
+            )
+            return []

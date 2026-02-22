@@ -122,8 +122,9 @@ class Conversation:
         self.context_builder = context_builder
         self.mcp_bridge = mcp_bridge
 
-        # Explainability: track action trace per session
+        # Explainability: track action trace per session (bounded to prevent leak)
         self._action_traces: dict[str, str] = {}
+        self._max_action_traces: int = 200
 
         # Background tasks: keep references so GC doesn't collect them
         self._background_tasks: set = set()
@@ -150,9 +151,7 @@ class Conversation:
         )
 
         # 2. Build rich context (recent history + relevant facts + time)
-        system_prompt = await self.context_builder.build(
-            user_message
-        )
+        system_prompt = await self.context_builder.build(user_message)
 
         # 2.5. Inject last action trace for explainability
         last_trace = self._action_traces.get(session_id, "")
@@ -173,8 +172,7 @@ class Conversation:
         tool_defs = get_openai_tool_definitions()
         if self.mcp_bridge and self.mcp_bridge.connected:
             tool_defs = (
-                tool_defs
-                + self.mcp_bridge.get_openai_tool_definitions()
+                tool_defs + self.mcp_bridge.get_openai_tool_definitions()
             )
 
         # 5. Call AI with tool loop
@@ -196,6 +194,32 @@ class Conversation:
         task.add_done_callback(self._background_tasks.discard)
 
         return response_text
+
+    async def _llm_call_with_retry(
+        self,
+        _max_retries: int = 3,
+        _base_delay: float = 2.0,
+        **kwargs,
+    ):
+        """Call litellm.acompletion with retry on rate limits."""
+        from litellm.exceptions import RateLimitError
+
+        for attempt in range(_max_retries):
+            try:
+                return await litellm.acompletion(**kwargs)
+            except RateLimitError:
+                if attempt == _max_retries - 1:
+                    raise
+                delay = _base_delay * (2**attempt)
+                logger.warning(
+                    "Rate limited (attempt %d/%d), retrying in %.1fs...",
+                    attempt + 1,
+                    _max_retries,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+        # Should never reach here, but satisfy type checker
+        return await litellm.acompletion(**kwargs)
 
     async def _ai_tool_loop(
         self,
@@ -234,18 +258,20 @@ class Conversation:
                     # After tools run, switch back to auto so
                     # the model can summarise the result.
                     if (
-                        (user_wants_action or nudge_count > 0)
-                        and not tools_called
-                    ):
+                        user_wants_action or nudge_count > 0
+                    ) and not tools_called:
                         kwargs["tool_choice"] = "required"
                     else:
                         kwargs["tool_choice"] = "auto"
 
-                response = await litellm.acompletion(**kwargs)
+                response = await self._llm_call_with_retry(**kwargs)
             except Exception as e:
                 logger.exception("AI call failed: %s", e)
                 return f"Error reaching AI: {e}"
 
+            if not response.choices:
+                logger.error("LLM returned empty choices list")
+                return "Error: AI returned an empty response."
             msg = response.choices[0].message
             # only system + user so far?
             is_first_response = len(messages) == 2
@@ -264,9 +290,7 @@ class Conversation:
                 # If tools HAVE been called, the AI is just
                 # summarising — not confabulating.
                 if not tools_called:
-                    is_confab = _looks_like_device_action_claim(
-                        text
-                    )
+                    is_confab = _looks_like_device_action_claim(text)
                     unmet_action = user_wants_action
                 else:
                     is_confab = False
@@ -309,6 +333,10 @@ class Conversation:
                 self._action_traces[session_id] = self._build_action_trace(
                     tools_called, facts_used
                 )
+                # Evict oldest entries if trace dict grows
+                while len(self._action_traces) > self._max_action_traces:
+                    oldest_key = next(iter(self._action_traces))
+                    del self._action_traces[oldest_key]
                 if self._action_traces[session_id]:
                     logger.debug(
                         "Action trace: %s", self._action_traces[session_id]
@@ -331,6 +359,11 @@ class Conversation:
                 try:
                     args = json.loads(tc.function.arguments)
                 except json.JSONDecodeError:
+                    logger.warning(
+                        "Failed to parse tool args for %s: %s",
+                        fn_name,
+                        tc.function.arguments[:200],
+                    )
                     args = {}
 
                 logger.info(
@@ -341,22 +374,13 @@ class Conversation:
 
                 # Route: native tool or MCP tool
                 if fn_name in TOOL_REGISTRY:
-                    result = await execute_tool(
+                    result = await execute_tool(fn_name, args)
+                elif self.mcp_bridge and self.mcp_bridge.has_tool(fn_name):
+                    result = await self.mcp_bridge.execute_tool(
                         fn_name, args
                     )
-                elif (
-                    self.mcp_bridge
-                    and self.mcp_bridge.has_tool(fn_name)
-                ):
-                    result = (
-                        await self.mcp_bridge.execute_tool(
-                            fn_name, args
-                        )
-                    )
                 else:
-                    result = (
-                        f"Unknown tool: {fn_name}"
-                    )
+                    result = f"Unknown tool: {fn_name}"
                 logger.debug(
                     "Tool result: %s -> %s",
                     fn_name,
@@ -406,13 +430,9 @@ class Conversation:
         trace_parts: list[str] = []
         if tools_called:
             unique = list(dict.fromkeys(tools_called))
-            trace_parts.append(
-                f"Actions taken: {', '.join(unique)}"
-            )
+            trace_parts.append(f"Actions taken: {', '.join(unique)}")
         if facts_used:
-            trace_parts.append(
-                f"Based on: {', '.join(facts_used)}"
-            )
+            trace_parts.append(f"Based on: {', '.join(facts_used)}")
         return " | ".join(trace_parts) if trace_parts else ""
 
     @staticmethod

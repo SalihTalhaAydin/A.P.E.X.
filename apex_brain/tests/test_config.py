@@ -12,7 +12,7 @@ def test_settings_defaults(monkeypatch):
     ):
         monkeypatch.delenv(key, raising=False)
     s = Settings(_env_file=None)
-    assert s.litellm_model == "gemini/gemini-2.5-pro"
+    assert s.litellm_model == "gpt-4o"
     assert s.embedding_model == "text-embedding-3-small"
     assert s.recent_turns == 10
     assert s.max_facts_in_context == 20

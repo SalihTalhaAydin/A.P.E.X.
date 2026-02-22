@@ -9,6 +9,7 @@ Implements tiered confirmation with dry-run mode:
   Tier 1 (Moderate): disable, delete_area
   Tier 2 (Destructive): remove (device)
 """
+
 from __future__ import annotations
 
 import logging
@@ -65,9 +66,7 @@ def _confirmation_prompt(
 # --- Action handlers ---
 
 
-async def _handle_rename(
-    target: str, data: dict
-) -> str:
+async def _handle_rename(target: str, data: dict) -> str:
     """Rename an entity."""
     name = data.get("name", "")
     if not name:
@@ -83,21 +82,14 @@ async def _handle_rename(
         }
     )
     new_name = result.get("name", name)
-    return (
-        f"Renamed {target} to '{new_name}'."
-    )
+    return f"Renamed {target} to '{new_name}'."
 
 
-async def _handle_assign_area(
-    target: str, data: dict
-) -> str:
+async def _handle_assign_area(target: str, data: dict) -> str:
     """Assign an entity or device to an area."""
     area_id = data.get("area_id", "")
     if not area_id:
-        return (
-            "Error: data.area_id is required for "
-            "assign_area."
-        )
+        return "Error: data.area_id is required for assign_area."
     if not target:
         return "Error: target is required."
 
@@ -111,10 +103,7 @@ async def _handle_assign_area(
                 "area_id": area_id,
             }
         )
-        return (
-            f"Assigned entity {target} "
-            f"to area '{area_id}'."
-        )
+        return f"Assigned entity {target} to area '{area_id}'."
     else:
         # Device ID
         result = await ws_command(
@@ -124,15 +113,10 @@ async def _handle_assign_area(
                 "area_id": area_id,
             }
         )
-        return (
-            f"Assigned device {target} "
-            f"to area '{area_id}'."
-        )
+        return f"Assigned device {target} to area '{area_id}'."
 
 
-async def _handle_disable(
-    target: str, data: dict
-) -> str:
+async def _handle_disable(target: str, data: dict) -> str:
     """Disable an entity."""
     if not target:
         return "Error: target (entity_id) is required."
@@ -147,9 +131,7 @@ async def _handle_disable(
     return f"Disabled entity {target}."
 
 
-async def _handle_enable(
-    target: str, data: dict
-) -> str:
+async def _handle_enable(target: str, data: dict) -> str:
     """Enable a previously disabled entity."""
     if not target:
         return "Error: target (entity_id) is required."
@@ -164,16 +146,11 @@ async def _handle_enable(
     return f"Enabled entity {target}."
 
 
-async def _handle_create_area(
-    target: str, data: dict
-) -> str:
+async def _handle_create_area(target: str, data: dict) -> str:
     """Create a new area."""
     name = data.get("name", "") or target
     if not name:
-        return (
-            "Error: data.name or target is required "
-            "for create_area."
-        )
+        return "Error: data.name or target is required for create_area."
 
     result = await ws_command(
         {
@@ -185,9 +162,7 @@ async def _handle_create_area(
     return f"Area '{name}' created (id: {area_id})."
 
 
-async def _handle_delete_area(
-    target: str, data: dict
-) -> str:
+async def _handle_delete_area(target: str, data: dict) -> str:
     """Delete an area."""
     if not target:
         return "Error: target (area_id) is required."
@@ -201,9 +176,7 @@ async def _handle_delete_area(
     return f"Area '{target}' deleted."
 
 
-async def _handle_remove(
-    target: str, data: dict
-) -> str:
+async def _handle_remove(target: str, data: dict) -> str:
     """Remove a device from the registry."""
     if not target:
         return "Error: target (device_id) is required."
@@ -220,53 +193,56 @@ async def _handle_remove(
     )
 
 
-async def _handle_list_stale(
-    target: str, data: dict
-) -> str:
-    """List entities unavailable/unknown for 7+ days."""
-    result = await ws_command(
-        {"type": "config/entity_registry/list"}
-    )
+async def _handle_list_stale(target: str, data: dict) -> str:
+    """List entities stuck in unavailable/unknown state."""
+    from tools.ha_helpers import ha_request
+
+    result = await ws_command({"type": "config/entity_registry/list"})
 
     # result is a list of entity entries
     entities = result if isinstance(result, list) else []
-    stale = []
+
+    # Build set of non-disabled entity IDs
+    active_ids: set[str] = set()
+    name_map: dict[str, str] = {}
     for entry in entities:
-        disabled = entry.get("disabled_by")
-        if disabled:
+        if entry.get("disabled_by"):
             continue
-        entity_id = entry.get("entity_id", "")
-        # We check platform/state info if available
-        # The registry itself doesn't have real-time state,
-        # but we mark entities that are disabled or have
-        # no config entry as potentially stale
-        if entry.get("disabled_by") is None:
-            name = entry.get("name") or entry.get(
-                "original_name", entity_id
+        eid = entry.get("entity_id", "")
+        if eid:
+            active_ids.add(eid)
+            name_map[eid] = entry.get("name") or entry.get(
+                "original_name", eid
             )
-            stale.append(
-                f"  - {name} ({entity_id})"
-            )
+
+    if not active_ids:
+        return "No active entities in registry."
+
+    # Cross-reference with actual HA states
+    try:
+        states = await ha_request("GET", "/states")
+    except Exception as e:
+        return f"Could not fetch entity states: {e}"
+
+    stale = []
+    if isinstance(states, list):
+        for s in states:
+            eid = s.get("entity_id", "")
+            state = s.get("state", "")
+            if eid in active_ids and state in ("unavailable", "unknown"):
+                name = name_map.get(eid, eid)
+                stale.append(f"  - {name} ({eid}): {state}")
 
     if not stale:
         return "No stale entities found."
 
-    # Note: for a real implementation, we'd cross-reference
-    # with actual state data. For now, return all non-disabled
-    # entities from the registry for the caller to filter.
-    return (
-        f"Entity registry has {len(stale)} entries. "
-        f"Cross-reference with entity states to find "
-        f"those stuck in unavailable/unknown."
-    )
+    return f"Found {len(stale)} stale entities:\n" + "\n".join(stale)
 
 
 # --- Dry-run handlers ---
 
 
-async def _dry_run_disable(
-    target: str, data: dict
-) -> str:
+async def _dry_run_disable(target: str, data: dict) -> str:
     """Show what disabling an entity would do."""
     return (
         f"DRY RUN: Would disable entity {target}. "
@@ -276,9 +252,7 @@ async def _dry_run_disable(
     )
 
 
-async def _dry_run_delete_area(
-    target: str, data: dict
-) -> str:
+async def _dry_run_delete_area(target: str, data: dict) -> str:
     """Show what deleting an area would do."""
     return (
         f"DRY RUN: Would delete area '{target}'. "
@@ -287,9 +261,7 @@ async def _dry_run_delete_area(
     )
 
 
-async def _dry_run_remove(
-    target: str, data: dict
-) -> str:
+async def _dry_run_remove(target: str, data: dict) -> str:
     """Show what removing a device would do."""
     return (
         f"DRY RUN: Would remove device '{target}' "
@@ -402,24 +374,22 @@ async def configure(
         detail = ""
         if tier == 1:
             detail = (
-                f"This operation may affect entity "
-                f"availability or area organization."
+                "This operation may affect entity "
+                "availability or area organization."
             )
         elif tier == 2:
             detail = (
-                f"This is a PERMANENT operation that "
-                f"cannot be easily undone."
+                "This is a PERMANENT operation that "
+                "cannot be easily undone."
             )
-        prompt = _confirmation_prompt(
-            action, target, tier, detail
-        )
+        prompt = _confirmation_prompt(action, target, tier, detail)
         if _audit_store:
             await _audit_store.log(
                 tool="configure",
                 action=action,
                 target=target,
                 config=data,
-                result="confirmed",
+                result="confirmation_prompted",
                 session_id=session_id,
                 user_approved=False,
             )

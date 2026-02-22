@@ -55,7 +55,7 @@ def _schema_from_hints(func: Callable) -> dict:
     """Generate an OpenAI-compatible parameter schema from function type hints."""
     try:
         hints = get_type_hints(func)
-    except Exception:
+    except (TypeError, NameError):
         # Fallback for older Python where PEP 604 unions can't be evaluated
         hints = {}
     sig = inspect.signature(func)

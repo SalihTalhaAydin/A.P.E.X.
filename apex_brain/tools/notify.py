@@ -12,17 +12,15 @@ from __future__ import annotations
 import logging
 
 import httpx
-
 from brain.config import settings
+
 from tools.base import tool
 from tools.ha_helpers import format_ha_error, ha_request
 
 logger = logging.getLogger(__name__)
 
 # Legacy services that still use the old calling convention
-_LEGACY_SERVICES = frozenset(
-    {"persistent_notification", "notify"}
-)
+_LEGACY_SERVICES = frozenset({"persistent_notification", "notify"})
 
 
 @tool(
@@ -39,15 +37,12 @@ _LEGACY_SERVICES = frozenset(
             "entity_id": {
                 "type": "string",
                 "description": (
-                    "Notify entity ID (use "
-                    "list_entities to discover)."
+                    "Notify entity ID (use list_entities to discover)."
                 ),
             },
             "message": {
                 "type": "string",
-                "description": (
-                    "The message to send or announce."
-                ),
+                "description": ("The message to send or announce."),
             },
             "title": {
                 "type": "string",
@@ -67,12 +62,8 @@ async def send_notification(
 ) -> str:
     """Send a notification via HA notify service."""
     try:
-        service_name = entity_id.replace(
-            "notify.", "", 1
-        )
-        target = (
-            service_name.replace("_", " ").title()
-        )
+        service_name = entity_id.replace("notify.", "", 1)
+        target = service_name.replace("_", " ").title()
 
         data: dict = {"message": message}
         if title is not None:
@@ -96,7 +87,7 @@ async def send_notification(
                 },
             )
 
-        return f"Sent to {target}: \"{message}\""
+        return f'Sent to {target}: "{message}"'
 
     except httpx.HTTPStatusError as e:
         return format_ha_error(entity_id, "notify", e)
@@ -137,12 +128,18 @@ async def announce(
     """Announce a message via Alexa or phone notification."""
     try:
         if target == "phone":
+            if not settings.phone_notify_target:
+                return (
+                    "Phone notification target not "
+                    "configured. Set "
+                    "phone_notify_target in settings."
+                )
             await ha_request(
                 "POST",
                 f"/services/notify/{settings.phone_notify_target}",
                 json_data={"message": message},
             )
-            return f"Phone notification sent: \"{message}\""
+            return f'Phone notification sent: "{message}"'
 
         if target == "alexa_all":
             # Try the Alexa Media Player "everywhere" group first
@@ -155,9 +152,7 @@ async def announce(
                         "data": {"type": "announce"},
                     },
                 )
-                return (
-                    f"Announced on all Alexa devices: \"{message}\""
-                )
+                return f'Announced on all Alexa devices: "{message}"'
             except httpx.HTTPStatusError as e:
                 if e.response.status_code not in (400, 404):
                     raise
@@ -169,22 +164,16 @@ async def announce(
 
             # Discover notify.* entities containing "alexa"
             try:
-                services_resp = await ha_request(
-                    "GET", "/services"
-                )
+                services_resp = await ha_request("GET", "/services")
             except Exception as disc_err:
-                return (
-                    f"Could not discover notify targets: {disc_err}"
-                )
+                return f"Could not discover notify targets: {disc_err}"
 
             alexa_services: list[str] = []
             if isinstance(services_resp, list):
                 for domain_info in services_resp:
                     if domain_info.get("domain") != "notify":
                         continue
-                    for svc_name in domain_info.get(
-                        "services", {}
-                    ).keys():
+                    for svc_name in domain_info.get("services", {}).keys():
                         if "alexa" in svc_name.lower():
                             alexa_services.append(svc_name)
 
@@ -198,8 +187,11 @@ async def announce(
                         if s["entity_id"].startswith("notify.")
                         and "alexa" in s["entity_id"].lower()
                     ]
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug(
+                        "Alexa service discovery via states failed: %s",
+                        exc,
+                    )
 
             if not alexa_services:
                 # Report what notify services are available
@@ -208,9 +200,7 @@ async def announce(
                     for domain_info in services_resp:
                         if domain_info.get("domain") == "notify":
                             available = list(
-                                domain_info.get(
-                                    "services", {}
-                                ).keys()
+                                domain_info.get("services", {}).keys()
                             )
                             break
                 return (
@@ -237,9 +227,7 @@ async def announce(
                         svc_err,
                     )
             if results:
-                return (
-                    f"Announced on {results}: \"{message}\""
-                )
+                return f'Announced on {results}: "{message}"'
             return (
                 f"Announce failed on all discovered targets: "
                 f"{alexa_services}"
@@ -252,7 +240,7 @@ async def announce(
                 f"/services/notify/{target}",
                 json_data={"message": message},
             )
-            return f"Notified {target}: \"{message}\""
+            return f'Notified {target}: "{message}"'
         except httpx.HTTPStatusError as e:
             return format_ha_error(target, "notify", e)
 

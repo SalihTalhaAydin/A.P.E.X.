@@ -7,6 +7,7 @@ integration, plus /api/chat for testing and
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import logging
 import os
@@ -25,6 +26,7 @@ from memory.conversation_store import (
 )
 from memory.fact_extractor import FactExtractor
 from memory.knowledge_store import KnowledgeStore
+from memory.routine_store import RoutineStore
 from pydantic import BaseModel
 from tools import discover_tools
 from tools.base import TOOL_REGISTRY
@@ -44,7 +46,6 @@ from brain.event_handler import (
 from brain.event_subscriber import EventSubscriber
 from brain.scheduler import Scheduler
 from brain.version import __version__
-from memory.routine_store import RoutineStore
 
 logger = logging.getLogger(__name__)
 
@@ -58,21 +59,15 @@ event_subscriber: EventSubscriber | None = None
 startup_time: float = 0
 
 
-async def _check_ha_reachable() -> (
-    tuple[bool, str | None]
-):
+async def _check_ha_reachable() -> tuple[bool, str | None]:
     """Perform one GET to HA Core API.
 
     Returns (success, error_message).
     """
     url = f"{settings.ha_api_url}/config"
     try:
-        async with httpx.AsyncClient(
-            timeout=3.0
-        ) as client:
-            r = await client.get(
-                url, headers=settings.ha_headers
-            )
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            r = await client.get(url, headers=settings.ha_headers)
             if r.status_code == 200:
                 return True, None
             return False, f"HTTP {r.status_code}"
@@ -118,127 +113,143 @@ async def lifespan(_app: FastAPI):
 
     # Set API keys
     if settings.openai_api_key:
-        os.environ["OPENAI_API_KEY"] = (
-            settings.openai_api_key
-        )
+        os.environ["OPENAI_API_KEY"] = settings.openai_api_key
     if settings.anthropic_api_key:
-        os.environ["ANTHROPIC_API_KEY"] = (
-            settings.anthropic_api_key
-        )
+        os.environ["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
     if settings.gemini_api_key:
-        os.environ["GEMINI_API_KEY"] = (
-            settings.gemini_api_key
-        )
+        os.environ["GEMINI_API_KEY"] = settings.gemini_api_key
 
-    # Initialize memory stores
-    convo_store = ConversationStore(settings.db_path)
-    await convo_store.initialize()
-
-    knowledge_store = KnowledgeStore(settings.db_path)
-    knowledge_store.set_embed_function(_embed_text)
-    await knowledge_store.initialize()
-
-    # Initialize fact extractor
-    fact_extractor = FactExtractor(
-        knowledge_store=knowledge_store,
-        model=settings.fact_extraction_model,
-    )
-
-    # Initialize context builder
-    context_builder = ContextBuilder(
-        conversation_store=convo_store,
-        knowledge_store=knowledge_store,
-        recent_turns_count=settings.recent_turns,
-        max_facts=settings.max_facts_in_context,
-    )
-
-    # Initialize routine store (dedicated table with lifecycle tracking)
-    routine_store = RoutineStore(settings.db_path)
-    await routine_store.initialize()
-    await routine_store.migrate_from_knowledge_store(knowledge_store)
-
-    # Discover and register tools
-    discover_tools()
-    set_knowledge_store(knowledge_store)
-    set_routine_store(routine_store)
-    logger.info(
-        "  Tools loaded: %s",
-        ", ".join(TOOL_REGISTRY.keys()),
-    )
-
-    # Connect MCP bridge (optional)
+    # Track initialized resources for cleanup on failure
+    convo_store = None
+    knowledge_store = None
+    routine_store = None
     mcp_bridge: MCPBridge | None = None
-    if settings.mcp_server_url:
-        mcp_bridge = MCPBridge(
-            url=settings.mcp_server_url,
-            transport=settings.mcp_transport,
-        )
-        await mcp_bridge.connect()
-        if mcp_bridge.connected:
-            await mcp_bridge.discover_tools(
-                skip_names=set(TOOL_REGISTRY.keys()),
-            )
-            logger.info(
-                "  MCP tools: %d from %s",
-                mcp_bridge.tool_count,
-                settings.mcp_server_url,
-            )
 
-    # Create conversation handler
-    conversation = Conversation(
-        conversation_store=convo_store,
-        knowledge_store=knowledge_store,
-        fact_extractor=fact_extractor,
-        context_builder=context_builder,
-        mcp_bridge=mcp_bridge,
-    )
+    try:
+        # Initialize memory stores
+        convo_store = ConversationStore(settings.db_path)
+        await convo_store.initialize()
 
-    # Create event handler (webhook reactions)
-    if settings.webhook_enabled:
-        event_handler = EventHandler(
-            conversation=conversation,
-            cooldown=settings.webhook_cooldown_seconds,
-        )
-        logger.info("  Webhook endpoint: enabled")
+        knowledge_store = KnowledgeStore(settings.db_path)
+        knowledge_store.set_embed_function(_embed_text)
+        await knowledge_store.initialize()
 
-    # Create curator for self-maintenance
-    curator = None
-    if settings.curator_enabled:
-        curator = Curator(
-            conversation=conversation,
+        # Initialize fact extractor
+        fact_extractor = FactExtractor(
             knowledge_store=knowledge_store,
+            model=settings.fact_extraction_model,
         )
-        logger.info("  Curator: enabled")
 
-    # Start scheduler (autonomous loop)
-    if settings.scheduler_enabled:
-        scheduler = Scheduler(
-            conversation=conversation,
+        # Initialize context builder
+        context_builder = ContextBuilder(
+            conversation_store=convo_store,
             knowledge_store=knowledge_store,
-            curator=curator,
+            recent_turns_count=settings.recent_turns,
+            max_facts=settings.max_facts_in_context,
         )
-        await scheduler.start()
+
+        # Initialize routine store (dedicated table with lifecycle tracking)
+        routine_store = RoutineStore(settings.db_path)
+        await routine_store.initialize()
+        await routine_store.migrate_from_knowledge_store(knowledge_store)
+
+        # Discover and register tools
+        discover_tools()
+        set_knowledge_store(knowledge_store)
+        set_routine_store(routine_store)
         logger.info(
-            "  Scheduler: %d tasks registered",
-            scheduler.task_count,
+            "  Tools loaded: %s",
+            ", ".join(TOOL_REGISTRY.keys()),
         )
 
-    # Start event subscriber (real-time HA events via WebSocket)
-    if settings.event_subscription_enabled:
-        decision_engine = DecisionEngine(
-            cooldown_seconds=settings.webhook_cooldown_seconds,
-            significance_threshold=settings.event_significance_threshold,
+        # Connect MCP bridge (optional)
+        if settings.mcp_server_url:
+            mcp_bridge = MCPBridge(
+                url=settings.mcp_server_url,
+                transport=settings.mcp_transport,
+            )
+            await mcp_bridge.connect()
+            if mcp_bridge.connected:
+                await mcp_bridge.discover_tools(
+                    skip_names=set(TOOL_REGISTRY.keys()),
+                )
+                logger.info(
+                    "  MCP tools: %d from %s",
+                    mcp_bridge.tool_count,
+                    settings.mcp_server_url,
+                )
+
+        # Create conversation handler
+        conversation = Conversation(
+            conversation_store=convo_store,
             knowledge_store=knowledge_store,
+            fact_extractor=fact_extractor,
+            context_builder=context_builder,
+            mcp_bridge=mcp_bridge,
         )
-        event_subscriber = EventSubscriber(
-            conversation=conversation,
-            decision_engine=decision_engine,
-        )
-        await event_subscriber.start()
-        logger.info("  Event subscriber: enabled")
 
-    logger.info("  Apex Brain is online.")
-    logger.info("=" * 50)
+        # Create event handler (webhook reactions)
+        if settings.webhook_enabled:
+            event_handler = EventHandler(
+                conversation=conversation,
+                cooldown=settings.webhook_cooldown_seconds,
+            )
+            logger.info("  Webhook endpoint: enabled")
+
+        # Create curator for self-maintenance
+        curator = None
+        if settings.curator_enabled:
+            curator = Curator(
+                conversation=conversation,
+                knowledge_store=knowledge_store,
+            )
+            logger.info("  Curator: enabled")
+
+        # Start scheduler (autonomous loop)
+        if settings.scheduler_enabled:
+            scheduler = Scheduler(
+                conversation=conversation,
+                knowledge_store=knowledge_store,
+                curator=curator,
+            )
+            await scheduler.start()
+            logger.info(
+                "  Scheduler: %d tasks registered",
+                scheduler.task_count,
+            )
+
+        # Start event subscriber (real-time HA events via WebSocket)
+        if settings.event_subscription_enabled:
+            decision_engine = DecisionEngine(
+                cooldown_seconds=settings.webhook_cooldown_seconds,
+                significance_threshold=settings.event_significance_threshold,
+                knowledge_store=knowledge_store,
+            )
+            event_subscriber = EventSubscriber(
+                conversation=conversation,
+                decision_engine=decision_engine,
+            )
+            await event_subscriber.start()
+            logger.info("  Event subscriber: enabled")
+
+        logger.info("  Apex Brain is online.")
+        logger.info("=" * 50)
+
+    except Exception:
+        logger.exception("Startup failed — cleaning up")
+        if event_subscriber:
+            await event_subscriber.stop()
+        if scheduler:
+            await scheduler.stop()
+        if mcp_bridge and mcp_bridge.connected:
+            await mcp_bridge.disconnect()
+        if routine_store:
+            await routine_store.close()
+        if knowledge_store:
+            await knowledge_store.close()
+        if convo_store:
+            await convo_store.close()
+        raise
 
     yield
 
@@ -249,6 +260,9 @@ async def lifespan(_app: FastAPI):
         await scheduler.stop()
     if mcp_bridge and mcp_bridge.connected:
         await mcp_bridge.disconnect()
+    from tools.ha_helpers import close_ha_client
+
+    await close_ha_client()
     await routine_store.close()
     await convo_store.close()
     await knowledge_store.close()
@@ -261,8 +275,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(
     title="Apex Brain",
     description=(
-        "Personal AI assistant with memory "
-        "and smart home control"
+        "Personal AI assistant with memory and smart home control"
     ),
     version=__version__,
     lifespan=lifespan,
@@ -309,8 +322,12 @@ class RateLimiter:
         if now - self._last_cleanup < self._cleanup_interval:
             return
         self._last_cleanup = now
+        max_window = 300  # 5 minutes
+        cutoff = now - max_window
         stale_keys = [
-            k for k, v in self._requests.items() if not v
+            k
+            for k, v in self._requests.items()
+            if not v or all(t < cutoff for t in v)
         ]
         for k in stale_keys:
             del self._requests[k]
@@ -325,26 +342,38 @@ async def rate_limit_middleware(request: Request, call_next):
     path = request.url.path
 
     if path == "/api/chat":
-        # Rate limit by session_id (from body) — but we can't
-        # easily read the body in middleware without consuming it,
-        # so we use the client IP as a proxy for session.
+        # Rate limit by client IP (not X-Forwarded-For which is spoofable).
         client_ip = request.client.host if request.client else "unknown"
         key = f"chat:{client_ip}"
-        if not rate_limiter.is_allowed(key, max_requests=30, window_seconds=60):
-            logger.warning("Rate limit exceeded for /api/chat from %s", client_ip)
+        if not rate_limiter.is_allowed(
+            key, max_requests=30, window_seconds=60
+        ):
+            logger.warning(
+                "Rate limit exceeded for /api/chat from %s",
+                client_ip,
+            )
             return JSONResponse(
                 status_code=429,
-                content={"error": "Too many requests. Limit: 30/min for /api/chat."},
+                content={
+                    "error": "Too many requests. "
+                    "Limit: 30/min for /api/chat."
+                },
             )
 
     elif path == "/api/webhook":
         client_ip = request.client.host if request.client else "unknown"
         key = f"webhook:{client_ip}"
-        if not rate_limiter.is_allowed(key, max_requests=60, window_seconds=60):
-            logger.warning("Rate limit exceeded for /api/webhook from %s", client_ip)
+        if not rate_limiter.is_allowed(
+            key, max_requests=60, window_seconds=60
+        ):
+            logger.warning(
+                "Rate limit exceeded for /api/webhook from %s", client_ip
+            )
             return JSONResponse(
                 status_code=429,
-                content={"error": "Too many requests. Limit: 60/min for /api/webhook."},
+                content={
+                    "error": "Too many requests. Limit: 60/min for /api/webhook."
+                },
             )
 
     return await call_next(request)
@@ -371,11 +400,7 @@ class ChatResponse(BaseModel):
 @app.get("/health")
 async def health():
     """Health check with HA connectivity."""
-    uptime = (
-        time.time() - startup_time
-        if startup_time
-        else 0
-    )
+    uptime = time.time() - startup_time if startup_time else 0
     ha_ok, ha_err = await _check_ha_reachable()
     out = {
         "status": "online",
@@ -419,9 +444,16 @@ async def simple_chat(req: ChatRequest):
             content={"error": "Not ready"},
         )
 
-    response_text = await conversation.handle(
-        req.message, req.session_id
-    )
+    try:
+        response_text = await asyncio.wait_for(
+            conversation.handle(req.message, req.session_id),
+            timeout=180,
+        )
+    except TimeoutError:
+        return JSONResponse(
+            status_code=504,
+            content={"error": "Request timed out"},
+        )
     return ChatResponse(
         response=response_text,
         session_id=req.session_id,
@@ -458,9 +490,7 @@ async def handle_webhook(event: WebhookEvent):
                 content={"error": "Invalid secret"},
             )
 
-    result = await event_handler.process_event(
-        event
-    )
+    result = await event_handler.process_event(event)
     return result
 
 
@@ -469,9 +499,7 @@ async def webhook_config():
     """Return supported event types and example YAML."""
     return {
         "enabled": settings.webhook_enabled,
-        "cooldown_seconds": (
-            settings.webhook_cooldown_seconds
-        ),
+        "cooldown_seconds": (settings.webhook_cooldown_seconds),
         "supported_event_types": [
             "motion",
             "door",
@@ -482,26 +510,21 @@ async def webhook_config():
             "alias": "Motion - notify Apex",
             "trigger": {
                 "platform": "state",
-                "entity_id": (
-                    "binary_sensor.hallway_motion"
-                ),
+                "entity_id": ("binary_sensor.hallway_motion"),
                 "to": "on",
             },
             "action": {
                 "service": "rest_command.apex_webhook",
                 "data": {
                     "event_type": "motion",
-                    "entity_id": (
-                        "binary_sensor.hallway_motion"
-                    ),
+                    "entity_id": ("binary_sensor.hallway_motion"),
                     "new_state": "on",
                 },
             },
         },
         "example_rest_command": {
             "apex_webhook": {
-                "url": "http://localhost:8080"
-                "/api/webhook",
+                "url": "http://localhost:8080/api/webhook",
                 "method": "POST",
                 "content_type": "application/json",
                 "payload": (
@@ -526,7 +549,13 @@ async def openai_compatible(request: Request):
             content={"error": "Not ready"},
         )
 
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Invalid JSON in request body"},
+        )
     messages = body.get("messages", [])
 
     # Extract the last user message
@@ -538,12 +567,9 @@ async def openai_compatible(request: Request):
                 for part in content:
                     if (
                         isinstance(part, dict)
-                        and part.get("type")
-                        == "text"
+                        and part.get("type") == "text"
                     ):
-                        user_message = part.get(
-                            "text", ""
-                        )
+                        user_message = part.get("text", "")
                         break
             else:
                 user_message = content
@@ -552,9 +578,7 @@ async def openai_compatible(request: Request):
     if not user_message:
         return JSONResponse(
             status_code=400,
-            content={
-                "error": "No user message found"
-            },
+            content={"error": "No user message found"},
         )
 
     # Extract session identifier from the request.
@@ -568,9 +592,16 @@ async def openai_compatible(request: Request):
         or "default"
     )
 
-    response_text = await conversation.handle(
-        user_message, session_id
-    )
+    try:
+        response_text = await asyncio.wait_for(
+            conversation.handle(user_message, session_id),
+            timeout=180,
+        )
+    except TimeoutError:
+        return JSONResponse(
+            status_code=504,
+            content={"error": "Request timed out"},
+        )
 
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",

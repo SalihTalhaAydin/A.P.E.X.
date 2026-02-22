@@ -4,6 +4,7 @@ Event Subscriber - Persistent WebSocket connection to Home Assistant.
 Subscribes to state_changed events, filters through the Decision Engine,
 and routes significant events to the conversation orchestrator.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -21,7 +22,9 @@ logger = logging.getLogger(__name__)
 def _get_ws_url() -> str:
     """Derive WebSocket URL from the configured HA URL."""
     ha_url = settings.ha_url
-    ws_url = ha_url.replace("https://", "wss://").replace("http://", "ws://")
+    ws_url = ha_url.replace("https://", "wss://").replace(
+        "http://", "ws://"
+    )
     return f"{ws_url}/websocket"
 
 
@@ -82,7 +85,9 @@ class EventSubscriber:
         while self._running:
             try:
                 await self._connect_and_listen()
-                delay = settings.event_reconnect_delay  # reset on clean disconnect
+                delay = (
+                    settings.event_reconnect_delay
+                )  # reset on clean disconnect
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -91,10 +96,13 @@ class EventSubscriber:
                 if self._running:
                     logger.info("Reconnecting in %ds...", delay)
                     await asyncio.sleep(delay)
-                    delay = min(delay * 2, settings.event_max_reconnect_delay)
+                    delay = min(
+                        delay * 2, settings.event_max_reconnect_delay
+                    )
 
     async def _connect_and_listen(self) -> None:
         """Connect, authenticate, subscribe, and process events."""
+        self._msg_id = 0  # Reset on each new connection
         ws_url = _get_ws_url()
         token = _get_token()
         if not token:
@@ -104,14 +112,19 @@ class EventSubscriber:
             return
 
         async with self._session.ws_connect(ws_url) as ws:
-            # 1. Auth handshake
-            auth_required = await ws.receive_json()
+            # 1. Auth handshake (with timeouts)
+            auth_required = await asyncio.wait_for(
+                ws.receive_json(), timeout=30
+            )
             if auth_required.get("type") != "auth_required":
                 raise ConnectionError(
-                    f"Expected auth_required, got {auth_required.get('type')}"
+                    f"Expected auth_required, got "
+                    f"{auth_required.get('type')}"
                 )
             await ws.send_json({"type": "auth", "access_token": token})
-            auth_result = await ws.receive_json()
+            auth_result = await asyncio.wait_for(
+                ws.receive_json(), timeout=30
+            )
             if auth_result.get("type") != "auth_ok":
                 raise PermissionError(
                     f"Auth failed: {auth_result.get('message', 'unknown')}"
@@ -126,19 +139,29 @@ class EventSubscriber:
                     "event_type": "state_changed",
                 }
             )
-            sub_result = await ws.receive_json()
+            sub_result = await asyncio.wait_for(
+                ws.receive_json(), timeout=30
+            )
             if not sub_result.get("success"):
                 raise RuntimeError(f"Subscribe failed: {sub_result}")
 
             self._connected = True
-            logger.info("EventSubscriber: connected and listening for state_changed events")
+            logger.info(
+                "EventSubscriber: connected and listening for state_changed events"
+            )
 
             # 3. Listen for events
             async for msg in ws:
                 if not self._running:
                     break
                 if msg.type == aiohttp.WSMsgType.TEXT:
-                    data = msg.json()
+                    try:
+                        data = msg.json()
+                    except Exception:
+                        logger.warning(
+                            "Malformed WebSocket message, skipping"
+                        )
+                        continue
                     if data.get("type") == "event":
                         await self._handle_event(data.get("event", {}))
                 elif msg.type in (
@@ -154,16 +177,20 @@ class EventSubscriber:
         """Process a state_changed event through the decision engine."""
         event_data = event.get("data", {})
         entity_id = event_data.get("entity_id", "")
-        old_state = event_data.get("old_state") or {}
-        new_state = event_data.get("new_state") or {}
+        old_state = event_data.get("old_state")
+        if not isinstance(old_state, dict):
+            old_state = {}
+        new_state = event_data.get("new_state")
+        if not isinstance(new_state, dict):
+            new_state = {}
 
         # Build a WebhookEvent-compatible structure
         webhook_event = WebhookEvent(
             event_type="state_changed",
             entity_id=entity_id,
-            old_state=old_state.get("state", "") if isinstance(old_state, dict) else "",
-            new_state=new_state.get("state", "") if isinstance(new_state, dict) else "",
-            attributes=new_state.get("attributes", {}) if isinstance(new_state, dict) else {},
+            old_state=old_state.get("state", ""),
+            new_state=new_state.get("state", ""),
+            attributes=new_state.get("attributes", {}),
         )
 
         # Run through decision engine
@@ -172,7 +199,9 @@ class EventSubscriber:
         if decision.should_process:
             msg = self._build_event_message(webhook_event, decision)
             try:
-                await self._conversation.handle(msg, session_id="apex_events")
+                await self._conversation.handle(
+                    msg, session_id="apex_events"
+                )
             except Exception as e:
                 logger.error(
                     "Failed to process event for %s: %s",

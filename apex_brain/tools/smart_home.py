@@ -325,12 +325,15 @@ async def control_light(
                 color.startswith("#")
                 and len(color) == 7
             ):
-                r, g, b = (
-                    int(color[1:3], 16),
-                    int(color[3:5], 16),
-                    int(color[5:7], 16),
-                )
-                data["rgb_color"] = [r, g, b]
+                try:
+                    r, g, b = (
+                        int(color[1:3], 16),
+                        int(color[3:5], 16),
+                        int(color[5:7], 16),
+                    )
+                    data["rgb_color"] = [r, g, b]
+                except ValueError:
+                    data["color_name"] = color
             else:
                 data["color_name"] = color
         if color_temp_kelvin is not None:
@@ -831,7 +834,12 @@ async def control_fan(
             "off": "turn_off",
             "toggle": "toggle",
         }
-        service = svc_map[action]
+        service = svc_map.get(action)
+        if service is None:
+            return (
+                f"Unknown fan action '{action}'. "
+                "Use 'on', 'off', or 'toggle'."
+            )
         data: dict = {}
 
         if (
@@ -960,18 +968,27 @@ async def control_area(
         ]
 
         # Step 2: Find matching area_id (case-insensitive,
-        #         substring match on the human name part)
+        #         prefer exact match, fall back to substring)
         search = area_name.lower()
         matched_id: str | None = None
+        substring_match: str | None = None
         known_names: list[str] = []
         for line in area_lines:
             area_id, _, human = line.partition("|")
             area_id = area_id.strip()
             human = human.strip()
             known_names.append(human)
-            if search in human.lower():
+            human_lower = human.lower()
+            if search == human_lower:
                 matched_id = area_id
-                break  # first match wins
+                break  # exact match wins
+            if (
+                substring_match is None
+                and search in human_lower
+            ):
+                substring_match = area_id
+        if matched_id is None:
+            matched_id = substring_match
 
         if matched_id is None:
             names_list = ", ".join(known_names) or "none"
@@ -1005,12 +1022,18 @@ async def control_area(
                 )
 
         # Step 4: Call the service via do()
-        await do(
+        result = await do(
             domain,
             service,
             {"area_id": matched_id},
             data or None,
         )
+
+        # Check for errors from do()
+        if isinstance(result, str) and (
+            result.startswith("Error") or result.startswith("HA error")
+        ):
+            return result
 
         # Step 5: Return confirmation
         extras = []

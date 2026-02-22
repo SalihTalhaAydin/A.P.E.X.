@@ -362,8 +362,10 @@ class TestAIToolLoop:
         tc = _make_tool_call("looping_tool", {}, call_id="tc_loop")
         looping_resp = _make_llm_response(content=None, tool_calls=[tc])
 
+        fake_registry = {"looping_tool": {}}
         with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.execute_tool", new_callable=AsyncMock) as mock_exec:
+             patch("brain.conversation.execute_tool", new_callable=AsyncMock) as mock_exec, \
+             patch("brain.conversation.TOOL_REGISTRY", fake_registry):
             mock_litellm.acompletion = AsyncMock(return_value=looping_resp)
             mock_exec.return_value = "result"
 
@@ -375,9 +377,12 @@ class TestAIToolLoop:
                 messages, tool_defs=[{"type": "function"}], max_iterations=15
             )
 
+        assert isinstance(result, str)
         assert "loop" in result.lower()
         assert "rephrase" in result.lower()
         assert mock_litellm.acompletion.await_count == 15
+        # Verify execute_tool was called each iteration
+        assert mock_exec.await_count == 15
 
     @pytest.mark.asyncio
     async def test_malformed_tool_json(self, conv):

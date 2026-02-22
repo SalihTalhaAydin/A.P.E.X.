@@ -169,6 +169,25 @@ class TestBuildMessage:
         assert "Garage Door" in msg
 
 
+    @pytest.mark.asyncio
+    async def test_handle_event_with_string_states(
+        self, subscriber, mock_decision_engine, mock_conversation
+    ):
+        """Non-dict states are handled gracefully (empty strings)."""
+        mock_decision_engine.evaluate = AsyncMock(
+            return_value=EventDecision(True, 0.5, "passed", "medium")
+        )
+        event = {
+            "data": {
+                "entity_id": "light.test",
+                "old_state": "some_string",
+                "new_state": "another_string",
+            }
+        }
+        await subscriber._handle_event(event)
+        mock_conversation.handle.assert_awaited_once()
+
+
 # ------------------------------------------------------------------ #
 # Connection loop (mocked WebSocket)
 # ------------------------------------------------------------------ #
@@ -180,3 +199,12 @@ class TestConnectionLoop:
             with patch("asyncio.sleep", new_callable=AsyncMock):
                 await subscriber._connect_and_listen()
         assert not subscriber.connected
+
+    @pytest.mark.asyncio
+    async def test_msg_id_resets_on_connect(self, subscriber):
+        """_msg_id resets to 0 on each new connection attempt."""
+        subscriber._msg_id = 42
+        with patch("brain.event_subscriber._get_token", return_value=None):
+            with patch("asyncio.sleep", new_callable=AsyncMock):
+                await subscriber._connect_and_listen()
+        assert subscriber._msg_id == 0

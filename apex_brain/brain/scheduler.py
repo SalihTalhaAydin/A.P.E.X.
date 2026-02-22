@@ -4,14 +4,15 @@ Scheduler - Background task runner for autonomous behavior.
 Runs periodic tasks inside the FastAPI lifespan using asyncio.
 No external dependencies (no APScheduler, no cron).
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Awaitable, Callable
+from datetime import datetime, timezone
 
 from brain.config import settings
 
@@ -83,7 +84,9 @@ class Scheduler:
             run_on_startup=run_on_startup,
         )
         self._tasks.append(task)
-        logger.debug("Registered task: %s (every %ds)", name, interval_seconds)
+        logger.debug(
+            "Registered task: %s (every %ds)", name, interval_seconds
+        )
 
     async def start(self) -> None:
         """Start the scheduler loop."""
@@ -109,7 +112,14 @@ class Scheduler:
         for task in self._background_tasks:
             task.cancel()
         if self._background_tasks:
-            await asyncio.gather(*self._background_tasks, return_exceptions=True)
+            results = await asyncio.gather(
+                *self._background_tasks, return_exceptions=True
+            )
+            for result in results:
+                if isinstance(result, Exception) and not isinstance(
+                    result, asyncio.CancelledError
+                ):
+                    logger.warning("Task shutdown error: %s", result)
         self._background_tasks.clear()
         logger.info("Scheduler stopped")
 
@@ -131,10 +141,14 @@ class Scheduler:
         """Run a task with error handling — never crash the loop."""
         try:
             await asyncio.wait_for(task.callback(), timeout=_TASK_TIMEOUT)
-        except asyncio.TimeoutError:
-            logger.error("Task '%s' timed out after %ds", task.name, _TASK_TIMEOUT)
+        except TimeoutError:
+            logger.error(
+                "Task '%s' timed out after %ds", task.name, _TASK_TIMEOUT
+            )
         except Exception as e:
-            logger.error("Task '%s' failed: %s", task.name, e, exc_info=True)
+            logger.error(
+                "Task '%s' failed: %s", task.name, e, exc_info=True
+            )
 
     # ------------------------------------------------------------------ #
     # Builtin tasks
@@ -247,26 +261,59 @@ class Scheduler:
             import datetime as _dt
 
             tz = _dt.timezone.utc
+            logger.debug(
+                "Could not load timezone '%s', using UTC",
+                settings.timezone,
+            )
 
         now = datetime.now(tz)
         today = now.strftime("%Y-%m-%d")
 
-        # Only fire at the target hour, and only once per day
         if now.hour != target_hour:
             return
 
-        # Check if already fired today
-        task = next((t for t in self._tasks if t.name == task_name), None)
+        # Check in-memory guard first (fast path)
+        task = next(
+            (t for t in self._tasks if t.name == task_name),
+            None,
+        )
         if task and task._last_fired_date == today:
             return
 
-        # Mark as fired
-        if task:
-            task._last_fired_date = today
+        # Check persistent guard (survives restart)
+        try:
+            facts = await self._knowledge_store.get_all_facts(
+                category="system", limit=50
+            )
+            for f in facts:
+                if (
+                    f.get("key") == f"last_{task_name}"
+                    and f.get("value") == today
+                ):
+                    if task:
+                        task._last_fired_date = today
+                    return
+        except Exception:
+            pass
 
         logger.info("Firing %s for %s", task_name, today)
         try:
-            await self._conversation.handle(message, session_id="apex_scheduler")
+            await self._conversation.handle(
+                message, session_id="apex_scheduler"
+            )
+            # Only mark as fired after successful execution
+            if task:
+                task._last_fired_date = today
+            try:
+                await self._knowledge_store.store_fact(
+                    category="system",
+                    key=f"last_{task_name}",
+                    value=today,
+                    confidence=1.0,
+                    source="system",
+                )
+            except Exception:
+                pass
         except Exception as e:
             logger.error("%s failed: %s", task_name, e)
 
@@ -279,24 +326,51 @@ class Scheduler:
             "3. If everything is fine, don't produce any output."
         )
         try:
-            await self._conversation.handle(msg, session_id="apex_scheduler")
+            await self._conversation.handle(
+                msg, session_id="apex_scheduler"
+            )
         except Exception as e:
             logger.error("Health check failed: %s", e)
 
     async def _task_reminder_check(self) -> None:
-        """Check for due reminders in the knowledge store."""
+        """Check for due reminders and fire them."""
         try:
-            now_iso = datetime.utcnow().isoformat()
             facts = await self._knowledge_store.get_all_facts(
                 category="reminder", limit=20
             )
+            now_iso = datetime.now(timezone.utc).isoformat()
             due = [
                 f
                 for f in facts
                 if f.get("value")
-                and "expires_at" not in f  # reminders without expiry are one-time
+                and f.get("expires_at")
+                and f.get("expires_at") <= now_iso
             ]
-            # For now, reminders are handled by fact expiration.
-            # Future: check expires_at proximity and send reminder messages.
+            if not due:
+                return
+            for reminder in due:
+                key = reminder.get("key", "reminder")
+                value = reminder.get("value", "")
+                msg = (
+                    "[REMINDER] The user asked to be "
+                    f"reminded: {key} — {value}. "
+                    "Let them know naturally."
+                )
+                try:
+                    await self._conversation.handle(
+                        msg,
+                        session_id="apex_reminders",
+                    )
+                except Exception as e:
+                    logger.error("Reminder '%s' failed: %s", key, e)
+                # Remove fired reminder
+                fact_id = reminder.get("id")
+                if fact_id:
+                    try:
+                        await self._knowledge_store.delete_fact_by_id(
+                            fact_id
+                        )
+                    except Exception:
+                        pass
         except Exception as e:
             logger.debug("Reminder check: %s", e)

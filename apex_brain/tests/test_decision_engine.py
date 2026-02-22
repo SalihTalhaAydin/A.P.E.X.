@@ -156,17 +156,21 @@ class TestCooldown:
 
     def test_second_event_blocked(self):
         engine = DecisionEngine(cooldown_seconds=60)
-        engine._check_cooldown("test:entity")
+        # check returns True (cooldown not active)
+        assert engine._check_cooldown("test:entity") is True
+        # set the cooldown
+        engine._set_cooldown("test:entity")
+        # now it should be blocked
         assert engine._check_cooldown("test:entity") is False
 
     def test_different_keys_independent(self):
         engine = DecisionEngine(cooldown_seconds=60)
-        engine._check_cooldown("test:entity_a")
+        engine._set_cooldown("test:entity_a")
         assert engine._check_cooldown("test:entity_b") is True
 
     def test_cooldown_expires(self):
         engine = DecisionEngine(cooldown_seconds=1)
-        engine._check_cooldown("test:entity")
+        engine._set_cooldown("test:entity")
         # Manually expire the cooldown
         engine._cooldowns["test:entity"] = time.time() - 2
         assert engine._check_cooldown("test:entity") is True

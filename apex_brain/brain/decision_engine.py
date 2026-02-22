@@ -5,15 +5,26 @@ Sits between raw HA events and the conversation orchestrator.
 Pure rule-based (zero LLM cost) — drops noise, scores significance,
 and only lets meaningful events through to the AI.
 """
+
 from __future__ import annotations
 
 import logging
 import time
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
+
+from brain.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Critical domains: unavailability should NOT be dropped
+_CRITICAL_DOMAINS = (
+    "lock",
+    "alarm_control_panel",
+    "camera",
+    "cover",
+)
 
 
 @dataclass
@@ -54,7 +65,7 @@ class DecisionEngine:
         if drop_reason:
             return EventDecision(False, 0.0, drop_reason, "low")
 
-        # Layer 2: Cooldown check
+        # Layer 2: Cooldown check (don't set yet)
         cooldown_key = f"{event.event_type}:{event.entity_id}"
         if not self._check_cooldown(cooldown_key):
             return EventDecision(False, 0.0, "cooldown active", "low")
@@ -62,11 +73,13 @@ class DecisionEngine:
         # Layer 3: Significance scoring (rule-based)
         score, priority = self._score_significance(event)
 
-        # Layer 4: Context enrichment (check knowledge store)
+        # Layer 4: Context enrichment
         if self._knowledge_store and score >= 0.2:
             score = await self._enrich_with_context(event, score)
 
         should_process = score >= self._significance_threshold
+        if should_process:
+            self._set_cooldown(cooldown_key)
         reason = "passed filters" if should_process else "below threshold"
         return EventDecision(should_process, score, reason, priority)
 
@@ -80,13 +93,16 @@ class DecisionEngine:
         if old and new and old == new:
             return "no state change"
 
-        # Unavailable bounces
+        # Unavailable bounces — allow critical domains
+        domain = entity.split(".")[0] if "." in entity else ""
         if new == "unavailable":
-            return "device went unavailable"
+            if domain not in _CRITICAL_DOMAINS:
+                return "device went unavailable"
         if old == "unavailable" and new:
-            return "recovery from unavailable"
+            if domain not in _CRITICAL_DOMAINS:
+                return "recovery from unavailable"
 
-        # Sensor noise: numeric sensors with tiny fluctuations
+        # Sensor noise: numeric sensors with tiny deltas
         if entity.startswith("sensor."):
             try:
                 delta = abs(float(new) - float(old))
@@ -110,27 +126,56 @@ class DecisionEngine:
         return ""
 
     def _check_cooldown(self, key: str) -> bool:
-        """True if cooldown elapsed (ok to act)."""
+        """True if cooldown elapsed (ok to act).
+
+        Does NOT set cooldown — call _set_cooldown()
+        after confirming the event will be processed.
+        """
         now = time.time()
         last = self._cooldowns.get(key, 0)
         if now - last < self._cooldown_seconds:
             return False
-        self._cooldowns[key] = now
-        # Periodic cleanup of stale entries
+        self._cleanup_cooldowns(now)
+        return True
+
+    def _set_cooldown(self, key: str) -> None:
+        """Record that an action was taken for this key."""
+        self._cooldowns[key] = time.time()
+
+    def _cleanup_cooldowns(self, now: float) -> None:
+        """Remove stale cooldown entries."""
         max_age = self._cooldown_seconds * 2
-        stale = [k for k, ts in self._cooldowns.items() if now - ts > max_age]
+        stale = [
+            k for k, ts in self._cooldowns.items() if now - ts > max_age
+        ]
         for k in stale:
             del self._cooldowns[k]
-        return True
 
     def _score_significance(self, event) -> tuple[float, str]:
         """Score event significance 0.0-1.0 using rules."""
         entity = event.entity_id
-        hour = datetime.now().hour
+        try:
+            from zoneinfo import ZoneInfo
+
+            tz = ZoneInfo(settings.timezone)
+        except Exception:
+            tz = timezone.utc
+            logger.debug(
+                "Could not load timezone '%s', using UTC",
+                settings.timezone,
+            )
+        hour = datetime.now(tz).hour
         score = 0.3  # base score for passing hard filter
 
         # Security events: always high
-        if any(d in entity for d in ("lock.", "alarm_control_panel.", "camera.")):
+        if any(
+            d in entity
+            for d in (
+                "lock.",
+                "alarm_control_panel.",
+                "camera.",
+            )
+        ):
             return 0.9, "critical"
 
         # Door/window sensors
@@ -138,7 +183,10 @@ class DecisionEngine:
             score = 0.7
             if hour >= 22 or hour < 6:
                 score = 0.95  # late night = critical
-            return score, "high" if score > 0.8 else "medium"
+            return (
+                score,
+                "high" if score > 0.8 else "medium",
+            )
 
         # Motion sensors
         if "motion" in entity or "occupancy" in entity:
@@ -160,8 +208,10 @@ class DecisionEngine:
 
         return score, "medium"
 
-    async def _enrich_with_context(self, event, base_score: float) -> float:
-        """Boost score if the entity is mentioned in user's knowledge."""
+    async def _enrich_with_context(
+        self, event, base_score: float
+    ) -> float:
+        """Boost score if entity is in user's knowledge."""
         try:
             entity_name = event.entity_id.split(".")[-1]
             facts = await self._knowledge_store.search_keyword(

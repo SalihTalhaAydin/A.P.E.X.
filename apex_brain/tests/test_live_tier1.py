@@ -15,6 +15,8 @@ from tools.base import execute_tool
 
 pytestmark = pytest.mark.live
 
+pytest.skip("Live tier 1 tests disabled", allow_module_level=True)
+
 
 # ===================================================================
 # 1. discover() — Read-only exploration

@@ -56,10 +56,10 @@ def test_event_handler_cooldown():
     key = "motion:binary_sensor.hallway"
 
     # First call: should pass
-    assert handler._check_cooldown(key) is True
+    assert handler._cooldown.check_and_set(key) is True
 
     # Second call within cooldown: should block
-    assert handler._check_cooldown(key) is False
+    assert handler._cooldown.check_and_set(key) is False
 
 
 def test_event_handler_cooldown_expires():
@@ -69,9 +69,9 @@ def test_event_handler_cooldown_expires():
     )
     key = "motion:binary_sensor.hallway"
 
-    assert handler._check_cooldown(key) is True
+    assert handler._cooldown.check_and_set(key) is True
     # With cooldown=0, immediately passes again
-    assert handler._check_cooldown(key) is True
+    assert handler._cooldown.check_and_set(key) is True
 
 
 def test_event_message_motion():

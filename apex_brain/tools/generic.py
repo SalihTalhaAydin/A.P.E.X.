@@ -99,9 +99,7 @@ async def discover(
         elif what == "devices":
             return await _discover_devices(filter)
         elif what == "integrations":
-            return await _discover_integrations(
-                filter
-            )
+            return await _discover_integrations(filter)
         elif what == "info":
             return await _discover_info()
         else:
@@ -128,9 +126,7 @@ async def _discover_entities(filter_str: str) -> str:
             for s in states
             if filt in s["entity_id"].lower()
             or filt
-            in s.get("attributes", {})
-            .get("friendly_name", "")
-            .lower()
+            in s.get("attributes", {}).get("friendly_name", "").lower()
         ]
     else:
         matches = states
@@ -165,13 +161,9 @@ async def _discover_services(filter_str: str) -> str:
 
     if filt:
         # Filter to matching domain and show full schemas
-        matched = [
-            s for s in services if filt in s.get("domain", "")
-        ]
+        matched = [s for s in services if filt in s.get("domain", "")]
         if not matched:
-            return (
-                f"No services matching domain '{filter_str}'."
-            )
+            return f"No services matching domain '{filter_str}'."
 
         lines = []
         for svc_domain in matched:
@@ -188,32 +180,23 @@ async def _discover_services(filter_str: str) -> str:
                     ftype = finfo.get("selector", {})
                     freq = finfo.get("required", False)
                     fdesc = finfo.get("description", "")
-                    type_str = (
-                        _selector_to_type(ftype)
-                        if ftype
-                        else "any"
-                    )
+                    type_str = _selector_to_type(ftype) if ftype else "any"
                     req_str = " (required)" if freq else ""
                     lines.append(
-                        f"    {fname}: {type_str}"
-                        f"{req_str}"
-                        f" — {fdesc}"
+                        f"    {fname}: {type_str}{req_str} — {fdesc}"
                         if fdesc
-                        else f"    {fname}: {type_str}"
-                        f"{req_str}"
+                        else f"    {fname}: {type_str}{req_str}"
                     )
 
         return (
             f"Services for '{filt}' "
-            f"({len(lines)} entries):\n"
-            + "\n".join(lines)
+            f"({len(lines)} entries):\n" + "\n".join(lines)
         )
     else:
         # No filter — list domains only
         domains = [s.get("domain", "?") for s in services]
-        return (
-            f"Service domains ({len(domains)}):\n"
-            + ", ".join(sorted(domains))
+        return f"Service domains ({len(domains)}):\n" + ", ".join(
+            sorted(domains)
         )
 
 
@@ -300,10 +283,7 @@ async def _discover_floors(filter_str: str) -> str:
             json_data={"template": template},
         )
     except Exception:
-        return (
-            "Floors not available (requires "
-            "Home Assistant 2024.2+)."
-        )
+        return "Floors not available (requires Home Assistant 2024.2+)."
 
     if not result or not isinstance(result, str):
         return "No floors found."
@@ -328,15 +308,10 @@ async def _discover_floors(filter_str: str) -> str:
 
     if not lines:
         if filter_str:
-            return (
-                f"No floors matching '{filter_str}'."
-            )
+            return f"No floors matching '{filter_str}'."
         return "No floors found."
 
-    return (
-        f"Floors ({len(lines)}):\n"
-        + "\n".join(lines)
-    )
+    return f"Floors ({len(lines)}):\n" + "\n".join(lines)
 
 
 async def _discover_devices(filter_str: str) -> str:
@@ -384,8 +359,7 @@ async def _discover_devices(filter_str: str) -> str:
     if len(lines) > 50:
         return (
             f"Devices ({len(lines)} found, "
-            f"showing first 50):\n"
-            + "\n".join(lines[:50])
+            f"showing first 50):\n" + "\n".join(lines[:50])
         )
     return f"Devices ({len(lines)}):\n" + "\n".join(lines)
 
@@ -394,13 +368,10 @@ async def _discover_integrations(filter_str: str) -> str:
     """List configured integrations via config entries."""
     # Try the config entries endpoint
     try:
-        entries = await ha_request(
-            "GET", "/config/config_entries/entry"
-        )
+        entries = await ha_request("GET", "/config/config_entries/entry")
     except Exception:
         return (
-            "Could not list integrations "
-            "(endpoint may not be available)."
+            "Could not list integrations (endpoint may not be available)."
         )
 
     if not isinstance(entries, list):
@@ -420,15 +391,11 @@ async def _discover_integrations(filter_str: str) -> str:
 
     if not seen:
         if filter_str:
-            return (
-                f"No integrations matching '{filter_str}'."
-            )
+            return f"No integrations matching '{filter_str}'."
         return "No integrations found."
 
     lines = sorted(seen.values())
-    return (
-        f"Integrations ({len(lines)}):\n" + "\n".join(lines)
-    )
+    return f"Integrations ({len(lines)}):\n" + "\n".join(lines)
 
 
 async def _discover_info() -> str:
@@ -508,26 +475,38 @@ def _is_template(target: str) -> bool:
     return "{{" in target or "{%" in target
 
 
+_ENTITY_RE = __import__("re").compile(r"^[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+$")
+
+
 async def _query_entity(entity_id: str) -> str:
     """Read a single entity's state and key attributes."""
     try:
         state = await read_state(entity_id)
     except Exception:
+        # Validate entity_id before template injection
+        if not _ENTITY_RE.match(entity_id):
+            return (
+                f"Invalid entity_id format: "
+                f"'{entity_id}'. Expected format: "
+                "domain.name (e.g. light.kitchen)."
+            )
         # Smart fallback: try as template
         try:
             result = await ha_request(
                 "POST",
                 "/template",
                 json_data={
-                    "template": (
-                        "{{ states('" + entity_id + "') }}"
-                    )
+                    "template": ("{{ states('" + entity_id + "') }}")
                 },
             )
             if result and result != "unknown":
                 return f"{entity_id}: {result}"
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(
+                "Template fallback failed for %s: %s",
+                entity_id,
+                exc,
+            )
         return (
             f"Entity '{entity_id}' not found. "
             "Check the entity_id with "
@@ -535,9 +514,7 @@ async def _query_entity(entity_id: str) -> str:
         )
 
     attrs = state.get("attributes", {})
-    fn = attrs.get(
-        "friendly_name", friendly_name(entity_id)
-    )
+    fn = attrs.get("friendly_name", friendly_name(entity_id))
     st = state.get("state", "unknown")
     domain = entity_id.split(".")[0]
 
@@ -549,18 +526,14 @@ async def _query_entity(entity_id: str) -> str:
     return result
 
 
-def _format_domain_attrs(
-    domain: str, attrs: dict
-) -> str:
+def _format_domain_attrs(domain: str, attrs: dict) -> str:
     """Format key attributes based on entity domain."""
     parts = []
     if domain == "climate":
         if "temperature" in attrs:
             parts.append(f"target: {attrs['temperature']}°")
         if "current_temperature" in attrs:
-            parts.append(
-                f"current: {attrs['current_temperature']}°"
-            )
+            parts.append(f"current: {attrs['current_temperature']}°")
         if "hvac_action" in attrs:
             parts.append(f"action: {attrs['hvac_action']}")
     elif domain == "light":
@@ -568,14 +541,10 @@ def _format_domain_attrs(
             pct = round(attrs["brightness"] / 255 * 100)
             parts.append(f"brightness: {pct}%")
         if attrs.get("color_temp_kelvin") is not None:
-            parts.append(
-                f"color_temp: {attrs['color_temp_kelvin']}K"
-            )
+            parts.append(f"color_temp: {attrs['color_temp_kelvin']}K")
     elif domain == "media_player":
         if attrs.get("media_title") is not None:
-            parts.append(
-                f"playing: {attrs['media_title']}"
-            )
+            parts.append(f"playing: {attrs['media_title']}")
         if attrs.get("volume_level") is not None:
             vol = round(attrs["volume_level"] * 100)
             parts.append(f"volume: {vol}%")
@@ -583,27 +552,17 @@ def _format_domain_attrs(
             parts.append(f"source: {attrs['source']}")
     elif domain == "vacuum":
         if "battery_level" in attrs:
-            parts.append(
-                f"battery: {attrs['battery_level']}%"
-            )
+            parts.append(f"battery: {attrs['battery_level']}%")
         if "fan_speed" in attrs:
-            parts.append(
-                f"fan_speed: {attrs['fan_speed']}"
-            )
+            parts.append(f"fan_speed: {attrs['fan_speed']}")
     elif domain == "cover":
         if "current_position" in attrs:
-            parts.append(
-                f"position: {attrs['current_position']}%"
-            )
+            parts.append(f"position: {attrs['current_position']}%")
     elif domain in ("sensor", "binary_sensor"):
         if "unit_of_measurement" in attrs:
-            parts.append(
-                f"unit: {attrs['unit_of_measurement']}"
-            )
+            parts.append(f"unit: {attrs['unit_of_measurement']}")
         if "device_class" in attrs:
-            parts.append(
-                f"class: {attrs['device_class']}"
-            )
+            parts.append(f"class: {attrs['device_class']}")
     return ", ".join(parts)
 
 
@@ -650,16 +609,16 @@ async def _query_template(template: str) -> str:
             "targets": {
                 "type": "object",
                 "description": (
-                    "Target(s): {\"entity_id\": \"...\"} or "
-                    "{\"area_id\": \"...\"} or "
-                    "{\"device_id\": \"...\"}."
+                    'Target(s): {"entity_id": "..."} or '
+                    '{"area_id": "..."} or '
+                    '{"device_id": "..."}.'
                 ),
             },
             "data": {
                 "type": "object",
                 "description": (
                     "Service-specific parameters, e.g. "
-                    "{\"brightness_pct\": 50}."
+                    '{"brightness_pct": 50}.'
                 ),
             },
         },
@@ -678,11 +637,7 @@ async def do(
         confirmed = bool(data and data.get("confirmed"))
         if confirmed and data:
             # Remove 'confirmed' from data before sending
-            data = {
-                k: v
-                for k, v in data.items()
-                if k != "confirmed"
-            }
+            data = {k: v for k, v in data.items() if k != "confirmed"}
             if not data:
                 data = None
 
@@ -777,12 +732,8 @@ async def _verify_area_or_floor(
         # target domain in the area or on the floor
         if area_id:
             template = (
-                "{%- for e in area_entities('"
-                + area_id
-                + "') "
-                "if e.startswith('"
-                + domain
-                + ".') -%}"
+                "{%- for e in area_entities('" + area_id + "') "
+                "if e.startswith('" + domain + ".') -%}"
                 "{{ e }}|"
                 "{{ states[e].state }}|"
                 "{{ state_attr(e, 'friendly_name')"
@@ -794,13 +745,9 @@ async def _verify_area_or_floor(
             # Floor: get all areas on the floor,
             # then entities in those areas
             template = (
-                "{%- for a in floor_areas('"
-                + floor_id
-                + "') -%}"
+                "{%- for a in floor_areas('" + floor_id + "') -%}"
                 "{%- for e in area_entities(a) "
-                "if e.startswith('"
-                + domain
-                + ".') -%}"
+                "if e.startswith('" + domain + ".') -%}"
                 "{{ e }}|"
                 "{{ states[e].state }}|"
                 "{{ state_attr(e, 'friendly_name')"
@@ -817,10 +764,7 @@ async def _verify_area_or_floor(
         )
 
         if not isinstance(raw, str):
-            return (
-                f"Done. Called {domain}.{service} "
-                f"on {label}."
-            )
+            return f"Done. Called {domain}.{service} on {label}."
 
         lines = [
             ln.strip()
@@ -842,21 +786,14 @@ async def _verify_area_or_floor(
                 state = segs[1].strip()
                 parts.append(f"{name}: {state}")
             elif len(segs) == 2:
-                parts.append(
-                    f"{segs[0]}: {segs[1]}"
-                )
+                parts.append(f"{segs[0]}: {segs[1]}")
 
         summary = ", ".join(parts)
         return f"Done. {summary}"
 
     except Exception:
-        logger.debug(
-            "Area/floor verify failed", exc_info=True
-        )
-        return (
-            f"Done. Called {domain}.{service} "
-            f"on {area_id or floor_id}."
-        )
+        logger.debug("Area/floor verify failed", exc_info=True)
+        return f"Done. Called {domain}.{service} on {area_id or floor_id}."
 
 
 # ------------------------------------------------------------------
@@ -866,8 +803,7 @@ async def _verify_area_or_floor(
 
 @tool(
     description=(
-        "Get state change history or logbook entries "
-        "for an entity."
+        "Get state change history or logbook entries for an entity."
     ),
     parameters={
         "type": "object",
@@ -875,15 +811,13 @@ async def _verify_area_or_floor(
             "entity_id": {
                 "type": "string",
                 "description": (
-                    "Entity to get history for, "
-                    "e.g. 'light.kitchen'."
+                    "Entity to get history for, e.g. 'light.kitchen'."
                 ),
             },
             "hours": {
                 "type": "integer",
                 "description": (
-                    "How many hours of history to fetch "
-                    "(default 24)."
+                    "How many hours of history to fetch (default 24)."
                 ),
                 "default": 24,
             },
@@ -908,24 +842,16 @@ async def history(
     """Get state change history or logbook entries."""
     try:
         if mode == "logbook":
-            return await _history_logbook(
-                entity_id, hours
-            )
+            return await _history_logbook(entity_id, hours)
         else:
-            return await _history_changes(
-                entity_id, hours
-            )
+            return await _history_changes(entity_id, hours)
     except Exception as e:
         return f"Error fetching history for {entity_id}: {e}"
 
 
-async def _history_changes(
-    entity_id: str, hours: int
-) -> str:
+async def _history_changes(entity_id: str, hours: int) -> str:
     """Fetch state change history for an entity."""
-    start = datetime.now(timezone.utc) - timedelta(
-        hours=hours
-    )
+    start = datetime.now(timezone.utc) - timedelta(hours=hours)
     start_str = start.strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
     result = await ha_request(
@@ -941,10 +867,7 @@ async def _history_changes(
         or len(result) == 0
         or not result[0]
     ):
-        return (
-            f"No state changes for {entity_id} "
-            f"in the last {hours}h."
-        )
+        return f"No state changes for {entity_id} in the last {hours}h."
 
     entries = result[0]
     lines = []
@@ -957,47 +880,33 @@ async def _history_changes(
         # Format timestamp
         ts_short = _format_timestamp(ts)
         if prev_state is not None:
-            lines.append(
-                f"  {ts_short}: {prev_state} → {st}"
-            )
+            lines.append(f"  {ts_short}: {prev_state} → {st}")
         else:
             lines.append(f"  {ts_short}: {st}")
         prev_state = st
 
     if not lines:
-        return (
-            f"No state changes for {entity_id} "
-            f"in the last {hours}h."
-        )
+        return f"No state changes for {entity_id} in the last {hours}h."
 
     fn = friendly_name(entity_id)
     return (
         f"History for {fn} ({entity_id}), "
-        f"last {hours}h ({len(lines)} changes):\n"
-        + "\n".join(lines)
+        f"last {hours}h ({len(lines)} changes):\n" + "\n".join(lines)
     )
 
 
-async def _history_logbook(
-    entity_id: str, hours: int
-) -> str:
+async def _history_logbook(entity_id: str, hours: int) -> str:
     """Fetch logbook entries for an entity."""
-    start = datetime.now(timezone.utc) - timedelta(
-        hours=hours
-    )
+    start = datetime.now(timezone.utc) - timedelta(hours=hours)
     start_str = start.strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
     result = await ha_request(
         "GET",
-        f"/logbook/{start_str}"
-        f"?entity={entity_id}",
+        f"/logbook/{start_str}?entity={entity_id}",
     )
 
     if not result or not isinstance(result, list):
-        return (
-            f"No logbook entries for {entity_id} "
-            f"in the last {hours}h."
-        )
+        return f"No logbook entries for {entity_id} in the last {hours}h."
 
     lines = []
     for entry in result[:50]:
@@ -1010,23 +919,15 @@ async def _history_logbook(
         if message:
             lines.append(f"  {ts_short}: {name} {message}")
         elif state:
-            lines.append(
-                f"  {ts_short}: {name} → {state}"
-            )
+            lines.append(f"  {ts_short}: {name} → {state}")
         else:
             lines.append(f"  {ts_short}: {name}")
 
     if not lines:
-        return (
-            f"No logbook entries for {entity_id} "
-            f"in the last {hours}h."
-        )
+        return f"No logbook entries for {entity_id} in the last {hours}h."
 
     fn = friendly_name(entity_id)
-    header = (
-        f"Logbook for {fn} ({entity_id}), "
-        f"last {hours}h"
-    )
+    header = f"Logbook for {fn} ({entity_id}), last {hours}h"
     if len(result) > 50:
         header += f" (showing 50 of {len(result)})"
     header += ":"

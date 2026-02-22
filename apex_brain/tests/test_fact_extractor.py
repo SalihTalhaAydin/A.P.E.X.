@@ -59,7 +59,7 @@ async def test_extract_empty_turns_returns_early():
 
     result = await extractor.extract_from_conversation([], llm)
 
-    assert result is None
+    assert result == []
     llm.assert_not_awaited()
     ks.store_fact.assert_not_awaited()
 
@@ -81,7 +81,7 @@ async def test_extract_turns_without_content_skipped():
     ]
     result = await extractor.extract_from_conversation(turns, llm)
 
-    assert result is None
+    assert result == []
     llm.assert_not_awaited()
 
 
@@ -95,7 +95,7 @@ async def test_extract_short_conversation_returns_early():
     turns = [{"role": "user", "content": "Hi"}]  # "User: Hi" = 8 chars
     result = await extractor.extract_from_conversation(turns, llm)
 
-    assert result is None
+    assert result == []
     llm.assert_not_awaited()
 
 
@@ -232,7 +232,7 @@ async def test_extract_empty_array_returns_early():
 
     result = await extractor.extract_from_conversation(_long_turns(), llm)
 
-    assert result is None
+    assert result == []
     ks.store_fact.assert_not_awaited()
 
 
@@ -258,7 +258,7 @@ async def test_extract_non_list_response_returns():
 
     result = await extractor.extract_from_conversation(_long_turns(), llm)
 
-    assert result is None
+    assert result == []
     ks.store_fact.assert_not_awaited()
 
 
@@ -459,15 +459,10 @@ async def test_extract_llm_api_error_handled(caplog):
 async def test_extract_store_continues_on_error():
     """If store_fact raises on one fact, remaining facts are still attempted.
 
-    NOTE: In the current implementation the generic `except Exception`
-    around the whole loop means a store_fact error aborts the rest. This
-    test documents the actual (current) behaviour: an error from
-    store_fact is caught at the outer level, so subsequent facts are NOT
-    stored.  If the implementation is later changed to be more resilient
-    (per-fact try/except), update this test accordingly.
+    Per-fact try/except ensures one failure doesn't abort the rest.
     """
     ks = _make_knowledge_store()
-    # First call raises, second would succeed
+    # First call raises, second succeeds
     ks.store_fact.side_effect = [RuntimeError("DB error"), None]
     extractor = FactExtractor(ks)
     facts_json = json.dumps([
@@ -479,9 +474,10 @@ async def test_extract_store_continues_on_error():
     # Should not propagate
     await extractor.extract_from_conversation(_long_turns(), llm)
 
-    # The first call was attempted (and failed)
-    assert ks.store_fact.await_count >= 1
+    # Both facts were attempted; first failed, second succeeded
+    assert ks.store_fact.await_count == 2
     assert ks.store_fact.call_args_list[0].kwargs["key"] == "first"
+    assert ks.store_fact.call_args_list[1].kwargs["key"] == "second"
 
 
 # ===========================================================================

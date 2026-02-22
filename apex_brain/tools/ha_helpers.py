@@ -15,12 +15,21 @@ logger = logging.getLogger(__name__)
 # Shared client — created once at module load, reused for all HA API calls.
 # This avoids the overhead of opening/closing a TCP connection per request.
 # A module-level AsyncClient is safe for a long-running asyncio server.
-_ha_client = httpx.AsyncClient(timeout=15.0)
+_ha_client = httpx.AsyncClient(
+    timeout=15.0,
+    limits=httpx.Limits(
+        max_connections=20,
+        max_keepalive_connections=10,
+    ),
+)
 
 
-def format_ha_error(
-    entity_id: str, domain: str, e: Exception
-) -> str:
+async def close_ha_client():
+    """Close the shared HA client on shutdown."""
+    await _ha_client.aclose()
+
+
+def format_ha_error(entity_id: str, domain: str, e: Exception) -> str:
     """Return a short, model-friendly error."""
     if isinstance(e, httpx.HTTPStatusError):
         r = getattr(e, "response", None)
@@ -33,10 +42,7 @@ def format_ha_error(
                     "Check the entity_id with list_entities."
                 )
             if code == 422:
-                return (
-                    "HA rejected the request (422). "
-                    f"{body or str(e)}"
-                )
+                return f"HA rejected the request (422). {body or str(e)}"
             return f"HA error {code}: {body or str(e)}"
     return f"Error ({domain}): {e}"
 
@@ -64,12 +70,20 @@ async def ha_request(
     token = headers.get("Authorization", "")
     tok = "set" if len(token) > 10 else "MISSING"
     logger.debug("HA API %s %s (token: %s)", method, url, tok)
-    response = await _ha_client.request(
-        method=method,
-        url=url,
-        headers=headers,
-        json=json_data,
-    )
+    try:
+        response = await _ha_client.request(
+            method=method,
+            url=url,
+            headers=headers,
+            json=json_data,
+        )
+    except httpx.ConnectError:
+        return {
+            "error": "Cannot connect to Home Assistant. "
+            "Check HA_URL and network."
+        }
+    except httpx.TimeoutException:
+        return {"error": "Home Assistant API request timed out."}
     if not response.is_success:
         logger.error(
             "HA API error: %s %s",
@@ -77,9 +91,7 @@ async def ha_request(
             response.text[:300],
         )
     response.raise_for_status()
-    content_type = response.headers.get(
-        "content-type", ""
-    )
+    content_type = response.headers.get("content-type", "")
     if "application/json" in content_type:
         result = response.json()
         if (
@@ -98,9 +110,7 @@ async def ha_request(
 
 def friendly_name(entity_id: str) -> str:
     """Derive a human-friendly name from an entity_id."""
-    return (
-        entity_id.split(".")[-1].replace("_", " ").title()
-    )
+    return entity_id.split(".")[-1].replace("_", " ").title()
 
 
 async def call_ha_service(
@@ -115,7 +125,10 @@ async def call_ha_service(
         payload.update(data)
     logger.debug(
         "HA service call: %s.%s -> %s data=%s",
-        domain, service, entity_id, data,
+        domain,
+        service,
+        entity_id,
+        data,
     )
     await ha_request(
         "POST",
@@ -154,7 +167,8 @@ async def get_device_summary() -> str:
     """
     try:
         states = await ha_request("GET", "/states")
-    except Exception:
+    except Exception as exc:
+        logger.debug("Device summary fetch failed: %s", exc)
         return ""
 
     sections: list[str] = []
@@ -165,9 +179,7 @@ async def get_device_summary() -> str:
             domain, cap = entry, None
 
         entities = [
-            s
-            for s in states
-            if s["entity_id"].startswith(f"{domain}.")
+            s for s in states if s["entity_id"].startswith(f"{domain}.")
         ]
         if not entities:
             continue
@@ -208,13 +220,13 @@ async def get_battery_level(entity_id: str) -> int | None:
     # 1. Try the entity's own attributes first
     try:
         state = await read_state(entity_id)
-        level = state.get("attributes", {}).get(
-            "battery_level"
-        )
+        level = state.get("attributes", {}).get("battery_level")
         if level is not None:
             return int(level)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug(
+            "Battery attr lookup failed for %s: %s", entity_id, exc
+        )
 
     # 2. Fallback: look for sensor.<name>_battery
     name = entity_id.split(".", 1)[-1]  # e.g. "dusty"
@@ -224,8 +236,10 @@ async def get_battery_level(entity_id: str) -> int | None:
         val = sensor.get("state", "")
         if val not in ("unknown", "unavailable", ""):
             return int(float(val))
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug(
+            "Battery sensor lookup failed for %s: %s", sensor_id, exc
+        )
 
     return None
 
@@ -239,7 +253,4 @@ async def verify_generic(entity_id: str) -> str:
         )
         return f"{fn}: {state.get('state', 'unknown')}"
     except Exception:
-        return (
-            f"{friendly_name(entity_id)}: "
-            "(state unconfirmed)"
-        )
+        return f"{friendly_name(entity_id)}: (state unconfirmed)"

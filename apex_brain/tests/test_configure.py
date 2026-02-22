@@ -440,7 +440,8 @@ class TestRemoveHandler:
 
 class TestListStaleHandler:
     @pytest.mark.asyncio
-    async def test_list_stale_returns_count(self):
+    async def test_list_stale_finds_unavailable(self):
+        """Entities in unavailable state are reported as stale."""
         entities = [
             {
                 "entity_id": "sensor.test",
@@ -453,16 +454,27 @@ class TestListStaleHandler:
                 "disabled_by": None,
             },
         ]
+        states = [
+            {"entity_id": "sensor.test", "state": "unavailable"},
+            {"entity_id": "light.old", "state": "on"},
+        ]
         with patch(
             "tools.configure.ws_command",
             new_callable=AsyncMock,
             return_value=entities,
+        ), patch(
+            "tools.ha_helpers.ha_request",
+            new_callable=AsyncMock,
+            return_value=states,
         ):
             result = await _handle_list_stale("", {})
-            assert "2 entries" in result
+            assert "1 stale" in result
+            assert "sensor.test" in result
+            assert "light.old" not in result
 
     @pytest.mark.asyncio
     async def test_list_stale_skips_disabled(self):
+        """Disabled entities are excluded from stale check."""
         entities = [
             {
                 "entity_id": "sensor.test",
@@ -476,7 +488,19 @@ class TestListStaleHandler:
             return_value=entities,
         ):
             result = await _handle_list_stale("", {})
-            assert "No stale" in result
+            # All entities disabled → no active entities
+            assert "No active" in result
+
+    @pytest.mark.asyncio
+    async def test_list_stale_no_active_entities(self):
+        """Empty registry returns appropriate message."""
+        with patch(
+            "tools.configure.ws_command",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
+            result = await _handle_list_stale("", {})
+            assert "No active" in result
 
 
 # ── Error handling ───────────────────────────────────
@@ -582,7 +606,7 @@ class TestConfigureAuditLogging:
             )
             mock_store.log.assert_called_once()
             kw = mock_store.log.call_args.kwargs
-            assert kw["result"] == "confirmed"
+            assert kw["result"] == "confirmation_prompted"
         finally:
             set_audit_store(None)
 

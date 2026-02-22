@@ -49,6 +49,29 @@ from tools import discover_tools  # noqa: E402
 from tools.base import TOOL_REGISTRY  # noqa: E402
 
 
+def skip_on_llm_error(response: str) -> None:
+    """Skip a live test if the LLM returned an API error.
+
+    Live tests depend on a working LLM API.  When the API
+    key has exhausted its quota or is unreachable, the
+    conversation pipeline returns an error string.  Rather
+    than failing the assertion, we skip the test so the
+    rest of the suite can continue.
+    """
+    _error_markers = (
+        "Error reaching AI:",
+        "RateLimitError",
+        "RESOURCE_EXHAUSTED",
+        "quota",
+        "429",
+    )
+    if any(m in response for m in _error_markers):
+        pytest.skip(
+            "LLM API unavailable (rate limit / quota): "
+            + response[:120]
+        )
+
+
 # ---------------------------------------------------------------------------
 # Session-scoped: check HA connectivity once
 # ---------------------------------------------------------------------------

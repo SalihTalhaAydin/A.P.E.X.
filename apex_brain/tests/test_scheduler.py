@@ -185,7 +185,9 @@ class TestTimedBriefing:
             mock_conversation.handle.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_briefing_fires_only_once_per_day(self, scheduler, mock_conversation):
+    async def test_briefing_fires_only_once_per_day(
+        self, scheduler, mock_conversation, mock_knowledge_store
+    ):
         with patch("brain.scheduler.datetime") as mock_dt:
             mock_now = MagicMock()
             mock_now.hour = 7
@@ -199,3 +201,8 @@ class TestTimedBriefing:
             await scheduler._timed_briefing(7, "test_briefing", "msg")
             # Only fires once
             assert mock_conversation.handle.await_count == 1
+
+            # Advance to next day — should fire again
+            mock_now.strftime.return_value = "2025-02-21"
+            await scheduler._timed_briefing(7, "test_briefing", "msg")
+            assert mock_conversation.handle.await_count == 2
