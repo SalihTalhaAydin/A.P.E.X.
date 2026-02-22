@@ -158,12 +158,56 @@ _DISCOVERY_DOMAINS: tuple = (
 )
 
 
+def _entity_area_lookup_placeholder(entity_ids: list[str]) -> str:
+    """Build Jinja2 template to get area_id for each entity.
+
+    Returns template string; call via POST /template.
+    """
+    import json
+
+    ids_json = json.dumps(entity_ids)
+    return (
+        "{% for eid in " + ids_json + " %}"
+        "{{ eid }}|{{ area_id(eid) or '' }}\n"
+        "{% endfor %}"
+    )
+
+
+async def _fetch_area_ids(entity_ids: list[str]) -> dict[str, str]:
+    """Fetch area_id for each entity via HA template API.
+
+    Returns dict mapping entity_id -> area_id (empty string if no area).
+    """
+    if not entity_ids:
+        return {}
+    try:
+        template = _entity_area_lookup_placeholder(entity_ids)
+        raw = await ha_request(
+            "POST",
+            "/template",
+            json_data={"template": template},
+        )
+        if not isinstance(raw, str):
+            return {}
+        result: dict[str, str] = {}
+        for line in raw.strip().split("\n"):
+            line = line.strip()
+            if "|" in line:
+                eid, aid = line.split("|", 1)
+                result[eid.strip()] = (aid or "").strip()
+        return result
+    except Exception as exc:
+        logger.debug("Area lookup template failed: %s", exc)
+        return {}
+
+
 async def get_device_summary() -> str:
     """Fetch key device entities from HA for the system prompt.
 
     Returns a short summary string the AI can reference
-    to know exact entity IDs and friendly names.  Called once
-    per conversation turn by the context builder.
+    to know exact entity IDs, friendly names, and area_id.
+    Area info helps the model map "basement" / "kitchen" to
+    correct area_id for do() targets.
     """
     try:
         states = await ha_request("GET", "/states")
@@ -171,7 +215,10 @@ async def get_device_summary() -> str:
         logger.debug("Device summary fetch failed: %s", exc)
         return ""
 
-    sections: list[str] = []
+    # Collect all entity IDs we will show; sections_data = (header, state dicts)
+    all_shown_ids: list[str] = []
+    sections_data: list[tuple[str, list[dict]]] = []
+
     for entry in _DISCOVERY_DOMAINS:
         if isinstance(entry, tuple):
             domain, cap = entry
@@ -195,6 +242,15 @@ async def get_device_summary() -> str:
             shown = entities
             header = f"## {domain.replace('_', ' ').title()}:"
 
+        all_shown_ids.extend(s["entity_id"] for s in shown)
+        sections_data.append((header, shown))
+
+    # Fetch area_id for each entity (single template call)
+    area_map = await _fetch_area_ids(all_shown_ids)
+
+    # Build output with area_id in each line when available
+    sections: list[str] = []
+    for header, shown in sections_data:
         lines: list[str] = []
         for s in shown:
             eid = s["entity_id"]
@@ -202,8 +258,11 @@ async def get_device_summary() -> str:
                 "friendly_name", friendly_name(eid)
             )
             st = s.get("state", "unknown")
-            lines.append(f"  - {fn} ({eid}): {st}")
-
+            aid = area_map.get(eid, "")
+            if aid:
+                lines.append(f"  - {fn} ({eid}) [area: {aid}]: {st}")
+            else:
+                lines.append(f"  - {fn} ({eid}): {st}")
         sections.append(header + "\n" + "\n".join(lines))
 
     return "\n".join(sections)

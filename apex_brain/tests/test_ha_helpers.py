@@ -346,3 +346,35 @@ async def test_get_device_summary_returns_empty_on_error():
         result = await get_device_summary()
 
     assert result == ""
+
+
+@pytest.mark.asyncio
+async def test_get_device_summary_includes_area_when_available():
+    """When area lookup succeeds, entity lines show [area: area_id]."""
+    from tools.ha_helpers import get_device_summary
+
+    states = [
+        _make_state("light.basement_ceiling", "on", "Basement Ceiling"),
+        _make_state("light.kitchen_overhead", "off", "Kitchen Light"),
+    ]
+    # Template returns entity_id|area_id per line
+    area_response = "light.basement_ceiling|basement\nlight.kitchen_overhead|kitchen\n"
+
+    async def mock_ha_request(method, path, json_data=None, **kwargs):
+        if method == "GET" and path == "/states":
+            return states
+        if method == "POST" and path == "/template":
+            return area_response
+        return []
+
+    with patch(
+        "tools.ha_helpers.ha_request",
+        new_callable=AsyncMock,
+        side_effect=mock_ha_request,
+    ):
+        result = await get_device_summary()
+
+    assert "light.basement_ceiling" in result
+    assert "[area: basement]" in result
+    assert "light.kitchen_overhead" in result
+    assert "[area: kitchen]" in result

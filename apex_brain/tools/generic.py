@@ -663,6 +663,23 @@ async def do(
         if data:
             payload.update(data)
 
+        # Extract targets for logging and verification
+        entity_id = ""
+        area_id = ""
+        floor_id = ""
+        if targets:
+            entity_id = targets.get("entity_id", "")
+            area_id = targets.get("area_id", "")
+            floor_id = targets.get("floor_id", "")
+        # Log area/floor targeting for diagnostics (basement-lights-type issues)
+        if area_id or floor_id:
+            logger.info(
+                "do() area/floor target: domain=%s service=%s area_id=%s floor_id=%s",
+                domain,
+                service,
+                area_id or "(none)",
+                floor_id or "(none)",
+            )
         # Make the service call
         await ha_request(
             "POST",
@@ -674,13 +691,6 @@ async def do(
         await asyncio.sleep(0.5)
 
         # Verify by reading back entity state
-        entity_id = ""
-        area_id = ""
-        floor_id = ""
-        if targets:
-            entity_id = targets.get("entity_id", "")
-            area_id = targets.get("area_id", "")
-            floor_id = targets.get("floor_id", "")
         if entity_id:
             status = await verify_generic(entity_id)
             return f"Done. {status}"
@@ -772,11 +782,18 @@ async def _verify_area_or_floor(
             if ln.strip() and "|" in ln
         ]
         if not lines:
-            return (
+            msg = (
                 f"Done. Called {domain}.{service} "
                 f"on {label} (no {domain} entities "
                 f"found in this area)."
             )
+            logger.info(
+                "do() area/floor verify: NO ENTITIES - %s (area_id=%s floor_id=%s)",
+                msg,
+                area_id or "(none)",
+                floor_id or "(none)",
+            )
+            return msg
 
         parts = []
         for line in lines:

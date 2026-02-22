@@ -737,6 +737,82 @@ class TestConfabulationGuard:
         assert result == "There — basement is off."
         assert mock_litellm.acompletion.await_count == 3
 
+    @pytest.mark.asyncio
+    async def test_discover_only_unmet_action(self, conv):
+        """User wants action, model calls discover() but not do(), then
+        claims success — nudge required (discover is not an action tool).
+        """
+        discover_tc = _make_tool_call(
+            "discover", {"what": "areas", "filter": "basement"}, call_id="tc_1"
+        )
+        discover_resp = _make_llm_response(content=None, tool_calls=[discover_tc])
+        confab_resp = _make_llm_response("All basement lights have been turned off.")
+        do_tc = _make_tool_call(
+            "do",
+            {"domain": "light", "service": "turn_off", "targets": {"area_id": "basement"}},
+            call_id="tc_2",
+        )
+        do_resp = _make_llm_response(content=None, tool_calls=[do_tc])
+        final_resp = _make_llm_response("Done — basement lights off.")
+
+        async def mock_exec(name, args):
+            if name == "discover":
+                return "  - Basement (basement)"
+            return "Done. Basement Light: off"
+
+        with patch("brain.conversation.litellm") as mock_litellm, \
+             patch("brain.conversation.execute_tool", new_callable=AsyncMock) as mock_exec_fn:
+            mock_exec_fn.side_effect = mock_exec
+            mock_litellm.acompletion = AsyncMock(
+                side_effect=[discover_resp, confab_resp, do_resp, final_resp]
+            )
+            messages = [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "turn off the basement lights"},
+            ]
+            result = await conv._ai_tool_loop(
+                messages, tool_defs=[{"type": "function"}]
+            )
+
+        assert result == "Done — basement lights off."
+        # Nudge fired: discover-only is not an action tool
+        assert mock_litellm.acompletion.await_count == 4
+
+    @pytest.mark.asyncio
+    async def test_tool_failed_but_claimed_success(self, conv):
+        """do() returns 'no entities found', model claims success — nudge."""
+        do_tc = _make_tool_call(
+            "do",
+            {"domain": "light", "service": "turn_off", "targets": {"area_id": "basement"}},
+            call_id="tc_1",
+        )
+        tool_resp = _make_llm_response(content=None, tool_calls=[do_tc])
+        confab_resp = _make_llm_response("All basement lights have been turned off.")
+        honest_resp = _make_llm_response(
+            "No lights are assigned to the basement area. "
+            "Assign them in Settings → Areas."
+        )
+
+        with patch("brain.conversation.litellm") as mock_litellm, \
+             patch("brain.conversation.execute_tool", new_callable=AsyncMock) as mock_exec:
+            mock_exec.return_value = (
+                "Done. Called light.turn_off on basement "
+                "(no light entities found in this area)."
+            )
+            mock_litellm.acompletion = AsyncMock(
+                side_effect=[tool_resp, confab_resp, honest_resp]
+            )
+            messages = [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "turn off the basement lights"},
+            ]
+            result = await conv._ai_tool_loop(
+                messages, tool_defs=[{"type": "function"}]
+            )
+
+        assert "No lights are assigned" in result or "basement area" in result
+        assert mock_litellm.acompletion.await_count == 3
+
 
 # ===================================================================
 # Explainability helpers

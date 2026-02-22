@@ -90,11 +90,62 @@ _CORRECTION_RE = re.compile(
 )
 
 
+# Tools that actually perform device/HA actions (vs discovery/query)
+_ACTION_TOOLS = frozenset(
+    {
+        "do",
+        "control_area",
+        "control_light",
+        "control_climate",
+        "control_media",
+        "control_cover",
+        "control_fan",
+        "control_lock",
+        "control_switch",
+        "control_alarm",
+        "call_service",
+        "activate_scene",
+        "trigger_automation",
+        "execute_script",
+        "set_input_helper",
+    }
+)
+
+# Tool result phrases that indicate the action did NOT succeed
+_TOOL_FAILURE_PHRASES = (
+    "no ",
+    "entities found",
+    "no entities",
+    "not found",
+    "error:",
+    "entity not found",
+    "could not",
+    "cannot ",
+    "failed",
+)
+
+
 def _looks_like_device_action_claim(content: str) -> bool:
     """Check if text claims a device action was performed."""
     if not content or not isinstance(content, str):
         return False
     return bool(_CONFAB_CLAIM_RE.search(content))
+
+
+def _tool_result_indicates_failure(result: str) -> bool:
+    """Check if a tool result indicates the action did not succeed."""
+    if not result or not isinstance(result, str):
+        return False
+    lower = result.lower()
+    return any(phrase in lower for phrase in _TOOL_FAILURE_PHRASES)
+
+
+def _last_tool_result(messages: list[dict]) -> str:
+    """Return the content of the most recent tool result message."""
+    for m in reversed(messages):
+        if m.get("role") == "tool":
+            return m.get("content", "") or ""
+    return ""
 
 
 def _user_expects_action(content: str) -> bool:
@@ -288,13 +339,29 @@ class Conversation:
                 # Detect confabulation: AI claims action or user
                 # expects action, but no tools were called yet.
                 # If tools HAVE been called, the AI is just
-                # summarising — not confabulating.
+                # summarising — not confabulating (unless tool failed).
+                last_result = _last_tool_result(messages)
                 if not tools_called:
                     is_confab = _looks_like_device_action_claim(text)
                     unmet_action = user_wants_action
                 else:
                     is_confab = False
                     unmet_action = False
+                    # User wanted action but only non-action tools
+                    # (e.g. discover) were called — still unmet
+                    if user_wants_action and not any(
+                        t in _ACTION_TOOLS for t in tools_called
+                    ):
+                        unmet_action = True
+                    # Tool reported failure but AI claims success
+                    if (
+                        _tool_result_indicates_failure(last_result)
+                        and _looks_like_device_action_claim(text)
+                    ):
+                        is_confab = True
+                        logger.warning(
+                            "Tool reported failure but AI claimed success."
+                        )
 
                 if is_confab:
                     logger.warning(
@@ -304,7 +371,7 @@ class Conversation:
                 if unmet_action:
                     logger.warning(
                         "User expects device action but no "
-                        "tools were called."
+                        "action tools were called."
                     )
 
                 if (
@@ -314,16 +381,23 @@ class Conversation:
                 ):
                     nudge_count += 1
                     messages.append(msg.model_dump())
+                    nudge_content = (
+                        "The tool reported no entities found or an error. "
+                        "You must NOT claim success. Tell the user what "
+                        "actually happened."
+                        if is_confab and last_result
+                        else (
+                            "You MUST call a tool to perform "
+                            "the action — do not describe or "
+                            "claim it; actually call 'do', "
+                            "'control_area', or the appropriate "
+                            "tool right now."
+                        )
+                    )
                     messages.append(
                         {
                             "role": "user",
-                            "content": (
-                                "You MUST call a tool to perform "
-                                "the action — do not describe or "
-                                "claim it; actually call 'do', "
-                                "'control_area', or the appropriate "
-                                "tool right now."
-                            ),
+                            "content": nudge_content,
                         },
                     )
                     continue
@@ -381,10 +455,12 @@ class Conversation:
                     )
                 else:
                     result = f"Unknown tool: {fn_name}"
-                logger.debug(
+                # INFO for diagnostics: tool results must be visible when debugging
+                # "turn off X" claims-success-but-nothing-happened issues
+                logger.info(
                     "Tool result: %s -> %s",
                     fn_name,
-                    str(result)[:300],
+                    str(result)[:500],
                 )
 
                 # Track for explainability
