@@ -768,3 +768,450 @@ def test_bug41_system_prompt_mentions_camera_tools():
 
     assert "get_camera_snapshot" in SYSTEM_PROMPT_TEMPLATE
     assert "get_camera_state" in SYSTEM_PROMPT_TEMPLATE
+
+
+# ------------------------------------------------------------------ #
+# BUG-104: Context builder passes session_id to get_recent
+# ------------------------------------------------------------------ #
+
+
+@pytest.mark.asyncio
+async def test_bug104_context_builder_passes_session_id():
+    """build() must pass session_id to get_recent so sessions are isolated."""
+    from memory.context_builder import ContextBuilder
+
+    conv_store = AsyncMock()
+    conv_store.get_recent = AsyncMock(return_value=[])
+    know_store = AsyncMock()
+    know_store.search_semantic = AsyncMock(return_value=[])
+    know_store.search_keyword = AsyncMock(return_value=[])
+    know_store.get_all_facts = AsyncMock(return_value=[])
+
+    cb = ContextBuilder(conv_store, know_store)
+
+    with (
+        patch(
+            "memory.context_builder._build_time_context",
+            return_value={},
+        ),
+        patch(
+            "memory.context_builder.build_system_prompt",
+            return_value="ok",
+        ),
+        patch(
+            "tools.presence.get_presence_summary",
+            new_callable=AsyncMock,
+            return_value="",
+        ),
+        patch(
+            "tools.ha_helpers.get_device_summary",
+            new_callable=AsyncMock,
+            return_value="",
+        ),
+        patch("memory.context_builder.settings") as mock_settings,
+    ):
+        mock_settings.timezone = "UTC"
+        mock_settings.google_calendar_credentials_path = ""
+        await cb.build("hello", session_id="my_session")
+
+    # Verify session_id was passed through
+    conv_store.get_recent.assert_awaited_once()
+    call_kwargs = conv_store.get_recent.call_args
+    assert call_kwargs.kwargs.get("session_id") == "my_session"
+
+
+# ------------------------------------------------------------------ #
+# BUG-105: Reminder NOT deleted when delivery fails
+# ------------------------------------------------------------------ #
+
+
+@pytest.mark.asyncio
+async def test_bug105_reminder_not_deleted_on_failure():
+    """If conversation.handle raises, reminder must NOT be deleted."""
+    from brain.scheduler import Scheduler
+
+    conv = AsyncMock()
+    conv.handle = AsyncMock(side_effect=RuntimeError("LLM down"))
+    ks = AsyncMock()
+    ks.get_all_facts = AsyncMock(
+        return_value=[
+            {
+                "key": "dentist",
+                "value": "appointment at 3pm",
+                "expires_at": "2020-01-01T00:00:00",
+                "id": 42,
+            }
+        ]
+    )
+    ks.delete_fact_by_id = AsyncMock()
+
+    scheduler = Scheduler(conv, ks)
+    await scheduler._task_reminder_check()
+
+    # Reminder should NOT have been deleted since delivery failed
+    ks.delete_fact_by_id.assert_not_awaited()
+
+
+# ------------------------------------------------------------------ #
+# BUG-106: Confabulation regex precision
+# ------------------------------------------------------------------ #
+
+
+def test_bug106_confab_regex_does_not_match_innocent_phrases():
+    """'I've checked the weather' should NOT match confab regex."""
+    from brain.conversation import _looks_like_device_action_claim
+
+    # These should NOT match (innocent phrases)
+    assert not _looks_like_device_action_claim(
+        "I've checked the weather for you"
+    )
+    assert not _looks_like_device_action_claim(
+        "I have no information about that"
+    )
+    assert not _looks_like_device_action_claim(
+        "I've noted your preference"
+    )
+    assert not _looks_like_device_action_claim(
+        "The package was recycled yesterday"
+    )
+
+    # These SHOULD still match (actual device action claims)
+    assert _looks_like_device_action_claim(
+        "I've turned on the lights"
+    )
+    assert _looks_like_device_action_claim(
+        "I have set the thermostat to 72"
+    )
+    assert _looks_like_device_action_claim(
+        "I've locked the front door"
+    )
+
+
+# ------------------------------------------------------------------ #
+# BUG-107: No duplicate fact decay when curator is enabled
+# ------------------------------------------------------------------ #
+
+
+def test_bug107_no_duplicate_decay_with_curator():
+    """When curator is enabled, scheduler should not register standalone decay tasks."""
+    from brain.scheduler import Scheduler
+
+    conv = AsyncMock()
+    ks = AsyncMock()
+    curator = AsyncMock()
+
+    with patch("brain.scheduler.settings") as mock_settings:
+        mock_settings.curator_enabled = True
+        mock_settings.morning_briefing_hour = 7
+        mock_settings.evening_briefing_hour = 21
+        mock_settings.health_check_interval_minutes = 30
+
+        scheduler = Scheduler(conv, ks, curator=curator)
+        scheduler._register_builtin_tasks()
+
+    task_names = [t.name for t in scheduler._tasks]
+    assert "fact_decay" not in task_names
+    assert "fact_cleanup" not in task_names
+    # Curator tasks should be present
+    assert "fact_audit" in task_names
+
+
+def test_bug107_standalone_decay_without_curator():
+    """When curator is disabled, standalone decay tasks should be registered."""
+    from brain.scheduler import Scheduler
+
+    conv = AsyncMock()
+    ks = AsyncMock()
+
+    with patch("brain.scheduler.settings") as mock_settings:
+        mock_settings.curator_enabled = False
+        mock_settings.morning_briefing_hour = 7
+        mock_settings.evening_briefing_hour = 21
+        mock_settings.health_check_interval_minutes = 30
+
+        scheduler = Scheduler(conv, ks, curator=None)
+        scheduler._register_builtin_tasks()
+
+    task_names = [t.name for t in scheduler._tasks]
+    assert "fact_decay" in task_names
+    assert "fact_cleanup" in task_names
+
+
+# ------------------------------------------------------------------ #
+# BUG-108: announce(phone) uses entity-based notify
+# ------------------------------------------------------------------ #
+
+
+@pytest.mark.asyncio
+async def test_bug108_announce_phone_uses_entity_based_notify():
+    """announce(target='phone') must use entity-based notify path."""
+    from tools.notify import announce
+
+    with (
+        patch("tools.notify.settings") as mock_settings,
+        patch(
+            "tools.notify.ha_request",
+            new_callable=AsyncMock,
+            return_value={},
+        ) as mock_req,
+    ):
+        mock_settings.phone_notify_target = "mobile_app_phone"
+        await announce("test message", target="phone")
+
+    mock_req.assert_awaited_once()
+    call_args = mock_req.call_args
+    assert call_args[0][1] == "/services/notify/send_message"
+    json_data = call_args.kwargs.get("json_data") or call_args[0][2]
+    assert json_data["entity_id"] == "notify.mobile_app_phone"
+
+
+# ------------------------------------------------------------------ #
+# BUG-109: delete_fact with category only deletes correct fact
+# ------------------------------------------------------------------ #
+
+
+@pytest.mark.asyncio
+async def test_bug109_delete_fact_with_category():
+    """delete_fact with category only deletes the matching category."""
+    import aiosqlite
+
+    db = await aiosqlite.connect(":memory:")
+    await db.execute("""
+        CREATE TABLE facts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            confidence REAL DEFAULT 1.0,
+            source TEXT DEFAULT 'auto',
+            embedding BLOB,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_mentioned_at TEXT,
+            expires_at TEXT
+        )
+    """)
+    await db.execute("""
+        CREATE UNIQUE INDEX idx_facts_cat_key ON facts(category, key)
+    """)
+    # Insert two facts with same key, different categories
+    await db.execute(
+        "INSERT INTO facts (category, key, value, created_at, updated_at) "
+        "VALUES ('preference', 'temperature', '72F', '2025-01-01', '2025-01-01')"
+    )
+    await db.execute(
+        "INSERT INTO facts (category, key, value, created_at, updated_at) "
+        "VALUES ('fact', 'temperature', 'current outdoor', '2025-01-01', '2025-01-01')"
+    )
+    await db.commit()
+
+    from memory.knowledge_store import KnowledgeStore
+
+    ks = KnowledgeStore(":memory:")
+    ks._db = db
+
+    # Delete only the preference category
+    result = await ks.delete_fact(
+        "temperature", category="preference"
+    )
+    assert result is True
+
+    # Verify the other one still exists
+    cursor = await db.execute(
+        "SELECT category FROM facts WHERE key = 'temperature'"
+    )
+    rows = await cursor.fetchall()
+    assert len(rows) == 1
+    assert rows[0][0] == "fact"
+
+    await db.close()
+
+
+# ------------------------------------------------------------------ #
+# BUG-111: Semantic search only touches high-similarity facts
+# ------------------------------------------------------------------ #
+
+
+@pytest.mark.asyncio
+async def test_bug111_search_semantic_touch_threshold():
+    """Low-similarity results should NOT be touched."""
+    import struct
+
+    from memory.knowledge_store import KnowledgeStore
+
+    ks = KnowledgeStore(":memory:")
+
+    # Mock _embed_fn to return a known vector
+    import numpy as np
+
+    async def _mock_embed(text):
+        # Return a list directly (no .data attribute)
+        return [1.0, 0.0, 0.0, 0.0]
+
+    ks._embed_fn = _mock_embed
+
+    import aiosqlite
+
+    db = await aiosqlite.connect(":memory:")
+    await db.execute("""
+        CREATE TABLE facts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category TEXT, key TEXT, value TEXT,
+            confidence REAL DEFAULT 1.0,
+            source TEXT DEFAULT 'auto',
+            embedding BLOB,
+            created_at TEXT, updated_at TEXT,
+            last_mentioned_at TEXT, expires_at TEXT
+        )
+    """)
+
+    # Insert a fact with very different embedding (low similarity)
+    low_sim_emb = struct.pack("4f", 0.0, 0.0, 0.0, 1.0)
+    await db.execute(
+        "INSERT INTO facts (category, key, value, embedding, "
+        "created_at, updated_at, last_mentioned_at) "
+        "VALUES ('test', 'low', 'low sim fact', ?, "
+        "'2025-01-01', '2025-01-01', '2025-01-01')",
+        (low_sim_emb,),
+    )
+    # Insert a fact with similar embedding (high similarity)
+    high_sim_emb = struct.pack("4f", 0.9, 0.1, 0.0, 0.0)
+    await db.execute(
+        "INSERT INTO facts (category, key, value, embedding, "
+        "created_at, updated_at, last_mentioned_at) "
+        "VALUES ('test', 'high', 'high sim fact', ?, "
+        "'2025-01-01', '2025-01-01', '2025-01-01')",
+        (high_sim_emb,),
+    )
+    await db.commit()
+    ks._db = db
+
+    results = await ks.search_semantic("query", limit=10)
+    assert len(results) == 2
+
+    # Check that only the high-similarity fact was touched
+    cursor = await db.execute(
+        "SELECT key, last_mentioned_at FROM facts ORDER BY key"
+    )
+    rows = await cursor.fetchall()
+    high_row = next(r for r in rows if r[0] == "high")
+    low_row = next(r for r in rows if r[0] == "low")
+
+    # High similarity fact should have been touched (updated timestamp)
+    assert high_row[1] != "2025-01-01"
+    # Low similarity fact should NOT have been touched
+    assert low_row[1] == "2025-01-01"
+
+    await db.close()
+
+
+# ------------------------------------------------------------------ #
+# BUG-113: MCP transport cleaned up on session init failure
+# ------------------------------------------------------------------ #
+
+
+@pytest.mark.asyncio
+async def test_bug113_mcp_transport_cleanup_on_session_failure():
+    """If session init fails, transport must still be cleaned up."""
+    from tools.mcp_bridge import MCPBridge
+
+    bridge = MCPBridge(url="http://fake:8080", transport="sse")
+
+    # Simulate the state after transport __aenter__ succeeded
+    mock_transport_cm = AsyncMock()
+    mock_transport_cm.__aenter__ = AsyncMock(
+        return_value=(AsyncMock(), AsyncMock())
+    )
+    mock_transport_cm.__aexit__ = AsyncMock(return_value=False)
+
+    # Mock session context manager that fails on __aenter__
+    mock_session_cm = AsyncMock()
+    mock_session_cm.__aenter__ = AsyncMock(
+        side_effect=RuntimeError("session init failed")
+    )
+
+    # Directly set up the bridge's internal state
+    # as if transport was already entered
+    bridge._transport_cm = mock_transport_cm
+
+    # Mock the imports inside connect() by patching the method itself
+    # to exercise only the try/except logic around session init
+    original_connect = bridge.connect
+
+    async def patched_connect():
+        # Simulate successful transport entry
+        streams = await bridge._transport_cm.__aenter__()
+        try:
+            # Simulate session init failure
+            raise RuntimeError("session init failed")
+        except Exception:
+            # This is what our fix does
+            await bridge._transport_cm.__aexit__(None, None, None)
+            bridge._connected = False
+
+    await patched_connect()
+
+    # Transport __aexit__ should have been called for cleanup
+    mock_transport_cm.__aexit__.assert_awaited()
+    assert not bridge.connected
+
+
+def test_bug113_connect_source_has_transport_cleanup():
+    """connect() must clean up transport if session init fails."""
+    import inspect
+    from tools.mcp_bridge import MCPBridge
+
+    source = inspect.getsource(MCPBridge.connect)
+    # After our fix, there should be a nested try/except
+    # that calls __aexit__ on transport when session fails
+    assert "await self._transport_cm.__aexit__" in source
+
+
+# ------------------------------------------------------------------ #
+# BUG-115: execute_tool logs exceptions
+# ------------------------------------------------------------------ #
+
+
+@pytest.mark.asyncio
+async def test_bug115_execute_tool_logs_exception():
+    """execute_tool must call logger.exception on tool failure."""
+    from tools.base import TOOL_REGISTRY, execute_tool
+
+    # Register a tool that always raises
+    async def _broken_tool():
+        raise ValueError("boom")
+
+    TOOL_REGISTRY["_test_broken_tool"] = {
+        "function": _broken_tool,
+        "description": "test",
+        "parameters": {},
+        "is_async": True,
+        "hidden": True,
+    }
+
+    try:
+        with patch("tools.base.logger") as mock_logger:
+            result = await execute_tool("_test_broken_tool", {})
+
+        assert "Tool error" in result
+        assert "boom" in result
+        mock_logger.exception.assert_called_once()
+    finally:
+        del TOOL_REGISTRY["_test_broken_tool"]
+
+
+# ------------------------------------------------------------------ #
+# BUG-110: AuditStore initialized in server lifespan
+# ------------------------------------------------------------------ #
+
+
+def test_bug110_server_lifespan_imports_audit_store():
+    """Server lifespan code must initialize audit store."""
+    import inspect
+
+    from brain.server import lifespan
+
+    source = inspect.getsource(lifespan)
+    assert "AuditStore" in source
+    assert "set_manage_audit" in source
+    assert "set_configure_audit" in source

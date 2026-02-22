@@ -35,7 +35,9 @@ class ContextBuilder:
         self.recent_turns_count = recent_turns_count
         self.max_facts = max_facts
 
-    async def build(self, user_message: str) -> str:
+    async def build(
+        self, user_message: str, session_id: str = "default"
+    ) -> str:
         """Build a full system prompt with all context.
 
         Returns the complete system prompt string.
@@ -54,7 +56,8 @@ class ContextBuilder:
 
         # 2. Recent conversation turns (for continuity)
         recent_turns = await self.conversation_store.get_recent(
-            n=self.recent_turns_count
+            n=self.recent_turns_count,
+            session_id=session_id,
         )
 
         # 3. Semantically relevant facts

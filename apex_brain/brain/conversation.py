@@ -45,10 +45,13 @@ _CONFAB_CLAIM_RE = re.compile(
     r"(?:it\s+is|it's|that's|all)\s+done|"
     r"taken\s+care\s+of|all\s+set|"
     r"that\s+should\s+have|corrected\s+the|"
-    # First-person past claims ("I've …", "I have …")
-    r"i've\s+|i\s+have\s+|"
+    # First-person past claims ("I've turned…", "I have set…")
+    r"i've\s+(?:turned|set|locked|unlocked|opened|closed|"
+    r"adjusted|activated|dimmed|toggled|armed|disarmed)|"
+    r"i\s+have\s+(?:turned|set|locked|unlocked|opened|closed|"
+    r"adjusted|activated|dimmed|toggled|armed|disarmed)|"
     # Specific device action verbs
-    r"cycled|adjusted\s+the|dimmed\s+the|brightened\s+the|"
+    r"\bcycled\b|adjusted\s+the|dimmed\s+the|brightened\s+the|"
     r"activated\s+the|deactivated\s+the|"
     r"locked\s+the|unlocked\s+the|"
     r"opened\s+the|closed\s+the|"
@@ -148,9 +151,19 @@ def _last_tool_result(messages: list[dict]) -> str:
     return ""
 
 
+_INFO_QUESTION_RE = re.compile(
+    r"^\s*(?:when|what\s+time|how\s+long|how\s+often|how\s+many"
+    r"|was\s+the|were\s+the|is\s+the|are\s+the)\b",
+    re.IGNORECASE,
+)
+
+
 def _user_expects_action(content: str) -> bool:
     """Check if user message requests an action or corrects a failed one."""
     if not content or not isinstance(content, str):
+        return False
+    # Informational questions about state/history are not action requests
+    if _INFO_QUESTION_RE.search(content):
         return False
     return bool(
         _ACTION_REQUEST_RE.search(content)
@@ -202,7 +215,9 @@ class Conversation:
         )
 
         # 2. Build rich context (recent history + relevant facts + time)
-        system_prompt = await self.context_builder.build(user_message)
+        system_prompt = await self.context_builder.build(
+            user_message, session_id=session_id
+        )
 
         # 2.5. Inject last action trace for explainability
         last_trace = self._action_traces.get(session_id, "")

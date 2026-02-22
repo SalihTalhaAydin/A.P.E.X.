@@ -507,18 +507,31 @@ class KnowledgeStore:
                     }
                 )
 
-            # Batch-touch returned facts so they
-            # don't decay while still relevant
+            # Batch-touch only facts above a minimum
+            # similarity threshold to prevent irrelevant
+            # facts from being kept alive indefinitely.
+            _MIN_TOUCH_SIMILARITY = 0.4
             if results:
-                ids = [r["id"] for r in results]
-                placeholders = ",".join("?" * len(ids))
-                touch_now = datetime.now(timezone.utc).isoformat()
-                await self._db.execute(
-                    f"UPDATE facts SET last_mentioned_at = ? "
-                    f"WHERE id IN ({placeholders})",
-                    [touch_now] + ids,
-                )
-                await self._db.commit()
+                to_touch = [
+                    r["id"]
+                    for r in results
+                    if r.get("similarity", 0)
+                    >= _MIN_TOUCH_SIMILARITY
+                ]
+                if to_touch:
+                    placeholders = ",".join(
+                        "?" * len(to_touch)
+                    )
+                    touch_now = (
+                        datetime.now(timezone.utc).isoformat()
+                    )
+                    await self._db.execute(
+                        "UPDATE facts "
+                        "SET last_mentioned_at = ? "
+                        f"WHERE id IN ({placeholders})",
+                        [touch_now] + to_touch,
+                    )
+                    await self._db.commit()
 
             return results
 
@@ -626,22 +639,26 @@ class KnowledgeStore:
             for r in rows
         ]
 
-    async def delete_fact(self, key: str) -> bool:
-        """Delete a fact by key (exact match only)."""
-        cursor = await self._db.execute(
-            "SELECT id FROM facts WHERE key = ?",
-            (key,),
-        )
-        row = await cursor.fetchone()
-        if not row:
-            return False
+    async def delete_fact(
+        self, key: str, category: str = ""
+    ) -> bool:
+        """Delete a fact by key (exact match only).
 
-        await self._db.execute(
-            "DELETE FROM facts WHERE id = ?",
-            (row[0],),
-        )
+        If category is provided, only delete the fact
+        matching both (category, key).
+        """
+        if category:
+            cursor = await self._db.execute(
+                "DELETE FROM facts WHERE key = ? AND category = ?",
+                (key, category),
+            )
+        else:
+            cursor = await self._db.execute(
+                "DELETE FROM facts WHERE key = ?",
+                (key,),
+            )
         await self._db.commit()
-        return True
+        return cursor.rowcount > 0
 
     async def get_low_confidence_facts(
         self, threshold: float = 0.4, limit: int = 50

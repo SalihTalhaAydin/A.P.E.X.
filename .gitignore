@@ -1,5 +1,6 @@
 # Environment (plain .env is secret — .env.encrypted is safe to commit)
 .env
+.env.backup
 !.env.encrypted
 !.env.example
 *.db

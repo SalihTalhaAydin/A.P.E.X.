@@ -108,8 +108,8 @@ class TestLooksLikeDeviceActionClaim:
             "I have cycled the switch.",
             "Turned the light on for you.",
             "Turned the lamp off.",
-            "I've done it for you.",
-            "I have completed the action.",
+            "I've turned it on for you.",
+            "I have adjusted the thermostat.",
             "The system cycled the breaker.",
             # JARVIS-style phrasings (the actual bug)
             "Very well. The basement lights are now off.",
@@ -253,7 +253,9 @@ class TestHandlePipeline:
             )
             await conv.handle("Turn on lights")
 
-        conv.context_builder.build.assert_awaited_once_with("Turn on lights")
+        conv.context_builder.build.assert_awaited_once_with(
+            "Turn on lights", session_id="default"
+        )
 
     @pytest.mark.asyncio
     async def test_handle_returns_response_text(self, conv):

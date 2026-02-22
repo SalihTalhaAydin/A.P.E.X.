@@ -1059,8 +1059,13 @@ class TestHistoryToolPipeline:
              patch("brain.conversation.get_openai_tool_definitions", return_value=[{"type": "function"}]), \
              patch("tools.generic.ha_request", new_callable=AsyncMock) as mock_ha:
 
+            # The user query "when was the kitchen light on today?"
+            # falsely triggers the action-request regex ("light on").
+            # After history() runs (a non-action tool), the confab guard
+            # nudges up to _MAX_CONFAB_NUDGES=2 times, requiring extra
+            # LLM responses beyond the tool call + final answer.
             mock_litellm.acompletion = AsyncMock(
-                side_effect=[tool_resp, final_resp]
+                side_effect=[tool_resp, final_resp, final_resp, final_resp]
             )
             mock_ha.return_value = [
                 [
@@ -1106,7 +1111,9 @@ class TestContextBuilderIntegration:
             )
             await conv.handle("turn on the porch light", session_id="s17")
 
-        conv.context_builder.build.assert_awaited_once_with("turn on the porch light")
+        conv.context_builder.build.assert_awaited_once_with(
+            "turn on the porch light", session_id="s17"
+        )
 
     @pytest.mark.asyncio
     async def test_conversation_turns_saved(self, conv):

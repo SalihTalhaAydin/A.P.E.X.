@@ -120,7 +120,9 @@ async def test_build_calls_conversation_store_get_recent(builder):
 
         await builder.build("hello")
 
-    builder.conversation_store.get_recent.assert_awaited_once_with(n=10)
+    builder.conversation_store.get_recent.assert_awaited_once_with(
+        n=10, session_id="default"
+    )
 
 
 @pytest.mark.asyncio

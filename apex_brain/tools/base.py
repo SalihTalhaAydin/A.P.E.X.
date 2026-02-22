@@ -207,4 +207,9 @@ async def execute_tool(name: str, arguments: dict) -> str:
             result = func(**arguments)
         return str(result)
     except Exception as e:
+        logger.exception(
+            "Tool '%s' raised an exception with args %s",
+            name,
+            arguments,
+        )
         return f"Tool error ({name}): {e}"

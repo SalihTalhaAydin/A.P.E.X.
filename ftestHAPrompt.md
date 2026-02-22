@@ -1,0 +1,1 @@
+go and test the home assistant chat. And find all the bugs with edge cases and everything. Just do not forget to revert back home to original way once you're done. But go ahead and test everything. I need you to find every single annoying thing here. Read all the tools that I have.

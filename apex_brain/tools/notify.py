@@ -136,8 +136,13 @@ async def announce(
                 )
             await ha_request(
                 "POST",
-                f"/services/notify/{settings.phone_notify_target}",
-                json_data={"message": message},
+                "/services/notify/send_message",
+                json_data={
+                    "entity_id": (
+                        f"notify.{settings.phone_notify_target}"
+                    ),
+                    "message": message,
+                },
             )
             return f'Phone notification sent: "{message}"'
 

@@ -123,6 +123,7 @@ async def lifespan(_app: FastAPI):
     convo_store = None
     knowledge_store = None
     routine_store = None
+    audit_store = None
     mcp_bridge: MCPBridge | None = None
 
     try:
@@ -161,6 +162,19 @@ async def lifespan(_app: FastAPI):
             "  Tools loaded: %s",
             ", ".join(TOOL_REGISTRY.keys()),
         )
+
+        # Initialize audit store for manage/configure logging
+        from memory.audit_store import AuditStore
+        from tools.manage import set_audit_store as set_manage_audit
+        from tools.configure import (
+            set_audit_store as set_configure_audit,
+        )
+
+        audit_store = AuditStore(settings.db_path)
+        await audit_store.initialize()
+        set_manage_audit(audit_store)
+        set_configure_audit(audit_store)
+        logger.info("  Audit store: initialized")
 
         # Connect MCP bridge (optional)
         if settings.mcp_server_url:
@@ -243,6 +257,8 @@ async def lifespan(_app: FastAPI):
             await scheduler.stop()
         if mcp_bridge and mcp_bridge.connected:
             await mcp_bridge.disconnect()
+        if audit_store:
+            await audit_store.close()
         if routine_store:
             await routine_store.close()
         if knowledge_store:
@@ -263,6 +279,8 @@ async def lifespan(_app: FastAPI):
     from tools.ha_helpers import close_ha_client
 
     await close_ha_client()
+    if audit_store:
+        await audit_store.close()
     await routine_store.close()
     await convo_store.close()
     await knowledge_store.close()

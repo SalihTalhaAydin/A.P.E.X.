@@ -156,17 +156,19 @@ class Scheduler:
 
     def _register_builtin_tasks(self) -> None:
         """Register all built-in scheduled tasks."""
-        # Fact maintenance (direct, no LLM)
-        self.register(
-            "fact_decay",
-            self._task_fact_decay,
-            interval_seconds=86400,  # daily
-        )
-        self.register(
-            "fact_cleanup",
-            self._task_fact_cleanup,
-            interval_seconds=86400,
-        )
+        # Fact maintenance: only register standalone decay/cleanup
+        # when curator is disabled (curator.audit_facts handles both).
+        if not (self._curator and settings.curator_enabled):
+            self.register(
+                "fact_decay",
+                self._task_fact_decay,
+                interval_seconds=86400,  # daily
+            )
+            self.register(
+                "fact_cleanup",
+                self._task_fact_cleanup,
+                interval_seconds=86400,
+            )
 
         # Curator audits
         if self._curator and settings.curator_enabled:
@@ -361,16 +363,20 @@ class Scheduler:
                         msg,
                         session_id="apex_reminders",
                     )
+                    # Only delete on successful delivery
+                    fact_id = reminder.get("id")
+                    if fact_id:
+                        try:
+                            await self._knowledge_store.delete_fact_by_id(
+                                fact_id
+                            )
+                        except Exception:
+                            pass
                 except Exception as e:
-                    logger.error("Reminder '%s' failed: %s", key, e)
-                # Remove fired reminder
-                fact_id = reminder.get("id")
-                if fact_id:
-                    try:
-                        await self._knowledge_store.delete_fact_by_id(
-                            fact_id
-                        )
-                    except Exception:
-                        pass
+                    logger.error(
+                        "Reminder '%s' failed, will retry next cycle: %s",
+                        key,
+                        e,
+                    )
         except Exception as e:
             logger.debug("Reminder check: %s", e)

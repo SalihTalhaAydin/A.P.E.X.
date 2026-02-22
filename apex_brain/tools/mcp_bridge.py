@@ -82,8 +82,15 @@ class MCPBridge:
             from mcp import ClientSession
 
             self._session_cm = ClientSession(read_stream, write_stream)
-            self._session = await self._session_cm.__aenter__()
-            await self._session.initialize()
+            try:
+                self._session = await self._session_cm.__aenter__()
+                await self._session.initialize()
+            except Exception:
+                # Clean up transport if session init fails
+                await self._transport_cm.__aexit__(
+                    None, None, None
+                )
+                raise
             self._connected = True
             logger.info(
                 "MCP bridge connected to %s (%s)",

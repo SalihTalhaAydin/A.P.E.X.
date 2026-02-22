@@ -1,9 +1,10 @@
-# Apex Brain — Deep Bug Scan Report (4th Pass)
+# Sixth-Pass Deep Bug Scan — BUG-92 through BUG-125
 
-> **Date:** 2026-02-21
+> **Date:** 2026-02-22
 > **Test baseline:** 643 passed, 3 skipped, 1 warning
 > **Scan scope:** All 85 Python files across brain/, memory/, tools/, tests/
-> **Previous bugs:** BUG-1 through BUG-58 from scans 1-3 are already fixed.
+> **Previous bugs:** BUG-1–58 (Prompts 1-3, fixed), BUG-59–76 (Prompt 4, unfixed), BUG-77–91 (Prompt 5, unfixed)
+> **This report:** Deduplicated against all prior prompts. No number collisions.
 
 ---
 
@@ -16,11 +17,13 @@
 4. Do NOT modify `.env` or any credentials.
 5. Keep fixes minimal — don't refactor surrounding code.
 
+**Important:** BUG-59–91 from Prompts 4 and 5 are ALSO unfixed. Fix those first if not already done, then proceed to BUG-92+ below.
+
 ---
 
-## CRITICAL BUGS (Fix Immediately)
+## CRITICAL
 
-### BUG-59: `do()` security gate bypassable — LLM can skip confirmation for locks/alarms
+### BUG-92: `do()` security gate bypassable — LLM can skip confirmation for locks/alarms
 
 **File:** `apex_brain/tools/generic.py:637`
 
@@ -29,79 +32,52 @@
 ```python
 confirmed = bool(data and data.get("confirmed"))
 if domain in PROTECTED_DOMAINS and not confirmed:
-    # Security gate — but bypassed by passing confirmed=true on first call
+    # Security gate — bypassed by passing confirmed=true on first call
 ```
 
-**Fix:** Implement server-side confirmation tracking. On first call to a protected domain, store a pending confirmation key in `Conversation._pending_confirmations`. The second call must match. Example:
+**Not a duplicate of any prior BUG.** No prior prompt addresses the security gate bypass mechanism.
 
-```python
-# In do():
-if domain in PROTECTED_DOMAINS:
-    confirm_key = f"{domain}.{service}:{targets}"
-    if not _pending_confirmations.pop(confirm_key, False):
-        _pending_confirmations[confirm_key] = True
-        return "CONFIRMATION REQUIRED: ..."
-```
-
-Alternatively, strip `confirmed` from data completely and only honor it when `conversation._last_tool_result` for this session contained "CONFIRMATION REQUIRED" for the same domain/service.
+**Fix:** Implement server-side confirmation tracking. On first call to a protected domain, store a pending confirmation key. The second call must match that key to prove the user saw the prompt.
 
 **Test:** Call `do("lock", "unlock", targets={"entity_id": "lock.front"}, data={"confirmed": True})` without a prior prompt — should NOT execute.
 
 ---
 
-### BUG-60: `scheduler`/`event_subscriber` globals never assigned — shutdown leaks resources
-
-**File:** `apex_brain/brain/server.py:98`
-
-**Problem:** `lifespan` declares `global conversation, event_handler, startup_time` but does NOT include `scheduler` or `event_subscriber`. Lines 210 and 228 assign to local variables that shadow the module globals. Module-level globals remain `None`.
-
-Consequences:
-- Shutdown (lines 257-258) checks `if event_subscriber:` / `if scheduler:` — always `None`, so **scheduler and event_subscriber are NEVER stopped on shutdown**, leaking asyncio tasks, WebSocket connections, and background loops
-- `/health` endpoint never reports scheduler/subscriber status
-
-**Fix:** Change line 98 to:
-```python
-global conversation, event_handler, scheduler, event_subscriber, startup_time
-```
-
-**Test:** Verify that after lifespan shutdown, the module-level `scheduler` and `event_subscriber` have `.stop()` called.
-
----
-
-### BUG-61: Reminders never fire — `expires_at` missing from `get_all_facts()` result
+### BUG-93: Reminders never fire — `expires_at` missing from `get_all_facts()` result
 
 **File:** `apex_brain/brain/scheduler.py:346` + `apex_brain/memory/knowledge_store.py:596-627`
 
 **Problem:** The scheduler's reminder check filters facts by `f.get("expires_at")`, but `get_all_facts()` returns dicts with only 7 keys: `id, category, key, value, confidence, created_at, updated_at`. The `expires_at` column is NOT in the SELECT query and NOT in the dict mapping. `f.get("expires_at")` always returns `None`, the `due` list is always empty, and **no reminder ever fires**.
 
-**Fix:** Update `get_all_facts()` to include `expires_at`:
+**Not a duplicate.** BUG-44 (Prompt 3) covers failed reminder *deletion* causing infinite repeats. This bug is about reminders never being *detected* as due.
 
+**Fix:** Add `expires_at` to the SELECT and dict mapping in `get_all_facts()`:
 ```python
-# In the SELECT query, add expires_at:
 "SELECT id, category, key, value, confidence, created_at, updated_at, expires_at ..."
-
-# In the dict mapping, add:
-"expires_at": r[7],
+# Dict: "expires_at": r[7]
 ```
 
 **Test:** Store a fact with `category="reminder"` and `expires_at` in the past. Call `_task_reminder_check()` — verify the reminder fires.
 
 ---
 
-### BUG-62: `BEGIN IMMEDIATE` inside aiosqlite auto-transaction may crash
+### BUG-94: `BEGIN IMMEDIATE` inside aiosqlite auto-transaction may crash + ROLLBACK swallows original error
 
-**File:** `apex_brain/memory/knowledge_store.py:209`
+**File:** `apex_brain/memory/knowledge_store.py:209, 304-306`
 
-**Problem:** `store_fact()` executes `BEGIN IMMEDIATE` but aiosqlite uses `isolation_level=""` by default, auto-managing transactions. Calling `BEGIN IMMEDIATE` when an implicit transaction is active raises `OperationalError: cannot start a transaction within a transaction`. Additionally, the ROLLBACK on line 304 can fail and swallow the original error.
+**Problem:** Two issues in one:
+1. `store_fact()` executes `BEGIN IMMEDIATE` but aiosqlite uses `isolation_level=""` by default. Calling `BEGIN IMMEDIATE` when an implicit transaction is active raises `OperationalError: cannot start a transaction within a transaction`.
+2. The ROLLBACK at line 304 has no try/except wrapper. If ROLLBACK itself fails (disk full, connection error), the original exception is replaced by the ROLLBACK error, making debugging impossible.
 
-**Fix:** After `aiosqlite.connect()` in `initialize()`, disable auto-transactions:
+**Not a duplicate.** BUG-62 (Prompt 4) covers ws_helpers exception handlers, not knowledge_store transactions.
+
+**Fix:**
 ```python
+# In initialize():
 self._db = await aiosqlite.connect(self.db_path)
 self._db._conn.isolation_level = None  # manual transaction control
-```
 
-Also wrap ROLLBACK in try/except:
-```python
+# In store_fact() except block:
 except Exception:
     try:
         await self._db.execute("ROLLBACK")
@@ -114,48 +90,32 @@ except Exception:
 
 ---
 
-## HIGH SEVERITY BUGS
+## HIGH
 
-### BUG-63: Shutdown crashes if stores are None — no guards on `.close()` calls
+### BUG-95: `scheduler`/`event_subscriber` module globals never assigned — `/health` never reports status
 
-**File:** `apex_brain/brain/server.py:266-268`
+**File:** `apex_brain/brain/server.py:98`
 
-**Problem:** The normal shutdown path calls `await routine_store.close()`, `await convo_store.close()`, `await knowledge_store.close()` without None guards. The exception handler (lines 246-251) correctly checks `if routine_store:` etc, but the normal shutdown at lines 266-268 does not.
+**Problem:** `lifespan` declares `global conversation, event_handler, startup_time` but does NOT include `scheduler` or `event_subscriber`. Lines 210 and 228 assign to local variables that shadow the module globals. Module-level globals remain `None`.
 
-**Fix:**
+**Impact:** The `/health` endpoint (lines 419-423) checks `if scheduler:` and `if event_subscriber:` against module globals — always `None`. Health output never includes scheduler or event subscriber status. (Note: the shutdown path after `yield` uses local variables from the same scope, so shutdown itself works correctly.)
+
+**Not a duplicate of BUG-59** (Prompt 4) which covers store None guards on shutdown.
+
+**Fix:** Change line 98 to:
 ```python
-if routine_store:
-    await routine_store.close()
-if convo_store:
-    await convo_store.close()
-if knowledge_store:
-    await knowledge_store.close()
+global conversation, event_handler, scheduler, event_subscriber, startup_time
 ```
+
+**Test:** Verify `/health` returns `scheduler_running` and `event_subscriber_connected` after startup.
 
 ---
 
-### BUG-64: `configure()` missing catch-all exception — `result` undefined for unexpected errors
-
-**File:** `apex_brain/tools/configure.py:407-416`
-
-**Problem:** The try/except catches `RuntimeError`, `ConnectionError`, `PermissionError`, `TimeoutError` but NOT generic `Exception`. Any other exception type (e.g., `KeyError`, `TypeError`, `ValueError` from a handler) propagates uncaught, crashing the tool call and leaving `result` undefined for the audit log.
-
-**Fix:** Add:
-```python
-except Exception as e:
-    logger.error("Unexpected error in configure handler '%s': %s", action, e)
-    result = f"Error: {e}"
-```
-
-**Test:** Mock a handler that raises `ValueError` — verify audit log is still written and graceful error returned.
-
----
-
-### BUG-65: `entity_id` in `do()` targets can be a list, breaking verification
+### BUG-96: `entity_id` in `do()` targets can be a list, breaking verification
 
 **File:** `apex_brain/tools/generic.py:680-685`
 
-**Problem:** HA accepts `entity_id` as a string OR a list. When the LLM passes `{"entity_id": ["light.a", "light.b"]}`, the verification call `verify_generic(entity_id)` builds URL `/states/['light.a', 'light.b']` which 404s. The service call itself succeeds but the user gets a misleading error.
+**Problem:** HA accepts `entity_id` as string OR list. When the LLM passes `{"entity_id": ["light.a", "light.b"]}`, `verify_generic(entity_id)` builds URL `/states/['light.a', 'light.b']` → 404. The service call succeeds but the user gets misleading error from verification.
 
 **Fix:**
 ```python
@@ -165,279 +125,318 @@ if targets:
         entity_id = entity_id[0] if entity_id else ""
 ```
 
-**Test:** Call `do("light", "turn_on", targets={"entity_id": ["light.a", "light.b"]})` — verify no crash.
+---
+
+### BUG-97: Addon slug in `manage()` not sanitized — potential path traversal
+
+**File:** `apex_brain/tools/manage.py:289-296` (and 315, 331, 377)
+
+**Problem:** Slug from `target.split(":", 1)[1]` interpolated directly into Supervisor URL `/addons/{slug}/update`. Crafted slug like `../../core/restart` could traverse paths.
+
+**Not a duplicate of BUG-47** (Prompt 3) which covers notify target validation.
+
+**Fix:** `if not re.match(r'^[a-zA-Z0-9_.-]+$', slug): return "Invalid addon slug"`
 
 ---
 
-### BUG-66: Addon slug in `manage()` not sanitized — potential path traversal
+### BUG-98: `ha_request` raises uncaught `HTTPStatusError` for non-2xx responses
 
-**File:** `apex_brain/tools/manage.py:289-296` (and similar at 315, 331, 377)
+**File:** `apex_brain/tools/ha_helpers.py:93`
 
-**Problem:** When `target` starts with `"addon:"`, the slug is extracted via `target.split(":", 1)[1]` and interpolated into the Supervisor URL: `/addons/{slug}/update`. A crafted slug like `../../core/restart` could traverse paths.
+**Problem:** `response.raise_for_status()` is called UNCONDITIONALLY on line 93, even after logging the error. For non-2xx responses, this raises `httpx.HTTPStatusError` which propagates to ALL callers. Most callers (`_discover_entities`, `_discover_areas`, `_discover_devices`, `query()`, `history()`, etc.) do NOT catch `HTTPStatusError`.
 
-**Fix:** Validate the slug:
+This is **distinct from** the `ConnectError`/`TimeoutException` paths (lines 80-86) which return error dicts. The `raise_for_status()` path throws an exception, not a dict.
+
+**Note:** The prior BUG-77 diagnosis in Prompt 3 was partially wrong — it described callers iterating error dicts. That only happens for connection errors. For HTTP 4xx/5xx, the real issue is this uncaught exception.
+
+**Fix:** Either catch `HTTPStatusError` inside `ha_request` and return a structured error dict, OR add `HTTPStatusError` handling to all callers. The cleanest fix:
 ```python
-slug = target.split(":", 1)[1]
-if not re.match(r'^[a-zA-Z0-9_.-]+$', slug):
-    return f"Invalid addon slug: {slug}"
+if not response.is_success:
+    logger.error("HA API error: %s %s", response.status_code, response.text[:300])
+    return {"error": f"HA API returned {response.status_code}: {response.text[:200]}"}
+# Remove the unconditional raise_for_status() call
 ```
 
-**Test:** Pass `target="addon:../../core/restart"` — should return error.
-
 ---
 
-### BUG-67: All stores access `self._db` without None checks
+### BUG-99: All stores access `self._db` without None checks — crashes if not initialized
 
-**File:** `audit_store.py:62`, `conversation_store.py:48`, `knowledge_store.py`, `routine_store.py`
+**File:** All 4 store files
 
 **Problem:** If `initialize()` was never called or `close()` was already called, every method crashes with `AttributeError: 'NoneType' object has no attribute 'execute'`.
 
-**Fix:** Add at top of each public method:
-```python
-if self._db is None:
-    raise RuntimeError("Store not initialized. Call initialize() first.")
-```
+**Fix:** Add guard: `if self._db is None: raise RuntimeError("Store not initialized")`
 
 ---
 
-### BUG-68: `get_contradictory_facts()` always returns empty — dead code
+### BUG-100: `get_contradictory_facts()` always returns empty — dead code due to unique index
 
 **File:** `apex_brain/memory/knowledge_store.py:700-733`
 
-**Problem:** Self-JOIN looks for `a.category = b.category AND a.key = b.key AND a.id < b.id`, but the `UNIQUE INDEX ON (category, key)` means two rows can never share the same (category, key). The query always returns empty. The Curator's contradiction resolution is silently disabled.
+**Problem:** Self-JOIN looks for `a.category = b.category AND a.key = b.key`, but `UNIQUE INDEX ON (category, key)` means this can never match. The Curator's contradiction resolution silently does nothing.
 
-**Fix:** Either remove the method (it's dead code due to the unique index) or redesign to detect semantic contradictions using embedding similarity.
-
----
-
-## MEDIUM SEVERITY BUGS
-
-### BUG-69: Shared `session_id="apex_events"` causes context crosstalk between concurrent events
-
-**File:** `apex_brain/brain/event_handler.py:182` + `apex_brain/brain/event_subscriber.py:203`
-
-**Problem:** Both webhook and WebSocket event paths use `session_id="apex_events"`. When multiple events arrive concurrently, their conversation histories bleed into each other. The AI can confuse which event it's responding to.
-
-**Fix:** Use per-event session IDs:
-```python
-from uuid import uuid4
-session_id = f"apex_event_{uuid4().hex[:8]}"
-```
+**Fix:** Remove dead method or redesign for semantic contradiction detection.
 
 ---
 
-### BUG-70: Calendar timezone stripping causes wrong dates/times
+### BUG-101: `configure()` missing catch-all exception — `result` undefined
+
+**File:** `apex_brain/tools/configure.py:407-416`
+
+**Problem:** try/except catches 4 specific types but not generic `Exception`. Unexpected errors propagate uncaught and leave `result` undefined for audit log.
+
+**Related to but distinct from BUG-62** (Prompt 4) which covers `ws_helpers.py` exception types.
+
+**Fix:** Add `except Exception as e: result = f"Error: {e}"`
+
+---
+
+### BUG-102: `correct_fact()` non-atomic read-then-write — race with concurrent `store_fact()`
+
+**File:** `apex_brain/memory/knowledge_store.py:308-365`
+
+**Problem:** `correct_fact()` SELECTs to check if the fact exists, then does UPDATE or calls `store_fact()`. Between these operations, concurrent `store_fact()` can modify the same row. The correction can be silently lost.
+
+**Fix:** Use a single `INSERT ... ON CONFLICT UPDATE` or wrap in `BEGIN IMMEDIATE`.
+
+---
+
+## MEDIUM
+
+### BUG-103: Shared `session_id="apex_events"` causes context crosstalk
+
+**File:** `apex_brain/brain/event_handler.py:182` + `event_subscriber.py:203`
+
+**Problem:** Both webhook and WebSocket event paths use same session_id. Concurrent events' conversation histories bleed together.
+
+**Fix:** `session_id=f"apex_event_{uuid4().hex[:8]}"`
+
+---
+
+### BUG-104: Calendar timezone stripping causes wrong dates/times
 
 **File:** `apex_brain/tools/calendar_tool.py:52-58`
 
-**Problem:** `_parse_event_dt` strips timezone with `dt.replace(tzinfo=None)` and compares against naive `datetime.now()`. UTC timestamps are treated as local time. For users west of UTC, evening events appear on the wrong day.
+**Problem:** `dt.replace(tzinfo=None)` strips timezone. UTC timestamps treated as local time. Wrong day for users west of UTC.
 
-**Fix:** Convert to local timezone using `settings.timezone`:
-```python
-from zoneinfo import ZoneInfo
-local_tz = ZoneInfo(settings.timezone)
-return dt.astimezone(local_tz).replace(tzinfo=None)
-```
+**Related to BUG-65** (Prompt 4, calendar `_today_date()` using naive datetime) but covers a different function (`_parse_event_dt`).
+
+**Fix:** Convert to local timezone: `dt.astimezone(local_tz).replace(tzinfo=None)`
 
 ---
 
-### BUG-71: Calendar multi-day events filtered out from today view
+### BUG-105: Calendar multi-day events filtered out from today view
 
 **File:** `apex_brain/tools/calendar_tool.py:170-172`
 
-**Problem:** Filter checks `today_start <= start_dt <= today_end`, excluding events that started before today but are still ongoing (vacations, conferences).
+**Problem:** Filter checks `today_start <= start_dt <= today_end`, excluding ongoing multi-day events.
 
-**Fix:** Check overlap:
-```python
-if start_dt is not None and end_dt is not None:
-    if end_dt < today_start or start_dt > today_end:
-        continue
-elif start_dt is not None:
-    if not (today_start <= start_dt <= today_end):
-        continue
-```
+**Fix:** Check overlap: `if end_dt < today_start or start_dt > today_end: continue`
 
 ---
 
-### BUG-72: `_check_duplicate()` holds write lock during O(N) cosine scan
+### BUG-106: `_check_duplicate()` holds write lock during O(N) cosine scan
 
 **File:** `apex_brain/memory/knowledge_store.py:266-277`
 
-**Problem:** `BEGIN IMMEDIATE` acquires a RESERVED lock, then `_check_duplicate()` scans up to 200 facts doing cosine similarity while holding it. All other writers are blocked.
+**Problem:** `BEGIN IMMEDIATE` blocks all writers while `_check_duplicate()` scans up to 200 facts.
 
-**Fix:** Move `_check_duplicate()` call outside the `BEGIN IMMEDIATE` block. Accept the small TOCTOU window.
+**Fix:** Move `_check_duplicate()` outside the `BEGIN IMMEDIATE` block.
 
 ---
 
-### BUG-73: Four stores share one SQLite file with separate connections — write contention
+### BUG-107: Four stores share one SQLite file with separate connections — write contention
 
 **File:** All store files
 
-**Problem:** Four independent `aiosqlite.connect()` calls to the same DB file. WAL allows only ONE writer at a time. Under load, concurrent writes cause `database is locked` with 5s timeout.
+**Problem:** Four independent connections to same DB. WAL allows only ONE writer. Under load: `database is locked`.
 
-**Fix:** Increase `busy_timeout` to 30000ms, or add an `asyncio.Lock` for write serialization.
+**Fix:** Increase `busy_timeout` to 30000ms.
 
 ---
 
-### BUG-74: `search_semantic()` loads ALL facts into memory for linear scan
+### BUG-108: `search_semantic()` loads ALL facts into memory for linear scan
 
 **File:** `apex_brain/memory/knowledge_store.py:471-508`
 
-**Problem:** No LIMIT on SELECT — fetches every fact with embedding. O(N) numpy cosine similarity blocks the event loop.
+**Problem:** No LIMIT. O(N) numpy cosine similarity blocks event loop.
 
-**Fix:** Add `LIMIT 1000` to the query. For CPU-bound computation, use `asyncio.to_thread()`.
+**Fix:** Add `LIMIT 1000`. Use `asyncio.to_thread()` for numpy computation.
 
 ---
 
-### BUG-75: Supervisor HTTP client never closed
+### BUG-109: Supervisor HTTP client never closed — connection leak
 
 **File:** `apex_brain/tools/manage.py:25-31`
 
-**Problem:** Module-level `httpx.AsyncClient` with no shutdown hook. TCP connections leak on restart.
+**Problem:** Module-level `httpx.AsyncClient` with no shutdown hook.
 
 **Fix:** Add `close_supervisor_client()` and call from server shutdown.
 
 ---
 
-### BUG-76: `model_dump()` includes provider-incompatible fields in conversation loop
+### BUG-110: `model_dump()` includes provider-incompatible fields
 
 **File:** `apex_brain/brain/conversation.py:316, 355`
 
-**Problem:** `msg.model_dump()` may include `tool_calls: null` or provider-specific fields. Switching LLM providers (OpenAI/Anthropic/Gemini) via litellm can fail.
+**Problem:** `tool_calls: null` or provider-specific fields may break cross-provider LLM calls.
 
-**Fix:**
-```python
-msg_dict = msg.model_dump(exclude_none=True)
-```
+**Fix:** `msg.model_dump(exclude_none=True)`
 
 ---
 
-### BUG-77: `ha_request` error returns dict, but callers iterate it as list
-
-**File:** `automation.py:88`, `energy.py:126`, `presence.py:29`, and 10+ other locations
-
-**Problem:** When HA is unreachable, `ha_request("GET", "/states")` returns `{"error": "..."}`. Callers do list comprehension on it, iterating dict keys → `TypeError`.
-
-**Fix:** Add `if not isinstance(states, list): return "Cannot reach HA..."` after every `/states` call. Or refactor `ha_request` to raise exceptions on error.
-
----
-
-### BUG-78: `do()` flat payload merge — targets and data key collisions
-
-**File:** `apex_brain/tools/generic.py:659-664`
-
-**Problem:** `payload.update(targets)` then `payload.update(data)` — if both contain `entity_id`, data overwrites targets silently.
-
-**Fix:** Log a warning when keys collide.
-
----
-
-### BUG-79: Tool name collisions silently overwrite in TOOL_REGISTRY
-
-**File:** `apex_brain/tools/base.py:42`
-
-**Problem:** If two tool functions have the same name, the second silently replaces the first.
-
-**Fix:** Add:
-```python
-if func.__name__ in TOOL_REGISTRY:
-    logger.warning("Tool '%s' redefined! Was from %s", func.__name__, TOOL_REGISTRY[func.__name__]["function"].__module__)
-```
-
----
-
-### BUG-80: `cover` domain not scored in `_score_significance()` despite being in `_CRITICAL_DOMAINS`
+### BUG-111: `cover` domain not scored in `_score_significance()` despite being in `_CRITICAL_DOMAINS`
 
 **File:** `apex_brain/brain/decision_engine.py`
 
-**Problem:** `cover` (garage doors) is in `_CRITICAL_DOMAINS` for hard filter but NOT in `_score_significance()`. A cover going unavailable passes the filter but gets base score 0.3, possibly below threshold. Garage door offline events may be silently ignored.
+**Problem:** Cover (garage doors) passes hard filter but gets base score 0.3 — possibly below threshold.
 
-**Fix:** Add `cover` scoring in `_score_significance()`, similar to `lock`/`camera`.
-
----
-
-### BUG-81: Webhook secret in request body instead of header
-
-**File:** `apex_brain/brain/server.py:484-491`
-
-**Problem:** Secret extracted from `event.attributes.get("secret")` — in the JSON body, visible in logs if body is logged.
-
-**Fix:** Move to header-based: `request.headers.get("X-Webhook-Secret")`.
+**Fix:** Add `cover` scoring in `_score_significance()`.
 
 ---
 
-### BUG-82: MCP `disconnect()` doesn't clear stale tool definitions
+### BUG-112: MCP `disconnect()` doesn't clear stale tool definitions
 
 **File:** `apex_brain/tools/mcp_bridge.py:102-113`
 
-**Problem:** After disconnect, `self._tools` and `self._tool_names` still contain old data. LLM keeps calling tools that always fail.
+**Problem:** After disconnect, `_tools` and `_tool_names` still hold old data. LLM keeps calling failed tools.
 
 **Fix:** Add `self._tools = []` and `self._tool_names = set()` in `disconnect()`.
 
 ---
 
-### BUG-83: `curator.audit_facts` reports inflated prune count
+### BUG-113: `search_semantic()` and `search_keyword()` write during reads — unnecessary contention
+
+**File:** `apex_brain/memory/knowledge_store.py:512-521, 575-584`
+
+**Problem:** Both methods UPDATE `last_mentioned_at` after every search. This adds write pressure to every context build — conceptually a read operation.
+
+**Distinct from BUG-91** (Prompt 5) which covers the missing transaction. This bug is about the unnecessary write operation itself.
+
+**Fix:** Defer touch-update to a background task, or wrap in try/except so search returns results even if touch fails.
+
+---
+
+### BUG-114: `EventSubscriber._session` not None-checked before `ws_connect`
+
+**File:** `apex_brain/brain/event_subscriber.py:114`
+
+**Problem:** During shutdown race, `self._session` could be closed before `ws_connect`. Produces confusing error logs.
+
+**Fix:** Guard: `if not self._session or self._session.closed: return`
+
+---
+
+### BUG-115: `_event_counts` dict in DecisionEngine is dead code — never used
+
+**File:** `apex_brain/brain/decision_engine.py:59`
+
+**Problem:** `defaultdict(int)` initialized but never incremented or read. Dead code, but unbounded growth if ever used without cleanup.
+
+**Fix:** Remove dead field, or implement with cleanup.
+
+---
+
+### BUG-116: Module-level `AsyncClient` created outside async context
+
+**File:** `apex_brain/tools/ha_helpers.py:18-24`
+
+**Problem:** `httpx.AsyncClient()` at import time. Connection pool issues if process forks (uvicorn workers).
+
+**Fix:** Use lazy singleton: create on first use inside async context.
+
+---
+
+### BUG-117: Notify entity-based path fragile for Alexa integrations
+
+**File:** `apex_brain/tools/notify.py:65`
+
+**Problem:** `service_name = entity_id.replace("notify.", "", 1)` doesn't validate prefix. Alexa Media notify may not support entity-based `send_message`.
+
+**Fix:** Add fallback: if entity-based fails with 404/400, retry legacy `/services/notify/{service_name}`.
+
+---
+
+### BUG-118: MCP transport stream unpacking assumes tuple shape
+
+**File:** `apex_brain/tools/mcp_bridge.py:74-78`
+
+**Problem:** `len(streams) >= 2` assumes `__aenter__` returns indexable tuple. SDK changes could break.
+
+**Fix:** Use `read_stream, write_stream = streams[:2]` with type guard.
+
+---
+
+### BUG-119: `curator.audit_facts` reports inflated prune count
 
 **File:** `apex_brain/brain/curator.py:58-69`
 
 **Problem:** Reports `len(low_conf)` as pruned but doesn't track actual successful deletions.
 
-**Fix:** Track actual count:
-```python
-pruned = sum(1 for f in low_conf if f.get("id") and await self._knowledge_store.delete_fact_by_id(f["id"]))
-```
+**Fix:** Track actual count.
 
 ---
 
-## LOW SEVERITY BUGS
+## LOW
 
-### BUG-84: Action trace eviction can delete just-inserted key → KeyError
+### BUG-120: Action trace eviction can delete just-inserted key → KeyError
 
 **File:** `apex_brain/brain/conversation.py:337-340`
-
-**Problem:** If session_id is the oldest key, it gets evicted then accessed → `KeyError`.
 
 **Fix:** Use `.get()` on line 340.
 
 ---
 
-### BUG-85: `_embed_text` fallback may create garbage numpy array
-
-**File:** `apex_brain/memory/knowledge_store.py:139`
-
-**Problem:** If embed function returns unexpected type, `np.array(response, dtype=np.float32)` creates bogus vector.
-
-**Fix:** Add `isinstance(response, (list, tuple))` check.
-
----
-
-### BUG-86: `get_device_summary` crashes if state dict lacks `entity_id`
+### BUG-121: `get_device_summary` crashes if state dict lacks `entity_id`
 
 **File:** `apex_brain/tools/ha_helpers.py:182`
-
-**Problem:** `s["entity_id"]` KeyError on malformed state data.
 
 **Fix:** Use `s.get("entity_id", "")`.
 
 ---
 
-### BUG-87: RoutineStore lowercases names + COLLATE NOCASE = inconsistency
+### BUG-122: `context_builder.py` `{f["id"]}` set comprehension — KeyError if fact lacks `id`
 
-**File:** `apex_brain/memory/routine_store.py:64-67`
+**File:** `apex_brain/memory/context_builder.py:76`
 
-**Problem:** `.lower().strip()` + `COLLATE NOCASE` creates mismatch for migrated data.
-
-**Fix:** Standardize: always store lowercase or drop `.lower()` and let COLLATE NOCASE handle it.
+**Fix:** Use `f.get("id")` and filter None.
 
 ---
 
-### BUG-88: `decay_confidence()` individual UPDATEs without explicit transaction
+### BUG-123: `delete_fact()` TOCTOU between SELECT and DELETE
 
-**File:** `apex_brain/memory/knowledge_store.py:396-440`
+**File:** `apex_brain/memory/knowledge_store.py:629-644`
 
-**Problem:** If crash mid-loop, some facts decayed, some not. Holds implicit lock during iteration.
+**Fix:** Single `DELETE FROM facts WHERE key = ?` and check `cursor.rowcount`.
 
-**Fix:** Use single SQL `UPDATE` with computed expression, or wrap in explicit transaction.
+---
+
+### BUG-124: `save_turn()` stores arbitrarily large content — no size limit
+
+**File:** `apex_brain/memory/conversation_store.py:41-52`
+
+**Fix:** Truncate to 10,000 chars before storage.
+
+---
+
+### BUG-125: `fire_webhook` sends auth token unnecessarily to webhook endpoint
+
+**File:** `apex_brain/tools/webhook.py:49-54`
+
+**Problem:** `ha_request` adds `Authorization: Bearer` header. Webhooks don't need auth. Unnecessary credential exposure.
+
+**Fix:** Add a `skip_auth=True` parameter to `ha_request` for webhook calls.
+
+---
+
+## FALSE POSITIVES REJECTED FROM EARLIER DRAFT
+
+These were in the previous version of this file but are NOT bugs:
+
+1. **"Shutdown leaks scheduler/event_subscriber"** — The shutdown code after `yield` uses local variables from the same scope (not module globals). Shutdown works correctly. Only `/health` is affected (BUG-95).
+2. **"do() flat payload merge"** — HA REST API is designed for flat payloads. `entity_id` collision is an LLM error, not a code bug.
+3. **"Tool name collisions silently overwrite"** — Deterministic behavior (last wins). Enhancement, not a bug.
+4. **"Webhook secret in body vs header"** — Design choice. Functional. HA automations commonly pass data in body.
 
 ---
 
@@ -445,14 +444,15 @@ pruned = sum(1 for f in low_conf if f.get("id") and await self._knowledge_store.
 
 | # | Gap | Severity |
 |---|-----|----------|
-| GAP-1 | `ConversationStore` — ZERO tests (SQL injection surface in `_escape_like` untested) | HIGH |
-| GAP-2 | `KnowledgeStore` — only 2-3 tests for 15+ methods (conflict resolution, dedup, decay, transactions untested) | HIGH |
+| GAP-1 | `ConversationStore` — ZERO tests (SQL injection in `_escape_like` untested) | HIGH |
+| GAP-2 | `KnowledgeStore` — only 2-3 tests for 15+ methods | HIGH |
 | GAP-3 | `Scheduler._task_reminder_check()` — entirely untested | HIGH |
-| GAP-4 | `CooldownTracker` — no dedicated tests (cleanup logic untested) | HIGH |
+| GAP-4 | `CooldownTracker` — no dedicated tests | HIGH |
 | GAP-5 | Server endpoints (`/api/chat`, `/api/webhook`, `/v1/chat/completions`) — zero tests | HIGH |
-| GAP-6 | `EventSubscriber` reconnection backoff, auth failure — untested | MEDIUM |
-| GAP-7 | `mock_embed` returns identical vectors for ALL text — semantic search tests don't validate ranking | MEDIUM |
-| GAP-8 | 14 tool modules have no test files (mostly deprecated but still callable) | MEDIUM |
+| GAP-6 | `EventSubscriber` reconnection, auth failure, URL derivation — untested | MEDIUM |
+| GAP-7 | `mock_embed` returns identical vectors for ALL text — semantic search ranking untested | MEDIUM |
+| GAP-8 | 14 tool modules have no test files | MEDIUM |
+| GAP-9 | DecisionEngine night-time scoring tests depend on wall clock — flaky | MEDIUM |
 
 ---
 
@@ -460,51 +460,47 @@ pruned = sum(1 for f in low_conf if f.get("id") and await self._knowledge_store.
 
 | Severity | Count | Bug IDs |
 |----------|-------|---------|
-| CRITICAL | 4 | BUG-59, BUG-60, BUG-61, BUG-62 |
-| HIGH | 6 | BUG-63 through BUG-68 |
-| MEDIUM | 15 | BUG-69 through BUG-83 |
-| LOW | 5 | BUG-84 through BUG-88 |
-| Test Gaps | 8 | GAP-1 through GAP-8 |
-| **Total** | **30 bugs + 8 test gaps** | |
+| CRITICAL | 3 | BUG-92, 93, 94 |
+| HIGH | 8 | BUG-95 through 102 |
+| MEDIUM | 17 | BUG-103 through 119 |
+| LOW | 6 | BUG-120 through 125 |
+| Test Gaps | 9 | GAP-1 through GAP-9 |
+| **Total** | **34 bugs + 9 test gaps** | |
 
 ---
 
 ## Recommended Fix Order
 
-### Batch 1 — Security & Data Loss (do first)
-1. BUG-59: Security gate bypass on protected domains
-2. BUG-60: Scheduler/subscriber never stop on shutdown
-3. BUG-61: Reminders never fire
-4. BUG-62: SQLite transaction management
+### Batch 0 — Fix Prompts 4 & 5 first (BUG-59 through BUG-91)
+These 33 bugs from earlier scans are still unfixed. Fix them before proceeding.
+
+### Batch 1 — Security & Data Integrity
+1. BUG-92: Security gate bypass on protected domains
+2. BUG-93: Reminders never fire
+3. BUG-94: SQLite transaction management + ROLLBACK safety
+4. BUG-98: ha_request raises uncaught HTTPStatusError
 
 ### Batch 2 — Crash Prevention
-5. BUG-63: Shutdown crash on None stores
-6. BUG-64: configure() catch-all exception
-7. BUG-65: List entity_id in do() verification
-8. BUG-66: Addon slug path traversal
-9. BUG-67: Store uninitialized guards
+5. BUG-95: Health endpoint missing scheduler/subscriber
+6. BUG-96: List entity_id in do() verification
+7. BUG-97: Addon slug path traversal
+8. BUG-99: Store uninitialized guards
+9. BUG-101: configure() catch-all exception
+10. BUG-102: correct_fact() race condition
 
 ### Batch 3 — Correctness
-10. BUG-69: Event session crosstalk
-11. BUG-70: Calendar timezone
-12. BUG-71: Calendar multi-day events
-13. BUG-76: model_dump provider compat
-14. BUG-77: ha_request error returns as dict
-15. BUG-80: Cover domain scoring
+11. BUG-103: Event session crosstalk
+12. BUG-104: Calendar timezone
+13. BUG-105: Calendar multi-day events
+14. BUG-110: model_dump provider compat
+15. BUG-111: Cover domain scoring
 
-### Batch 4 — Performance & Maintenance
-16. BUG-72: Write lock during cosine scan
-17. BUG-73: SQLite write contention
-18. BUG-74: Unbounded semantic search
-19. BUG-75: Supervisor client leak
-20. BUG-78: Payload merge collisions
-
-### Batch 5 — Test Coverage
-21. GAP-1: ConversationStore tests
-22. GAP-2: KnowledgeStore tests
-23. GAP-3: Reminder tests
-24. GAP-4: CooldownTracker tests
-25. GAP-5: Server endpoint tests
+### Batch 4 — Performance & Reliability
+16. BUG-106: Write lock during cosine scan
+17. BUG-107: SQLite write contention
+18. BUG-108: Unbounded semantic search
+19. BUG-109: Supervisor client leak
+20. BUG-113: Search writes during reads
 
 ---
 

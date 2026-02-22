@@ -85,8 +85,8 @@ class TestStartStop:
     async def test_builtin_tasks_include_key_tasks(self, scheduler):
         await scheduler.start()
         names = scheduler.task_names
-        assert "fact_decay" in names
-        assert "fact_cleanup" in names
+        # When curator is enabled, standalone fact_decay/cleanup
+        # are NOT registered (curator.audit_facts handles both).
         assert "morning_briefing" in names
         assert "evening_briefing" in names
         assert "health_check" in names
