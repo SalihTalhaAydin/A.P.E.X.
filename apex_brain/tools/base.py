@@ -168,9 +168,8 @@ DEPRECATED_TOOLS = (
     "control_lock",
     # switch.py → do()
     "control_switch",
-    # security.py → do()
+    # security.py → do()  (camera tools kept — no generic equivalent)
     "control_alarm",
-    "get_camera_snapshot",
     # template.py → query()
     "evaluate_template",
     # script.py → do/discover()

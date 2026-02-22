@@ -155,6 +155,7 @@ _DISCOVERY_DOMAINS: tuple = (
     "media_player",
     "lock",
     "cover",
+    "camera",
 )
 
 

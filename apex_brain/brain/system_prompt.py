@@ -85,7 +85,7 @@ wait_seconds, define_routine, list_routines, run_routine, \
 delete_routine, list_automations, trigger_automation, \
 toggle_automation, create_automation, update_automation, \
 delete_automation, list_scenes, activate_scene, get_entity_power, \
-fire_webhook, fire_event.
+fire_webhook, fire_event, get_camera_snapshot, get_camera_state.
 {devices_block}
 {service_schemas_block}\
 

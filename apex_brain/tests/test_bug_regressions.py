@@ -728,3 +728,43 @@ def test_bug40_schema_from_hints_narrow_catch():
     schema = _schema_from_hints(good_func)
     assert "x" in schema["properties"]
     assert "y" in schema["properties"]
+
+
+# ------------------------------------------------------------------ #
+# BUG-41: Camera tools hidden + cameras excluded from device summary
+# ------------------------------------------------------------------ #
+
+
+def test_bug41_camera_snapshot_not_deprecated():
+    """get_camera_snapshot must NOT be in DEPRECATED_TOOLS.
+
+    It was incorrectly deprecated despite having no generic equivalent,
+    which caused the LLM to be unable to show camera snapshots.
+    """
+    from tools.base import DEPRECATED_TOOLS
+
+    assert "get_camera_snapshot" not in DEPRECATED_TOOLS
+    assert "get_camera_state" not in DEPRECATED_TOOLS
+
+
+def test_bug41_camera_in_discovery_domains():
+    """Camera domain must be in _DISCOVERY_DOMAINS.
+
+    Without it the AI never sees camera entity IDs in its device
+    summary, so it cannot resolve 'front door camera' to an entity.
+    """
+    from tools.ha_helpers import _DISCOVERY_DOMAINS
+
+    flat = [
+        d if isinstance(d, str) else d[0]
+        for d in _DISCOVERY_DOMAINS
+    ]
+    assert "camera" in flat
+
+
+def test_bug41_system_prompt_mentions_camera_tools():
+    """System prompt must list camera tools so the LLM knows they exist."""
+    from brain.system_prompt import SYSTEM_PROMPT_TEMPLATE
+
+    assert "get_camera_snapshot" in SYSTEM_PROMPT_TEMPLATE
+    assert "get_camera_state" in SYSTEM_PROMPT_TEMPLATE
