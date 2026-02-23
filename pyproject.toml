@@ -1,6 +1,6 @@
 [project]
 name = "apex-brain"
-version = "0.7.9"
+version = "0.7.10"
 description = "Apex Brain - HA add-on and local dev"
 readme = "README.md"
 requires-python = ">=3.12"

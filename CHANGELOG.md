@@ -5,7 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
-## [0.7.8] - 2026-02-23
+## [0.7.10] - 2026-02-23
+
+### Changed
+- **Parallel context building** — `ContextBuilder.build_context()` now runs all independent fetches (facts, presence, devices, areas, schemas, calendar) via `asyncio.gather()` instead of sequential awaits, reducing prompt assembly latency.
+- **Smarter confabulation detection** — Fixed false-positive confabulation nudges: bare `"no "` prefix removed from failure phrases (matched legitimate results like "no additional changes needed"); messages ending with `?` are now treated as questions (not actions) unless they contain an imperative command.
+- **Concise area/floor verification** — `_verify_area_or_floor` returns count-based summaries ("Done. 3 light(s) turn on in Basement.") instead of listing every entity, reducing LLM response tokens especially in voice mode.
+- **Structured `do()` targets schema** — `targets` parameter now has explicit `properties` (entity_id, area_name, area_id, device_id, floor_id) with descriptions, improving LLM tool-call accuracy.
+
+### Added
+- **`_safe_async` helper** — Reusable coroutine wrapper in context_builder that catches expected errors and returns a default, replacing repetitive try/except blocks.
+- **`_expected_state_for_service` helper** — Maps common HA services (turn_on, lock, open_cover, etc.) to expected states for verification summaries.
+- **`_ACTION_IMPERATIVE_RE`** — Regex to distinguish imperative commands ending with `?` ("Can you lock the door?") from pure questions ("Is the door locked?").
+
+---
+
+## [0.7.9] - 2026-02-23
 
 ### Changed
 - **HA error handling** — `ha_request` now raises `HomeAssistantError` instead of returning silent error dicts. Callers can no longer accidentally treat connection failures or HTTP errors as empty results.

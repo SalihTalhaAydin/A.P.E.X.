@@ -667,12 +667,44 @@ async def _query_template(template: str) -> str:
             "targets": {
                 "type": "object",
                 "description": (
-                    'Target(s): {"entity_id": "..."} or '
-                    '{"area_id": "..."} or '
-                    '{"area_name": "basement"} or '
-                    '{"device_id": "..."}. '
-                    "area_name is auto-resolved to area_id."
+                    "Target. Provide ONE of: entity_id, "
+                    "area_name, area_id, device_id, "
+                    "or floor_id."
                 ),
+                "properties": {
+                    "entity_id": {
+                        "type": "string",
+                        "description": (
+                            "Entity ID, e.g. "
+                            "'light.kitchen_ceiling'."
+                        ),
+                    },
+                    "area_name": {
+                        "type": "string",
+                        "description": (
+                            "Room name, e.g. 'basement'. "
+                            "Auto-resolved to area_id."
+                        ),
+                    },
+                    "area_id": {
+                        "type": "string",
+                        "description": (
+                            "Area ID from area "
+                            "directory."
+                        ),
+                    },
+                    "device_id": {
+                        "type": "string",
+                        "description": "HA device ID.",
+                    },
+                    "floor_id": {
+                        "type": "string",
+                        "description": (
+                            "Floor ID, e.g. "
+                            "'ground_floor'."
+                        ),
+                    },
+                },
             },
             "data": {
                 "type": "object",
@@ -815,6 +847,18 @@ async def do(
         )
 
 
+def _expected_state_for_service(service: str) -> str:
+    """Map common HA services to the expected entity state."""
+    return {
+        "turn_on": "on",
+        "turn_off": "off",
+        "lock": "locked",
+        "unlock": "unlocked",
+        "open_cover": "open",
+        "close_cover": "closed",
+    }.get(service, "")
+
+
 async def _verify_area_or_floor(
     domain: str,
     service: str,
@@ -899,18 +943,33 @@ async def _verify_area_or_floor(
             )
             return msg
 
-        parts = []
-        for line in lines:
-            segs = line.split("|", 2)
-            if len(segs) >= 3:
-                name = segs[2].strip()
-                state = segs[1].strip()
-                parts.append(f"{name}: {state}")
-            elif len(segs) == 2:
-                parts.append(f"{segs[0]}: {segs[1]}")
-
-        summary = ", ".join(parts)
-        return f"Done. {summary}"
+        # Concise count-based summary (shorter = faster
+        # LLM response, especially in voice mode)
+        count = len(lines)
+        expected = _expected_state_for_service(service)
+        if expected:
+            matching = 0
+            for line in lines:
+                segs = line.split("|", 2)
+                if len(segs) >= 2:
+                    st = segs[1].strip().lower()
+                    if st == expected:
+                        matching += 1
+            if matching == count:
+                svc_label = service.replace("_", " ")
+                return (
+                    f"Done. {count} {domain}(s) "
+                    f"{svc_label} in {label}."
+                )
+            return (
+                f"Done. Called {domain}.{service} on "
+                f"{label}: {matching}/{count} now "
+                f"{expected}."
+            )
+        return (
+            f"Done. {count} {domain}(s) in {label} "
+            f"affected."
+        )
 
     except Exception:
         logger.debug("Area/floor verify failed", exc_info=True)

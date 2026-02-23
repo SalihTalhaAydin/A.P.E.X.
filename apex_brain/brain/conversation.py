@@ -127,17 +127,22 @@ _ACTION_TOOLS = frozenset(
     }
 )
 
-# Tool result phrases that indicate the action did NOT succeed
+# Tool result phrases that indicate the action did NOT succeed.
+# NOTE: bare "no " was removed — it matched legitimate results
+# like "Done. ...no additional changes needed." Use specific
+# variants instead.
 _TOOL_FAILURE_PHRASES = (
-    "no ",
-    "entities found",
-    "no entities",
+    "no entities found",
+    "no entities matching",
+    "no area matching",
     "not found",
     "error:",
     "entity not found",
     "could not",
     "cannot ",
     "failed",
+    "connection error",
+    "not available",
 )
 
 
@@ -167,6 +172,25 @@ def _last_tool_result(messages: list[dict]) -> str:
 _INFO_QUESTION_RE = re.compile(
     r"^\s*(?:when|what\s+time|how\s+long|how\s+often|how\s+many"
     r"|was\s+the|were\s+the|is\s+the|are\s+the)\b",
+    re.IGNORECASE,
+)
+
+# Matches imperative action commands (optionally prefixed by
+# "please" / "can you" / "could you").  Used to distinguish
+# "Can you lock the door?" (action) from "Is the door locked?"
+# (question) when the message ends with "?".
+_ACTION_IMPERATIVE_RE = re.compile(
+    r"^\s*(?:please\s+|"
+    r"(?:can|could|would)\s+you\s+(?:please\s+)?)?(?:"
+    r"turn\s+(?:on|off)|switch\s+(?:on|off)|"
+    r"(?:dim|brighten)\b|"
+    r"(?:lock|unlock)\b|"
+    r"(?:open|close)\s+(?:the|my|all)|"
+    r"set\s+.{1,40}\s+to\b|"
+    r"(?:arm|disarm)\b|"
+    r"shut\s+(?:off|down)|power\s+(?:on|off|down|up)|"
+    r"lights?\s+(?:on|off)"
+    r")",
     re.IGNORECASE,
 )
 
@@ -240,6 +264,14 @@ def _safe_get_tool_calls(msg) -> list:
 def _user_expects_action(content: str) -> bool:
     """Check if user message requests an action or corrects a failed one."""
     if not content or not isinstance(content, str):
+        return False
+    stripped = content.strip()
+    # Messages ending with "?" are questions UNLESS they start
+    # with an imperative command ("Turn off the lights?",
+    # "Can you lock the door?").
+    if stripped.endswith("?") and not _ACTION_IMPERATIVE_RE.match(
+        stripped
+    ):
         return False
     # Informational questions about state/history are not action requests
     if _INFO_QUESTION_RE.search(content):
@@ -511,11 +543,12 @@ class Conversation:
                 else:
                     is_confab = False
                     unmet_action = False
+                    action_tools_used = any(
+                        t in _ACTION_TOOLS for t in tools_called
+                    )
                     # User wanted action but only non-action tools
                     # (e.g. discover) were called — still unmet
-                    if user_wants_action and not any(
-                        t in _ACTION_TOOLS for t in tools_called
-                    ):
+                    if user_wants_action and not action_tools_used:
                         unmet_action = True
                     # Tool reported failure but AI claims success
                     if (
@@ -526,6 +559,17 @@ class Conversation:
                         logger.warning(
                             "Tool reported failure but AI claimed success."
                         )
+                    # Action tool succeeded — trust the result,
+                    # never nudge. The AI is just summarising.
+                    if (
+                        action_tools_used
+                        and last_result.startswith("Done.")
+                        and not _tool_result_indicates_failure(
+                            last_result
+                        )
+                    ):
+                        is_confab = False
+                        unmet_action = False
 
                 if is_confab:
                     logger.warning(

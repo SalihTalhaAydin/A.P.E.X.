@@ -5,6 +5,7 @@ calendar, presence. This is what makes Apex feel like it
 actually knows you.
 """
 
+import asyncio
 import datetime
 import logging
 from zoneinfo import ZoneInfo
@@ -20,6 +21,20 @@ from brain.system_prompt import (
 
 from memory.conversation_store import ConversationStore
 from memory.knowledge_store import KnowledgeStore
+
+
+async def _safe_async(coro, label: str, default=""):
+    """Run a coroutine, returning *default* on expected errors."""
+    try:
+        return await coro
+    except (
+        ImportError,
+        ConnectionError,
+        TimeoutError,
+        OSError,
+    ) as e:
+        logger.warning("context_builder: %s failed: %s", label, e)
+        return default
 
 
 class ContextBuilder:
@@ -45,11 +60,12 @@ class ContextBuilder:
         conversation history, service schemas, proactive hints,
         and calendar to cut prompt tokens for fast voice responses.
 
+        All independent fetches run in parallel via
+        asyncio.gather() to minimise latency.
+
         Returns the complete system prompt string.
         """
-        # 1. Current date/time + time context
-        # Only catch KeyError (unknown timezone / ZoneInfoNotFoundError) and ValueError (bad format).
-        # Do NOT catch ImportError, RuntimeError, or Exception — those must propagate.
+        # 1. Sync: timezone + time context (no I/O)
         try:
             tz = ZoneInfo(settings.timezone)
         except (KeyError, ValueError):
@@ -61,29 +77,88 @@ class ContextBuilder:
         now = datetime.datetime.now(tz=tz)
         time_context = _build_time_context(now)
 
-        # 2. Recent conversation turns (skip in voice mode — stateless)
-        recent_turns = None
-        if not voice_mode:
-            recent_turns = await self.conversation_store.get_recent(
-                n=self.recent_turns_count,
-                session_id=session_id,
-            )
-
-        # 3. Semantically relevant facts (search_semantic falls back to
-        #    search_keyword internally when embeddings are unavailable)
-        # Voice mode: fewer facts (just core identity facts)
+        # 2. Prepare parallel coroutines
         fact_limit = 5 if voice_mode else self.max_facts
         semantic_limit = max(1, fact_limit - 5)
-        relevant_facts = []
-        if user_message:
-            relevant_facts = await self.knowledge_store.search_semantic(
-                query=user_message,
-                limit=semantic_limit,
-            )
 
-        # 4. High-confidence core facts (always add; reserve ensured above)
-        core_facts = await self.knowledge_store.get_all_facts(limit=50)
-        core_set = {f.get("id") for f in relevant_facts if f.get("id")}
+        # Lazy imports (avoid circular / heavy imports at module level)
+        from tools.ha_helpers import (
+            get_area_directory,
+            get_device_summary,
+        )
+        from tools.presence import get_presence_summary
+
+        # --- Always-run coroutines ---
+        async def _no_facts():
+            return []
+
+        coros = {
+            "semantic_facts": (
+                self.knowledge_store.search_semantic(
+                    query=user_message,
+                    limit=semantic_limit,
+                )
+                if user_message
+                else _no_facts()
+            ),
+            "core_facts": self.knowledge_store.get_all_facts(
+                limit=50
+            ),
+            "presence": _safe_async(
+                get_presence_summary(), "presence"
+            ),
+            "device_summary": _safe_async(
+                get_device_summary(), "device_summary"
+            ),
+            "area_directory": _safe_async(
+                get_area_directory(), "area_directory"
+            ),
+        }
+
+        # --- Text-mode only ---
+        if not voice_mode:
+            coros["recent_turns"] = (
+                self.conversation_store.get_recent(
+                    n=self.recent_turns_count,
+                    session_id=session_id,
+                )
+            )
+            coros["service_schemas"] = _safe_async(
+                fetch_service_schemas(), "service_schemas"
+            )
+            if settings.google_calendar_credentials_path:
+                try:
+                    from tools.calendar_tool import (
+                        get_today_schedule,
+                    )
+
+                    coros["calendar"] = _safe_async(
+                        get_today_schedule(), "calendar"
+                    )
+                except ImportError:
+                    pass
+
+        # 3. Parallel fetch
+        keys = list(coros.keys())
+        results = await asyncio.gather(
+            *coros.values(), return_exceptions=True
+        )
+        fetched: dict = {}
+        for key, result in zip(keys, results):
+            if isinstance(result, Exception):
+                logger.warning(
+                    "context_builder: %s raised %s", key, result
+                )
+                fetched[key] = [] if "facts" in key else ""
+            else:
+                fetched[key] = result
+
+        # 4. Post-process facts (dedup core into semantic)
+        relevant_facts = fetched.get("semantic_facts") or []
+        core_facts = fetched.get("core_facts") or []
+        core_set = {
+            f.get("id") for f in relevant_facts if f.get("id")
+        }
         for fact in core_facts:
             if len(relevant_facts) >= fact_limit:
                 break
@@ -93,67 +168,15 @@ class ContextBuilder:
             ):
                 relevant_facts.append(fact)
 
-        # 4.5. Presence: who is home?
-        presence_summary = ""
-        try:
-            from tools.presence import (
-                get_presence_summary,
-            )
-
-            presence_summary = await get_presence_summary()
-        except (ImportError, ConnectionError, TimeoutError, OSError) as e:
-            logger.warning("context_builder: Failed to fetch presence: %s", e)
-
-        # 4.6. Device discovery: current entity names + area directory
-        device_summary = ""
-        area_directory = ""
-        try:
-            from tools.ha_helpers import (
-                get_area_directory,
-                get_device_summary,
-            )
-
-            device_summary = await get_device_summary()
-            area_directory = await get_area_directory()
-        except (ImportError, ConnectionError, TimeoutError, OSError) as e:
-            logger.warning(
-                "context_builder: Failed to fetch device summary: %s", e
-            )
-
-        # 4.7. Service schemas for top domains (skip in voice mode)
-        service_schemas = ""
-        if not voice_mode:
-            try:
-                service_schemas = await fetch_service_schemas()
-            except (ConnectionError, TimeoutError, OSError) as e:
-                logger.warning(
-                    "context_builder: Failed to fetch service schemas: %s", e
-                )
-
-        # 5. Calendar summary (skip in voice mode)
-        calendar_summary = ""
-        if not voice_mode:
-            try:
-                if settings.google_calendar_credentials_path:
-                    from tools.calendar_tool import (
-                        get_today_schedule,
-                    )
-
-                    calendar_summary = await get_today_schedule()
-            except (ImportError, ConnectionError, TimeoutError, OSError) as e:
-                logger.warning(
-                    "context_builder: Failed to fetch calendar: %s", e
-                )
-
-        # 6. Build the system prompt
+        # 5. Build the system prompt
         return build_system_prompt(
-            calendar_summary=calendar_summary,
+            calendar_summary=fetched.get("calendar", ""),
             relevant_facts=relevant_facts,
-            recent_turns=recent_turns,
-            presence_summary=presence_summary,
+            recent_turns=fetched.get("recent_turns"),
+            presence_summary=fetched.get("presence", ""),
             time_context=time_context,
-            device_summary=device_summary,
-            service_schemas=service_schemas,
-            area_directory=area_directory,
+            device_summary=fetched.get("device_summary", ""),
+            service_schemas=fetched.get("service_schemas", ""),
+            area_directory=fetched.get("area_directory", ""),
             voice_mode=voice_mode,
         )
