@@ -1,0 +1,44 @@
+# Azure Pipelines: lint + pytest (unit and model tests; skips live/model)
+# Compatible with Azure Test Plans and test result reporting.
+
+trigger:
+  - main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  pythonVersion: "3.12"
+  testResultsDir: $(Agent.TempDirectory)/TestResults
+
+steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: $(pythonVersion)
+
+  - script: |
+      python -m pip install --upgrade pip
+      pip install -r apex_brain/requirements.txt
+      pip install pytest pytest-asyncio pytest-cov ruff
+    displayName: Install dependencies
+
+  - script: ruff check apex_brain scripts
+    displayName: Ruff check
+
+  - script: ruff format --check apex_brain scripts
+    displayName: Ruff format check
+
+  - script: |
+      mkdir -p $(testResultsDir)
+      PYTHONPATH=apex_brain DB_PATH=/tmp/apex_brain_test.db HA_URL=http://127.0.0.1:99999 \
+        python -m pytest apex_brain/tests -v --tb=short -m "not live and not model" \
+        --junitxml=$(testResultsDir)/junit.xml
+    displayName: Run pytest (unit + model; no live/API)
+
+  - task: PublishTestResults@2
+    condition: always()
+    inputs:
+      testResultsFormat: JUnit
+      testResultsFiles: $(testResultsDir)/junit.xml
+      failTaskOnFailedTests: true
+    displayName: Publish test results

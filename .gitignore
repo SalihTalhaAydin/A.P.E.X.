@@ -20,6 +20,7 @@ scripts/broadlink_import/jsonIrCode
 site/
 
 # Python
+.venv/
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -39,6 +40,8 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+*.stackdump
+nul
 
 # Ad-hoc HA exports / debug output (do not commit)
 ha_states*.json
