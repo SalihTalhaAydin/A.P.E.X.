@@ -9,7 +9,7 @@
 #   homeassistant_api — grants access to the HA Core API
 
 name: "Apex Brain"
-version: "0.7.5"
+version: "0.7.6"
 slug: "apex_brain"
 description: "Personal AI assistant with memory, smart home control, and semantic knowledge"
 url: "https://github.com/SalihTalhaAydin/A.P.E.X."
@@ -20,7 +20,8 @@ startup: application
 boot: auto
 init: false
 
-# Network — expose the API on port 8080
+# Network — host_network enables outbound API calls (OpenAI, Anthropic, Gemini)
+host_network: true
 ports:
   8080/tcp: 8080
 ports_description:

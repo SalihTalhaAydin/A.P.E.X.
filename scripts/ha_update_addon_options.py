@@ -83,15 +83,26 @@ async def main():
 
         print("Current options keys:", list(options.keys()))
 
-        # 2. Merge in gemini_api_key from env (GEMINI_API_KEY or GOOGLE_API_KEY)
-        gemini_key = (
-            os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or ""
-        ).strip()
-        if gemini_key:
-            options["gemini_api_key"] = gemini_key
-            print("Merging gemini_api_key from GEMINI_API_KEY (len=%d)" % len(gemini_key))
+        # 2. Merge API keys and model from .env into add-on options
+        updates = []
+        if os.environ.get("OPENAI_API_KEY"):
+            options["openai_api_key"] = os.environ["OPENAI_API_KEY"].strip()
+            updates.append("openai_api_key")
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            options["anthropic_api_key"] = os.environ["ANTHROPIC_API_KEY"].strip()
+            updates.append("anthropic_api_key")
+        if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
+            key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
+            if key:
+                options["gemini_api_key"] = key
+                updates.append("gemini_api_key")
+        if os.environ.get("LITELLM_MODEL"):
+            options["litellm_model"] = os.environ["LITELLM_MODEL"].strip()
+            updates.append("litellm_model")
+        if updates:
+            print("Merging from .env:", ", ".join(updates))
         else:
-            print("GEMINI_API_KEY not set in .env, skipping merge")
+            print("No API keys or LITELLM_MODEL in .env, skipping merge")
 
         # 3. POST updated options (WebSocket uses "data", Supervisor expects options in data.options)
         await ws.send(
@@ -137,6 +148,20 @@ async def main():
                 print("Add-on restarted (options applied).")
             else:
                 print("Restart failed:", r4.get("error", r4))
+        elif state in ("stopped", "error", "unknown"):
+            await ws.send(
+                json.dumps({
+                    "id": 4,
+                    "type": "supervisor/api",
+                    "endpoint": f"/addons/{ADDON_SLUG}/start",
+                    "method": "post",
+                })
+            )
+            r4 = json.loads(await ws.recv())
+            if r4.get("success"):
+                print("Add-on started (options applied).")
+            else:
+                print("Start failed:", r4.get("error", r4))
 
 
 if __name__ == "__main__":

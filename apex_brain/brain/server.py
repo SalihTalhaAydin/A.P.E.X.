@@ -135,6 +135,28 @@ async def lifespan(_app: FastAPI):
     logger.info("  HA URL: %s", settings.ha_url)
     logger.info("=" * 50)
 
+    # Validate API key for configured model
+    model = settings.litellm_model
+    if model.startswith("gpt-") or "openai" in model.lower():
+        if not settings.openai_api_key:
+            logger.error(
+                "Model %s requires openai_api_key. Set it in Add-on Configuration.",
+                model,
+            )
+    elif model.startswith("claude-") or "anthropic" in model.lower():
+        if not settings.anthropic_api_key:
+            logger.error(
+                "Model %s requires anthropic_api_key. Set it in Add-on Configuration.",
+                model,
+            )
+    elif model.startswith("gemini/"):
+        if not settings.gemini_api_key:
+            logger.error(
+                "Model %s requires gemini_api_key. Get one at "
+                "https://aistudio.google.com/apikey and set it in Add-on Configuration.",
+                model,
+            )
+
     # Set API keys
     if settings.openai_api_key:
         os.environ["OPENAI_API_KEY"] = settings.openai_api_key
