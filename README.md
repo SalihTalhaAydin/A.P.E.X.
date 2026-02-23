@@ -81,12 +81,12 @@ curl -X POST http://localhost:8080/api/chat \
 2. Click it, then **Install** (builds the Docker image, ~1-2 minutes)
 3. Go to the **Configuration** tab
 4. Set your API key (`openai_api_key`, `anthropic_api_key`, or `gemini_api_key` depending on model)
-5. Adjust `litellm_model` if desired (default: `gemini/gemini-2.5-pro`)
+5. Adjust `litellm_model` if desired (default: `gpt-4o`)
 6. Click **Save**, then go to **Info** tab and click **Start**
 7. Check the **Log** tab — you should see:
    ```
    Apex Brain Add-on Starting...
-   Model: gemini/gemini-2.5-pro
+   Model: gpt-4o
    Uvicorn running on http://0.0.0.0:8080
    ```
 
@@ -172,11 +172,22 @@ Restart the server. Done.
 
 ## Swapping AI Models
 
-Change `LITELLM_MODEL` in your .env or HA add-on config:
-- `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`
-- `claude-sonnet-4-20250514`, `claude-opus-4-20250514`
-- `gemini/gemini-2.5-pro`, `gemini/gemini-2.0-flash`
-- Any model LiteLLM supports: https://docs.litellm.ai/docs/providers
+`LITELLM_MODEL` must be updated in **two places** when switching providers:
+
+| Environment | Where to change |
+|-------------|----------------|
+| **Local dev** | `.env` file → `LITELLM_MODEL=` |
+| **HA add-on** | Settings > Add-ons > Apex Brain > Configuration > `litellm_model` |
+
+Supported model identifiers (via [LiteLLM](https://docs.litellm.ai/docs/providers)):
+
+| Provider | Example models |
+|----------|---------------|
+| OpenAI | `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo` |
+| Anthropic | `anthropic/claude-haiku-4-5-20251001`, `anthropic/claude-sonnet-4-20250514` |
+| Google | `gemini/gemini-2.5-pro`, `gemini/gemini-2.0-flash` |
+
+Only the API key matching your chosen provider needs to be set. After changing the add-on config, click **Save** and **Restart** the add-on.
 
 ## Updating the Add-on
 

@@ -5,6 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.7.8] - 2026-02-23
+
+### Changed
+- **HA error handling** — `ha_request` now raises `HomeAssistantError` instead of returning silent error dicts. Callers can no longer accidentally treat connection failures or HTTP errors as empty results.
+- **`generic.py` error paths** — Refactored `discover`, `_query_entity`, `_query_template`, and sub-discovery functions to catch `HomeAssistantError` with clear, specific messages (e.g. "Home Assistant connection error", "Entity not found").
+- **`read_state` simplified** — No longer wraps error dicts in `RuntimeError`; propagates `HomeAssistantError` directly from `ha_request`.
+- **README** — Improved "Swapping AI Models" section with provider/model table and dual-location update note.
+- **`.env.example`** — Fixed Anthropic model identifiers to use `anthropic/` prefix; added note to also update HA add-on config.
+
+### Added
+- **`HomeAssistantError` exception class** — New typed exception in `ha_helpers.py` for all HA API failures.
+- **`bugs.csv`** — Known-bugs tracker with 17 catalogued issues across scheduler, config gaps, and code quality.
+
+### Fixed
+- **Silent HA failures** — Connection errors and HTTP 4xx/5xx from HA were returned as dicts that callers could ignore. Now raised as exceptions, ensuring failures are always visible.
+
+---
+
 ## [0.7.5] - 2026-02-22
 
 ### Added

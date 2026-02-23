@@ -224,18 +224,19 @@ class TestDiscover:
 
         assert "No entities matching" in result
 
-    async def test_entities_handles_ha_request_error_dict(self):
-        """discover(what='entities') handles ha_request error dict without crashing (BUG-39)."""
+    async def test_entities_handles_ha_request_error(self):
+        """discover(what='entities') surfaces HA errors clearly (BUG-39)."""
+        from tools.ha_helpers import HomeAssistantError
         from tools.generic import discover
 
         with patch(
             "tools.generic.ha_request",
             new_callable=AsyncMock,
-            return_value={"error": "HA API error 503: Service Unavailable"},
+            side_effect=HomeAssistantError("HA API error 503: Service Unavailable"),
         ):
             result = await discover(what="entities")
 
-        assert "No entities found" in result
+        assert "connection error" in result.lower() or "503" in result
 
     async def test_entities_caps_at_50(self):
         from tools.generic import discover

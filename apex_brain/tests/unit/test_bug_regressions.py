@@ -570,8 +570,10 @@ async def test_bug86_create_automation_malformed_states_no_crash():
 
 @pytest.mark.asyncio
 async def test_bug29_ha_request_connect_error():
-    """ConnectError returns error dict, not crash."""
+    """ConnectError raises HomeAssistantError, not crash."""
     import httpx
+
+    from tools.ha_helpers import HomeAssistantError
 
     with patch(
         "tools.ha_helpers._ha_client",
@@ -582,16 +584,16 @@ async def test_bug29_ha_request_connect_error():
         )
         from tools.ha_helpers import ha_request
 
-        result = await ha_request("GET", "/states")
-    assert isinstance(result, dict)
-    assert "error" in result
-    assert "Cannot connect" in result["error"]
+        with pytest.raises(HomeAssistantError, match="Cannot connect"):
+            await ha_request("GET", "/states")
 
 
 @pytest.mark.asyncio
 async def test_bug29_ha_request_timeout():
-    """TimeoutException returns error dict, not crash."""
+    """TimeoutException raises HomeAssistantError, not crash."""
     import httpx
+
+    from tools.ha_helpers import HomeAssistantError
 
     with patch(
         "tools.ha_helpers._ha_client",
@@ -602,10 +604,8 @@ async def test_bug29_ha_request_timeout():
         )
         from tools.ha_helpers import ha_request
 
-        result = await ha_request("GET", "/states")
-    assert isinstance(result, dict)
-    assert "error" in result
-    assert "timed out" in result["error"]
+        with pytest.raises(HomeAssistantError, match="[Tt]imed out"):
+            await ha_request("GET", "/states")
 
 
 # ------------------------------------------------------------------ #

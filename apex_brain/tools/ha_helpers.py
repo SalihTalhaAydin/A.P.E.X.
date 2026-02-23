@@ -13,6 +13,15 @@ from brain.config import settings
 
 logger = logging.getLogger(__name__)
 
+
+class HomeAssistantError(Exception):
+    """Raised when an HA API call fails (connection, timeout, HTTP error).
+
+    Converts what were previously silent error-dicts into visible exceptions
+    so callers cannot accidentally treat failures as empty results.
+    """
+
+
 # Lazy-initialized client — created on first use, not at import.
 # Avoids connection pool issues when the process forks (e.g. uvicorn workers):
 # each worker gets its own client in the correct process/event-loop context.
@@ -104,22 +113,23 @@ async def ha_request(
             headers=headers,
             json=json_data,
         )
-    except httpx.ConnectError:
-        return {
-            "error": "Cannot connect to Home Assistant. "
-            "Check HA_URL and network."
-        }
-    except httpx.TimeoutException:
-        return {"error": "Home Assistant API request timed out."}
+    except httpx.ConnectError as exc:
+        raise HomeAssistantError(
+            "Cannot connect to Home Assistant. Check HA_URL and network."
+        ) from exc
+    except httpx.TimeoutException as exc:
+        raise HomeAssistantError(
+            "Home Assistant API request timed out."
+        ) from exc
     if not response.is_success:
-        # BUG-123: Log once at debug to avoid duplicate logs when caller
-        # also logs on receiving error dict
         logger.debug(
             "HA API error: %s %s",
             response.status_code,
             response.text[:300],
         )
-        return {"error": f"HA API error {response.status_code}: {response.text[:300]}"}
+        raise HomeAssistantError(
+            f"HA API error {response.status_code}: {response.text[:300]}"
+        )
     content_type = response.headers.get("content-type", "")
     if "application/json" in content_type:
         result = response.json()
@@ -172,14 +182,11 @@ async def read_state(entity_id: str | list[str]) -> dict:
     Accepts entity_id as str or list (HA services accept both);
     if list, uses the first element for the GET /states/{id} URL.
 
-    Raises RuntimeError with the error message when ha_request returns
-    an error dict (e.g. connection failure, timeout).
+    Raises HomeAssistantError on connection/timeout/HTTP errors
+    (propagated from ha_request).
     """
     eid = entity_id[0] if isinstance(entity_id, list) else entity_id
-    result = await ha_request("GET", f"/states/{eid}")
-    if isinstance(result, dict) and "error" in result:
-        raise RuntimeError(result["error"])
-    return result
+    return await ha_request("GET", f"/states/{eid}")
 
 
 # Domains whose entities are injected into the system prompt so
@@ -253,10 +260,11 @@ async def get_device_summary() -> str:
     try:
         states = await ha_request("GET", "/states")
     except Exception as exc:
-        logger.debug("Device summary fetch failed: %s", exc)
+        logger.warning("Device summary fetch failed: %s", exc)
         return ""
 
     if not isinstance(states, list):
+        logger.warning("Device summary: /states returned non-list: %s", type(states).__name__)
         return ""
 
     # Collect all entity IDs we will show; sections_data = (header, state dicts)

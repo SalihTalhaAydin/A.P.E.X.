@@ -330,14 +330,14 @@ async def test_get_device_summary_light_no_cap_header_when_under_limit():
 
 # ---------------------------------------------------------------------------
 # Tests — ha_request HTTP error handling (BUG-39)
-# ha_request must return error dicts for non-2xx, never raise HTTPStatusError
+# ha_request must raise HomeAssistantError for non-2xx / connection errors
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_ha_request_returns_error_dict_on_404():
-    """ha_request returns {"error": "..."} for 404, does not raise (BUG-39)."""
-    from tools.ha_helpers import ha_request
+async def test_ha_request_raises_on_404():
+    """ha_request raises HomeAssistantError for 404 (BUG-39)."""
+    from tools.ha_helpers import HomeAssistantError, ha_request
 
     mock_resp = type("Response", (), {})()
     mock_resp.is_success = False
@@ -347,18 +347,14 @@ async def test_ha_request_returns_error_dict_on_404():
 
     with patch("tools.ha_helpers._ha_client") as mock_client:
         mock_client.request = AsyncMock(return_value=mock_resp)
-        result = await ha_request("GET", "/states/light.missing")
-
-    assert isinstance(result, dict)
-    assert "error" in result
-    assert "404" in result["error"]
-    assert "Not Found" in result["error"]
+        with pytest.raises(HomeAssistantError, match="404"):
+            await ha_request("GET", "/states/light.missing")
 
 
 @pytest.mark.asyncio
-async def test_ha_request_returns_error_dict_on_500():
-    """ha_request returns {"error": "..."} for 500, does not raise (BUG-39)."""
-    from tools.ha_helpers import ha_request
+async def test_ha_request_raises_on_500():
+    """ha_request raises HomeAssistantError for 500 (BUG-39)."""
+    from tools.ha_helpers import HomeAssistantError, ha_request
 
     mock_resp = type("Response", (), {})()
     mock_resp.is_success = False
@@ -368,48 +364,38 @@ async def test_ha_request_returns_error_dict_on_500():
 
     with patch("tools.ha_helpers._ha_client") as mock_client:
         mock_client.request = AsyncMock(return_value=mock_resp)
-        result = await ha_request("GET", "/states")
-
-    assert isinstance(result, dict)
-    assert "error" in result
-    assert "500" in result["error"]
+        with pytest.raises(HomeAssistantError, match="500"):
+            await ha_request("GET", "/states")
 
 
 @pytest.mark.asyncio
-async def test_ha_request_returns_error_dict_on_connect_error():
-    """ha_request returns {"error": "..."} for ConnectError, does not raise (BUG-39)."""
+async def test_ha_request_raises_on_connect_error():
+    """ha_request raises HomeAssistantError for ConnectError (BUG-39)."""
     import httpx
 
-    from tools.ha_helpers import ha_request
+    from tools.ha_helpers import HomeAssistantError, ha_request
 
     with patch("tools.ha_helpers._ha_client") as mock_client:
         mock_client.request = AsyncMock(
             side_effect=httpx.ConnectError("connection refused")
         )
-        result = await ha_request("GET", "/states")
-
-    assert isinstance(result, dict)
-    assert "error" in result
-    assert "connect" in result["error"].lower()
+        with pytest.raises(HomeAssistantError, match="[Cc]onnect"):
+            await ha_request("GET", "/states")
 
 
 @pytest.mark.asyncio
-async def test_ha_request_returns_error_dict_on_timeout():
-    """ha_request returns {"error": "..."} for TimeoutException, does not raise (BUG-39)."""
+async def test_ha_request_raises_on_timeout():
+    """ha_request raises HomeAssistantError for TimeoutException (BUG-39)."""
     import httpx
 
-    from tools.ha_helpers import ha_request
+    from tools.ha_helpers import HomeAssistantError, ha_request
 
     with patch("tools.ha_helpers._ha_client") as mock_client:
         mock_client.request = AsyncMock(
             side_effect=httpx.TimeoutException("timed out")
         )
-        result = await ha_request("GET", "/states")
-
-    assert isinstance(result, dict)
-    assert "error" in result
-    err = result["error"].lower()
-    assert "timeout" in err or "timed out" in err
+        with pytest.raises(HomeAssistantError, match="[Tt]imed out"):
+            await ha_request("GET", "/states")
 
 
 # ---------------------------------------------------------------------------
@@ -475,14 +461,14 @@ async def test_bug121_get_device_summary_returns_empty_when_states_not_list():
 
 
 @pytest.mark.asyncio
-async def test_get_device_summary_returns_empty_on_ha_request_error_dict():
-    """get_device_summary returns '' when ha_request returns canonical error dict."""
-    from tools.ha_helpers import get_device_summary
+async def test_get_device_summary_returns_empty_on_ha_request_error():
+    """get_device_summary returns '' when ha_request raises HomeAssistantError."""
+    from tools.ha_helpers import HomeAssistantError, get_device_summary
 
     with patch(
         "tools.ha_helpers.ha_request",
         new_callable=AsyncMock,
-        return_value={"error": "HA API error 503: Service Unavailable"},
+        side_effect=HomeAssistantError("HA API error 503: Service Unavailable"),
     ):
         result = await get_device_summary()
 
@@ -495,14 +481,16 @@ async def test_get_device_summary_returns_empty_on_ha_request_error_dict():
 
 
 # ---------------------------------------------------------------------------
-# BUG-39 (P3-BUG-98): ha_request must return error dict for non-2xx (no raise_for_status)
+# BUG-39 (P3-BUG-98): ha_request must raise HomeAssistantError for non-2xx
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_ha_request_returns_error_dict_for_non_2xx():
-    """ha_request returns {"error": "..."} for non-success responses; does NOT raise."""
+async def test_ha_request_raises_for_non_2xx():
+    """ha_request raises HomeAssistantError for non-success responses."""
     import httpx
+
+    from tools.ha_helpers import HomeAssistantError
 
     fake_response = httpx.Response(
         404,
@@ -517,18 +505,16 @@ async def test_ha_request_returns_error_dict_for_non_2xx():
         mock_client.request = AsyncMock(return_value=fake_response)
         from tools.ha_helpers import ha_request
 
-        result = await ha_request("GET", "/states/light.nonexistent")
-
-    assert isinstance(result, dict)
-    assert "error" in result
-    assert "404" in result["error"]
-    assert "Entity not found" in result["error"]
+        with pytest.raises(HomeAssistantError, match="404"):
+            await ha_request("GET", "/states/light.nonexistent")
 
 
 @pytest.mark.asyncio
-async def test_ha_request_returns_error_dict_for_500():
-    """ha_request returns error dict for 500 Server Error."""
+async def test_ha_request_raises_for_500():
+    """ha_request raises HomeAssistantError for 500 Server Error."""
     import httpx
+
+    from tools.ha_helpers import HomeAssistantError
 
     fake_response = httpx.Response(
         500,
@@ -543,11 +529,8 @@ async def test_ha_request_returns_error_dict_for_500():
         mock_client.request = AsyncMock(return_value=fake_response)
         from tools.ha_helpers import ha_request
 
-        result = await ha_request("GET", "/states")
-
-    assert isinstance(result, dict)
-    assert "error" in result
-    assert "500" in result["error"]
+        with pytest.raises(HomeAssistantError, match="500"):
+            await ha_request("GET", "/states")
 
 
 # ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from tools.base import tool
 from tools.ha_helpers import (
+    HomeAssistantError,
     format_ha_error,
     friendly_name,
     ha_request,
@@ -150,6 +151,8 @@ async def discover(
                 "floors, devices, integrations, "
                 "or info."
             )
+    except HomeAssistantError as e:
+        return f"Home Assistant connection error while discovering {what}: {e}"
     except Exception as e:
         return f"Error discovering {what}: {e}"
 
@@ -158,7 +161,7 @@ async def _discover_entities(filter_str: str) -> str:
     """List entities, optionally filtered by domain or keyword."""
     states = await ha_request("GET", "/states")
     if not isinstance(states, list):
-        return "No entities found."
+        return "Unexpected response from Home Assistant (expected entity list)."
 
     filt = filter_str.strip().lower()
     if filt:
@@ -196,7 +199,7 @@ async def _discover_services(filter_str: str) -> str:
     When filtered, include full schemas."""
     services = await ha_request("GET", "/services")
     if not isinstance(services, list):
-        return "No services found."
+        return "Unexpected response from Home Assistant (expected service list)."
 
     filt = filter_str.strip().lower()
 
@@ -289,7 +292,7 @@ async def _discover_areas(filter_str: str) -> str:
         "POST", "/template", json_data={"template": template}
     )
     if not result or not isinstance(result, str):
-        return "No areas found."
+        return "Unexpected response from Home Assistant (expected area list)."
 
     lines = []
     for line in result.strip().split("\n"):
@@ -323,15 +326,12 @@ async def _discover_floors(filter_str: str) -> str:
             "/template",
             json_data={"template": template},
         )
-    except Exception as e:
-        err_str = str(e).lower()
-        if "connect" in err_str or "timeout" in err_str or "network" in err_str:
-            return "Unable to reach Home Assistant. Check connection."
+    except HomeAssistantError:
+        raise  # Let discover() wrapper handle connection/auth errors
+    except Exception:
         return "Floors not available (requires Home Assistant 2024.2+)."
-    if isinstance(result, dict) and result.get("error"):
-        return result["error"]
     if not result or not isinstance(result, str):
-        return "No floors found."
+        return "Unexpected response from Home Assistant (expected floor list)."
 
     filt = filter_str.strip().lower()
     lines = []
@@ -381,7 +381,7 @@ async def _discover_devices(filter_str: str) -> str:
     )
 
     if not result or not isinstance(result, str):
-        return "No devices found."
+        return "Unexpected response from Home Assistant (expected device list)."
 
     filt = filter_str.strip().lower()
     lines = []
@@ -414,13 +414,15 @@ async def _discover_integrations(filter_str: str) -> str:
     # Try the config entries endpoint
     try:
         entries = await ha_request("GET", "/config/config_entries/entry")
+    except HomeAssistantError:
+        raise  # Let discover() wrapper handle connection/auth errors
     except Exception:
         return (
             "Could not list integrations (endpoint may not be available)."
         )
 
     if not isinstance(entries, list):
-        return "No integrations found."
+        return "Unexpected response from Home Assistant (expected integration list)."
 
     filt = filter_str.strip().lower()
     seen = {}
@@ -447,11 +449,13 @@ async def _discover_info() -> str:
     """Return HA system info."""
     try:
         config = await ha_request("GET", "/config")
+    except HomeAssistantError:
+        raise  # Let discover() wrapper handle connection/auth errors
     except Exception as e:
         return f"Could not get HA info: {e}"
 
     if not isinstance(config, dict):
-        return "Could not read HA configuration."
+        return "Unexpected response from Home Assistant (expected config dict)."
 
     version = config.get("version", "unknown")
     name = config.get("location_name", "Home")
@@ -527,59 +531,40 @@ async def _query_entity(entity_id: str) -> str:
     """Read a single entity's state and key attributes."""
     try:
         state = await read_state(entity_id)
-    except httpx.ConnectError:
-        return "Home Assistant is unreachable (connection error)."
-    except httpx.TimeoutException:
-        return "Home Assistant request timed out."
-    except Exception as exc:
-        # read_state raises RuntimeError when ha_request returns error dict
+    except HomeAssistantError as exc:
         err_msg = str(exc)
-        if "Cannot connect" in err_msg or "timed out" in err_msg.lower():
-            return err_msg
-        # Validate entity_id before template injection
-        if not _ENTITY_RE.match(entity_id):
-            return (
-                f"Invalid entity_id format: "
-                f"'{entity_id}'. Expected format: "
-                "domain.name (e.g. light.kitchen)."
-            )
-        # Smart fallback: try as template
-        try:
-            result = await ha_request(
-                "POST",
-                "/template",
-                json_data={
-                    "template": ("{{ states('" + entity_id + "') }}")
-                },
-            )
-            if isinstance(result, dict) and "error" in result:
-                return result["error"]
-            if result and result != "unknown":
-                return f"{entity_id}: {result}"
-        except Exception as exc:
-            logger.debug(
-                "Template fallback failed for %s: %s",
-                entity_id,
-                exc,
-            )
-        return (
-            f"Entity '{entity_id}' not found. "
-            "Check the entity_id with "
-            "discover(what='entities')."
-        )
-
-    # ha_request returns error dict on ConnectError/Timeout/4xx/5xx; don't treat as state
-    if isinstance(state, dict) and "error" in state:
-        err = state["error"]
-        # Reserve "Entity not found" only for actual 404 or invalid entity
-        if "404" in err or "not found" in err.lower():
+        if "404" in err_msg:
+            # Validate entity_id before template injection
+            if not _ENTITY_RE.match(entity_id):
+                return (
+                    f"Invalid entity_id format: "
+                    f"'{entity_id}'. Expected format: "
+                    "domain.name (e.g. light.kitchen)."
+                )
+            # Smart fallback: try as template
+            try:
+                result = await ha_request(
+                    "POST",
+                    "/template",
+                    json_data={
+                        "template": ("{{ states('" + entity_id + "') }}")
+                    },
+                )
+                if result and result != "unknown":
+                    return f"{entity_id}: {result}"
+            except Exception as fallback_exc:
+                logger.debug(
+                    "Template fallback failed for %s: %s",
+                    entity_id,
+                    fallback_exc,
+                )
             return (
                 f"Entity '{entity_id}' not found. "
                 "Check the entity_id with "
                 "discover(what='entities')."
             )
-        # Connection/timeout/other: return the error message directly
-        return err
+        # Connection/timeout/other HA errors: surface clearly
+        return f"Home Assistant error: {err_msg}"
 
     attrs = state.get("attributes", {})
     fn = attrs.get("friendly_name", friendly_name(entity_id))
@@ -636,11 +621,14 @@ def _format_domain_attrs(domain: str, attrs: dict) -> str:
 
 async def _query_template(template: str) -> str:
     """Evaluate a Jinja2 template against HA."""
-    result = await ha_request(
-        "POST",
-        "/template",
-        json_data={"template": template},
-    )
+    try:
+        result = await ha_request(
+            "POST",
+            "/template",
+            json_data={"template": template},
+        )
+    except HomeAssistantError as exc:
+        return f"Home Assistant error: {exc}"
     if isinstance(result, str):
         return result
     return str(result)
