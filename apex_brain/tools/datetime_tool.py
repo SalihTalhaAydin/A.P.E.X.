@@ -20,5 +20,5 @@ def get_current_datetime() -> str:
         tz = zoneinfo.ZoneInfo(settings.timezone)
         now = datetime.datetime.now(tz=tz)
     except Exception:
-        now = datetime.datetime.now()
+        now = datetime.datetime.now(tz=datetime.timezone.utc)
     return now.strftime("%A, %B %d, %Y at %I:%M %p")

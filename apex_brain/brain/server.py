@@ -8,6 +8,7 @@ integration, plus /api/chat for testing and
 from __future__ import annotations
 
 import asyncio
+import re
 import hmac
 import logging
 import os
@@ -21,13 +22,12 @@ import litellm
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from memory.context_builder import ContextBuilder
-from memory.conversation_store import (
-    ConversationStore,
-)
+from memory.conversation_store import ConversationStore
+from memory.db_manager import SharedDbConnection
 from memory.fact_extractor import FactExtractor
 from memory.knowledge_store import KnowledgeStore
 from memory.routine_store import RoutineStore
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from tools import discover_tools
 from tools.base import TOOL_REGISTRY
 from tools.knowledge import set_knowledge_store
@@ -48,6 +48,24 @@ from brain.scheduler import Scheduler
 from brain.version import __version__
 
 logger = logging.getLogger(__name__)
+
+
+async def _close_stores_if_present(
+    shared_db: SharedDbConnection | None,
+    routine_store,
+    convo_store,
+    knowledge_store,
+) -> None:
+    """Close store connections if present. No-op when None (e.g. startup failed)."""
+    if routine_store is not None:
+        await routine_store.close()
+    if convo_store is not None:
+        await convo_store.close()
+    if knowledge_store is not None:
+        await knowledge_store.close()
+    if shared_db is not None:
+        await shared_db.close()
+
 
 # ---------------------------------------------------------
 # Globals (initialized on startup)
@@ -86,7 +104,13 @@ async def _embed_text(
             model=settings.embedding_model,
             input=[text],
         )
-        return response.data[0]["embedding"]
+        if not response.data:
+            logger.warning("Embedding API returned empty data for text: %s", text[:50])
+            return None
+        item = response.data[0]
+        if isinstance(item, dict):
+            return item.get("embedding")
+        return getattr(item, "embedding", None)
     except Exception as e:
         logger.error("Embedding error: %s", e)
         return None
@@ -95,7 +119,7 @@ async def _embed_text(
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Startup and shutdown logic."""
-    global conversation, event_handler, startup_time
+    global conversation, event_handler, scheduler, event_subscriber, startup_time
     startup_time = time.time()
 
     logging.basicConfig(
@@ -120,18 +144,30 @@ async def lifespan(_app: FastAPI):
         os.environ["GEMINI_API_KEY"] = settings.gemini_api_key
 
     # Track initialized resources for cleanup on failure
+    shared_db: SharedDbConnection | None = None
     convo_store = None
     knowledge_store = None
     routine_store = None
     audit_store = None
     mcp_bridge: MCPBridge | None = None
+    scheduler = None
+    event_subscriber = None
 
     try:
-        # Initialize memory stores
-        convo_store = ConversationStore(settings.db_path)
-        await convo_store.initialize()
+        # Single shared DB connection for all stores (prevents "database is locked" BUG-52)
+        shared_db = SharedDbConnection(settings.db_path)
+        await shared_db.initialize()
 
-        knowledge_store = KnowledgeStore(settings.db_path)
+        # Initialize memory stores (all share the same connection + lock)
+        convo_store = ConversationStore(shared_db)
+        await convo_store.initialize()
+        pruned = await convo_store.cleanup_old_turns(
+            settings.conversation_retention_days
+        )
+        if pruned:
+            logger.info("Pruned %d old conversation turns at startup", pruned)
+
+        knowledge_store = KnowledgeStore(shared_db)
         knowledge_store.set_embed_function(_embed_text)
         await knowledge_store.initialize()
 
@@ -150,7 +186,7 @@ async def lifespan(_app: FastAPI):
         )
 
         # Initialize routine store (dedicated table with lifecycle tracking)
-        routine_store = RoutineStore(settings.db_path)
+        routine_store = RoutineStore(shared_db)
         await routine_store.initialize()
         await routine_store.migrate_from_knowledge_store(knowledge_store)
 
@@ -170,7 +206,7 @@ async def lifespan(_app: FastAPI):
             set_audit_store as set_configure_audit,
         )
 
-        audit_store = AuditStore(settings.db_path)
+        audit_store = AuditStore(shared_db)
         await audit_store.initialize()
         set_manage_audit(audit_store)
         set_configure_audit(audit_store)
@@ -255,35 +291,38 @@ async def lifespan(_app: FastAPI):
             await event_subscriber.stop()
         if scheduler:
             await scheduler.stop()
+        if conversation:
+            await conversation.shutdown()
         if mcp_bridge and mcp_bridge.connected:
             await mcp_bridge.disconnect()
         if audit_store:
             await audit_store.close()
-        if routine_store:
-            await routine_store.close()
-        if knowledge_store:
-            await knowledge_store.close()
-        if convo_store:
-            await convo_store.close()
+        await _close_stores_if_present(
+            shared_db, routine_store, convo_store, knowledge_store
+        )
         raise
 
     yield
 
-    # Shutdown
+    # Shutdown (stop event sources first, then conversation's background tasks)
     if event_subscriber:
         await event_subscriber.stop()
     if scheduler:
         await scheduler.stop()
+    if conversation:
+        await conversation.shutdown()
     if mcp_bridge and mcp_bridge.connected:
         await mcp_bridge.disconnect()
     from tools.ha_helpers import close_ha_client
+    from tools.manage import close_supervisor_client
 
     await close_ha_client()
+    await close_supervisor_client()
     if audit_store:
         await audit_store.close()
-    await routine_store.close()
-    await convo_store.close()
-    await knowledge_store.close()
+    await _close_stores_if_present(
+        shared_db, routine_store, convo_store, knowledge_store
+    )
     logger.info("Apex Brain shut down.")
 
 
@@ -361,7 +400,13 @@ async def rate_limit_middleware(request: Request, call_next):
 
     if path == "/api/chat":
         # Rate limit by client IP (not X-Forwarded-For which is spoofable).
-        client_ip = request.client.host if request.client else "unknown"
+        if request.client:
+            client_ip = request.client.host
+        else:
+            # BUG-103: behind reverse proxy, client can be None; fallback to
+            # X-Real-IP or X-Forwarded-For to avoid all sharing "chat:unknown"
+            forwarded = request.headers.get("x-forwarded-for", "")
+            client_ip = forwarded.split(",")[0].strip() if forwarded else "unknown"
         key = f"chat:{client_ip}"
         if not rate_limiter.is_allowed(
             key, max_requests=30, window_seconds=60
@@ -379,7 +424,11 @@ async def rate_limit_middleware(request: Request, call_next):
             )
 
     elif path == "/api/webhook":
-        client_ip = request.client.host if request.client else "unknown"
+        if request.client:
+            client_ip = request.client.host
+        else:
+            forwarded = request.headers.get("x-forwarded-for", "")
+            client_ip = forwarded.split(",")[0].strip() if forwarded else "unknown"
         key = f"webhook:{client_ip}"
         if not rate_limiter.is_allowed(
             key, max_requests=60, window_seconds=60
@@ -401,7 +450,7 @@ async def rate_limit_middleware(request: Request, call_next):
 # Models
 # ---------------------------------------------------------
 class ChatRequest(BaseModel):
-    message: str
+    message: str = Field(..., max_length=50000)
     session_id: str = "default"
 
 
@@ -602,13 +651,15 @@ async def openai_compatible(request: Request):
     # Extract session identifier from the request.
     # The HA Extended OpenAI Conversation integration may send
     # a 'user' field or conversation_id in the body.
-    session_id = (
+    # All sources are untrusted; sanitize to prevent path traversal, SQL, or collision.
+    raw_session = (
         body.get("user")
         or body.get("conversation_id")
         or request.headers.get("x-session-id")
         or request.headers.get("x-conversation-id")
-        or "default"
     )
+    sanitized = re.sub(r"[^a-zA-Z0-9_-]", "", str(raw_session) if raw_session else "")[:64]
+    session_id = sanitized or "default"
 
     try:
         response_text = await asyncio.wait_for(

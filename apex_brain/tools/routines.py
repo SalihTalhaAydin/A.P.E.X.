@@ -82,11 +82,15 @@ async def define_routine(
             f"Delete it first with delete_routine or use a different name."
         )
 
-    step_list = [
-        s.strip()
-        for s in steps.replace("\n", ".").split(".")
-        if s.strip()
-    ]
+    # Split on newlines and ". " (period-space) to avoid splitting numbers
+    # like "72.5" or abbreviations. (BUG-154)
+    parts: list[str] = []
+    for line in steps.split("\n"):
+        for p in line.split(". "):
+            p = p.strip()
+            if p:
+                parts.append(p)
+    step_list = parts
     await _routine_store.save_routine(
         name, step_list, trigger=trigger
     )

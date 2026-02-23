@@ -62,7 +62,13 @@ async def send_notification(
 ) -> str:
     """Send a notification via HA notify service."""
     try:
-        service_name = entity_id.replace("notify.", "", 1)
+        if not entity_id.startswith("notify."):
+            return (
+                "Invalid notify entity — must be a notify.* entity "
+                "(e.g. notify.mobile_app_phone). Use list_entities or "
+                "discover to find valid targets."
+            )
+        service_name = entity_id.removeprefix("notify.")
         target = service_name.replace("_", " ").title()
 
         data: dict = {"message": message}
@@ -186,12 +192,15 @@ async def announce(
                 # Last resort: list states for notify.*
                 try:
                     states = await ha_request("GET", "/states")
-                    alexa_services = [
-                        s["entity_id"].replace("notify.", "", 1)
-                        for s in states
-                        if s["entity_id"].startswith("notify.")
-                        and "alexa" in s["entity_id"].lower()
-                    ]
+                    if isinstance(states, list):
+                        alexa_services = [
+                            s["entity_id"].removeprefix("notify.")
+                            for s in states
+                            if s.get("entity_id", "").startswith("notify.")
+                            and "alexa" in s.get("entity_id", "").lower()
+                        ]
+                    else:
+                        alexa_services = []
                 except Exception as exc:
                     logger.debug(
                         "Alexa service discovery via states failed: %s",

@@ -51,6 +51,7 @@ async def fire_webhook(webhook_id: str, data: dict | None = None) -> str:
             "POST",
             f"/webhook/{webhook_id}",
             json_data=data or {},
+            skip_auth=True,
         )
         return f"Done. Webhook '{webhook_id}' fired successfully."
     except Exception as e:
@@ -72,8 +73,10 @@ async def list_webhook_automations() -> str:
     """List automations with webhook triggers."""
     try:
         states = await ha_request("GET", "/states")
+        if not isinstance(states, list):
+            return "Error: Unable to reach Home Assistant."
         automations = [
-            s for s in states if s["entity_id"].startswith("automation.")
+            s for s in states if s.get("entity_id", "").startswith("automation.")
         ]
 
         webhook_autos = []

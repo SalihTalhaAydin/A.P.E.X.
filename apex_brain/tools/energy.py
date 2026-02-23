@@ -75,6 +75,35 @@ def _format_reading(entity: dict) -> str:
     return f"- {name} ({eid}): {state} {unit}".rstrip()
 
 
+def _categorize_power_reading(p: dict) -> str:
+    """Return category for power reading: generating, from_grid, exporting, consumption."""
+    eid_lower = p["entity_id"].lower()
+    name_lower = p["name"].lower()
+    if any(
+        kw in eid_lower or kw in name_lower
+        for kw in ("solar", "pv", "generat")
+    ):
+        return "generating"
+    if any(
+        kw in eid_lower or kw in name_lower
+        for kw in ("grid", "import", "mains")
+    ):
+        return "from_grid"
+    if any(
+        kw in eid_lower or kw in name_lower
+        for kw in ("export", "feed")
+    ):
+        return "exporting"
+    return "consumption"
+
+
+def _fmt_w(val_w: float) -> str:
+    """Format watts as kW or W string."""
+    if abs(val_w) >= 1000:
+        return f"{round(val_w / 1000, 2)} kW"
+    return f"{round(val_w, 1)} W"
+
+
 def _categorize_reading(
     entity: dict,
 ) -> tuple[str, float | None, str]:
@@ -124,6 +153,11 @@ async def get_energy_entities() -> str:
     # generic equivalent.
     try:
         states = await ha_request("GET", "/states")
+        if not isinstance(states, list):
+            return (
+                "Unable to reach Home Assistant. "
+                "Check connection and try again."
+            )
         energy = [
             s for s in states if _is_energy_entity(s)
         ]
@@ -243,6 +277,11 @@ async def get_energy_summary() -> str:
     # generic equivalent.
     try:
         states = await ha_request("GET", "/states")
+        if not isinstance(states, list):
+            return (
+                "Unable to reach Home Assistant. "
+                "Check connection and try again."
+            )
         energy = [
             s for s in states if _is_energy_entity(s)
         ]
@@ -326,45 +365,68 @@ async def get_energy_summary() -> str:
                 + str(len(power_readings))
                 + " sensors):"
             )
-            total_w = 0
+            # Net consumption = grid import + device use - solar - grid export
+            solar_w = 0.0
+            grid_import_w = 0.0
+            grid_export_w = 0.0
+            consumption_w = 0.0
+
             for p in sorted(
                 power_readings,
                 key=lambda x: abs(x["value_w"]),
                 reverse=True,
             ):
-                indicator = ""
-                eid_lower = p["entity_id"].lower()
-                name_lower = p["name"].lower()
-                if any(
-                    kw in eid_lower or kw in name_lower
-                    for kw in ("solar", "pv", "generat")
-                ):
+                category = _categorize_power_reading(p)
+                val = p["value_w"]
+                if category == "generating":
+                    solar_w += val
                     indicator = " (generating)"
-                elif any(
-                    kw in eid_lower or kw in name_lower
-                    for kw in ("grid", "import", "mains")
-                ):
+                elif category == "from_grid":
+                    grid_import_w += val
                     indicator = " (from grid)"
-                elif any(
-                    kw in eid_lower or kw in name_lower
-                    for kw in ("export", "feed")
-                ):
+                elif category == "exporting":
+                    grid_export_w += val
                     indicator = " (exporting)"
+                else:
+                    consumption_w += val
+                    indicator = " (consuming)"
                 lines.append(
                     f"  {p['name']}: "
                     f"{p['display']}{indicator}"
                 )
-                total_w += p["value_w"]
 
+            # Net consumption: grid import + device use - solar - grid export
+            net_w = grid_import_w + consumption_w - solar_w - grid_export_w
             if len(power_readings) > 1:
-                total_display = (
-                    f"{round(total_w / 1000, 2)} kW"
-                    if abs(total_w) >= 1000
-                    else f"{round(total_w, 1)} W"
+                net_display = (
+                    f"{round(net_w / 1000, 2)} kW"
+                    if abs(net_w) >= 1000
+                    else f"{round(net_w, 1)} W"
                 )
-                lines.append(
-                    f"  --- Total: {total_display}"
-                )
+                lines.append(f"  --- Net consumption: {net_display}")
+                # Per-category breakdown when we have multiple categories
+                has_solar = solar_w != 0
+                has_grid = grid_import_w != 0 or grid_export_w != 0
+                if (has_solar or has_grid) and (consumption_w != 0 or grid_import_w != 0):
+                    parts = []
+                    if grid_import_w > 0:
+                        parts.append(
+                            f"grid +{_fmt_w(grid_import_w)}"
+                        )
+                    if consumption_w > 0:
+                        parts.append(
+                            f"devices +{_fmt_w(consumption_w)}"
+                        )
+                    if solar_w > 0:
+                        parts.append(
+                            f"solar -{_fmt_w(solar_w)}"
+                        )
+                    if grid_export_w > 0:
+                        parts.append(
+                            f"export -{_fmt_w(grid_export_w)}"
+                        )
+                    if parts:
+                        lines.append(f"  Breakdown: {' '.join(parts)}")
 
         # Energy (cumulative)
         if energy_readings:

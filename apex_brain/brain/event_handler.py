@@ -8,6 +8,7 @@ Includes cooldown to prevent reaction storms.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timezone
 
 from pydantic import BaseModel
@@ -18,15 +19,47 @@ from brain.cooldown import CooldownTracker
 logger = logging.getLogger(__name__)
 
 
-def _is_high_priority(event_type: str, hour: int) -> bool:
+def _effective_event_type(event_type: str, entity_id: str) -> str:
+    """Derive event type from entity when event_type is state_changed (BUG-159).
+    WebSocket events are always state_changed; derive alarm/door from domain."""
+    if event_type != "state_changed":
+        return event_type
+    domain = entity_id.split(".")[0] if "." in entity_id else ""
+    if domain == "alarm_control_panel":
+        return "alarm"
+    if domain in ("lock", "cover"):
+        return "door"
+    return event_type
+
+
+def _is_high_priority(event_type: str, hour: int, entity_id: str = "") -> bool:
     """Return True if this event warrants a voice announcement."""
-    if event_type in ("door", "alarm"):
+    effective = _effective_event_type(event_type, entity_id)
+    if effective in ("door", "alarm"):
         return True
-    if event_type == "motion" and (hour >= 22 or hour < 6):
+    if effective == "motion" and (hour >= 22 or hour < 6):
         return True
-    if "security" in event_type or "alarm" in event_type:
+    if "security" in effective or "alarm" in effective:
         return True
     return False
+
+
+def _build_announcement_message(event: "WebhookEvent") -> str:
+    """Build a short, TTS-friendly message for voice announcement."""
+    name = (
+        event.attributes.get("friendly_name")
+        or event.entity_id.split(".")[-1].replace("_", " ").title()
+    )
+    templates = {
+        "motion": f"Motion detected in {name}",
+        "door": f"Door event: {name} is {event.new_state}",
+        "alarm": f"Alarm alert: {name}",
+        "temperature": f"Temperature alert in {name}",
+    }
+    return templates.get(
+        event.event_type,
+        f"Alert: {name} – {event.new_state}",
+    )
 
 
 class WebhookEvent(BaseModel):
@@ -124,8 +157,9 @@ class EventHandler:
         # Unavailable bounces — device connectivity noise
         if new == "unavailable":
             return "device went unavailable"
-        if old == "unavailable" and new:
-            return f"recovery from unavailable to {new}"
+        # Recovery from unavailable: do NOT drop (users need to know when
+        # devices come back online; BUG-88)
+        # Removed: if old == "unavailable" and new: return "recovery..."
 
         return ""
 
@@ -169,7 +203,9 @@ class EventHandler:
                 settings.timezone,
             )
         now = datetime.now(tz)
-        high_priority = _is_high_priority(event.event_type, now.hour)
+        high_priority = _is_high_priority(
+            event.event_type, now.hour, event.entity_id
+        )
         if high_priority:
             logger.info(
                 "High-priority event: %s on %s",
@@ -177,16 +213,33 @@ class EventHandler:
                 event.entity_id,
             )
 
+        actions_taken: list[str] = []
+        if high_priority:
+            actions_taken.append("high_priority_alert")
+            if settings.announce_on_events and settings.announce_target:
+                try:
+                    from tools.notify import announce
+
+                    announcement_msg = _build_announcement_message(event)
+                    await announce(
+                        announcement_msg,
+                        target=settings.announce_target,
+                    )
+                    actions_taken.append("voice_announcement")
+                except Exception:
+                    logger.exception(
+                        "Failed to announce high-priority event %s on %s",
+                        event.event_type,
+                        event.entity_id,
+                    )
+
         try:
-            response = await self.conversation.handle(
-                msg, session_id="apex_events"
-            )
+            session_id = f"apex_events:{event.entity_id}:{uuid.uuid4().hex[:12]}"
+            response = await self.conversation.handle(msg, session_id=session_id)
             return WebhookResponse(
                 status="processed",
                 message=response,
-                actions_taken=(
-                    ["high_priority_alert"] if high_priority else []
-                ),
+                actions_taken=actions_taken,
             )
         except Exception:
             logger.exception(

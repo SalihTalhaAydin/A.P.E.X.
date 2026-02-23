@@ -17,8 +17,18 @@ logger = logging.getLogger(__name__)
 # Service schema cache (refreshed every hour)
 # ---------------------------------------------------------------------------
 _schema_cache: dict = {"schemas": "", "timestamp": 0.0}
-_schema_lock = asyncio.Lock()
+_schema_lock: asyncio.Lock | None = None
 _SCHEMA_REFRESH_SECONDS = 3600  # 1 hour
+
+
+def _get_schema_lock() -> asyncio.Lock:
+    """Lazy-init lock to avoid RuntimeError when importing without event loop."""
+    global _schema_lock
+    if _schema_lock is None:
+        _schema_lock = asyncio.Lock()
+    return _schema_lock
+
+
 _TOP_DOMAINS = ("light", "climate", "cover", "fan", "switch")
 
 SYSTEM_PROMPT_TEMPLATE = """\
@@ -70,7 +80,7 @@ You have 6 primary tools for Home Assistant control:
 - do(domain, service, targets, data) — call ANY HA service (lights, \
 switches, climate, media, covers, fans, locks, etc.)
 - query(target) — read entity state or evaluate a Jinja2 template
-- discover(what, filter) — find entities, services, areas, floors, \
+- discover(what, filter_str) — find entities, services, areas, floors, \
 devices, integrations, or system info
 - history(entity_id, hours, mode) — get state change history or logbook
 - manage(action, target, config) — Supervisor operations: backups, \
@@ -94,12 +104,12 @@ AREA-BASED CONTROL:
 without specifying a particular fixture (like "ceiling light"), target the \
 ENTIRE AREA using do(domain="light", service="turn_on", \
 targets={{"area_id": "the_area_id"}}).
-- ALWAYS call discover(what="areas", filter="room_name") FIRST to get the \
+- ALWAYS call discover(what="areas", filter_str="room_name") FIRST to get the \
 exact area_id before calling do(). Area IDs may differ from display names \
 (e.g. "lower_level" not "basement"). Do not guess.
 - Device summary shows [area: area_id] per entity — use that to infer \
 area_id when present; otherwise discover(what="areas") first.
-- "Turn on the basement lights" → discover(what="areas", filter="basement") \
+- "Turn on the basement lights" → discover(what="areas", filter_str="basement") \
 → then do("light", "turn_on", targets={{"area_id": "<exact_id>"}})
 - "Turn on the basement ceiling light" → use entity_id from device summary.
 - For floors, use discover(what="floors") then target with \
@@ -217,7 +227,7 @@ async def fetch_service_schemas() -> str:
     ):
         return _schema_cache["schemas"]
 
-    async with _schema_lock:
+    async with _get_schema_lock():
         # Re-check after acquiring lock (another coroutine
         # may have refreshed while we waited)
         now = time.monotonic()
@@ -435,7 +445,7 @@ def build_system_prompt(
     if service_schemas:
         service_schemas_block = (
             "\nSERVICE SCHEMAS (top domains — use "
-            "discover(what='services', filter='domain') "
+            "discover(what='services', filter_str='domain') "
             "for others):\n"
             f"{service_schemas}\n"
         )

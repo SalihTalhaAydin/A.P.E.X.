@@ -23,11 +23,20 @@ _WS_TIMEOUT = 10  # seconds
 
 def _get_ws_url() -> str:
     """Derive WebSocket URL from the configured HA URL."""
-    ha_url = settings.ha_url
+    ha_url = (settings.ha_url or "").strip()
+    if not ha_url:
+        raise ValueError(
+            "HA_URL is not set. Configure HA_URL in add-on options or .env."
+        )
     # Replace http(s) with ws(s)
     ws_url = ha_url.replace("https://", "wss://").replace(
         "http://", "ws://"
     )
+    if not ws_url.startswith(("ws://", "wss://")):
+        raise ValueError(
+            f"Invalid HA_URL for WebSocket: {ha_url}. "
+            "Use http:// or https:// (e.g. http://localhost:8123)."
+        )
     return f"{ws_url}/websocket"
 
 
@@ -102,11 +111,18 @@ async def ws_command(command: dict) -> dict:
                 cmd = {"id": 1, **command}
                 await ws.send_json(cmd)
 
-                # 4. Receive result
-                result = await asyncio.wait_for(
-                    ws.receive_json(),
-                    timeout=_WS_TIMEOUT,
-                )
+                # 4. Receive result — loop until we get the response for our command.
+                # HA may send unsolicited messages (e.g. type "event") before the result.
+                while True:
+                    result = await asyncio.wait_for(
+                        ws.receive_json(),
+                        timeout=_WS_TIMEOUT,
+                    )
+                    if result.get("id") == 1:
+                        break
+                    # Skip unsolicited messages (events, etc.) that don't match our cmd id
+                    logger.debug("Skipping unsolicited WS message id=%s", result.get("id"))
+
                 if not result.get("success", False):
                     error = result.get("error", {})
                     raise RuntimeError(
@@ -123,6 +139,18 @@ async def ws_command(command: dict) -> dict:
     except aiohttp.ClientConnectorError as e:
         raise ConnectionError(
             f"Cannot connect to HA WebSocket at {ws_url}: {e}"
+        ) from e
+    except aiohttp.ClientOSError as e:
+        raise ConnectionError(
+            f"WebSocket connection lost (broken pipe/reset): {e}"
+        ) from e
+    except aiohttp.ClientError as e:
+        raise ConnectionError(
+            f"WebSocket client error: {e}"
+        ) from e
+    except (OSError, ConnectionResetError) as e:
+        raise ConnectionError(
+            f"WebSocket socket error: {e}"
         ) from e
     except asyncio.TimeoutError as e:
         raise TimeoutError(

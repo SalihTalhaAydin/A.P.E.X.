@@ -66,6 +66,8 @@ async def _get_dock_status(entity_id: str) -> dict:
         all_states = await ha_request("GET", "/states")
     except Exception:
         return result
+    if not isinstance(all_states, list):
+        return result
 
     # Index matching sensors by entity_id
     sensor_states: dict[str, dict] = {}
@@ -345,7 +347,7 @@ async def _resolve_action(entity_id: str, action: str) -> str:
         f"Unknown action '{action}' for {fn}. "
         f"No matching vacuum service, button entity, or "
         f"send_command found. Use "
-        f"discover(what='services', filter='vacuum') to "
+        f"discover(what='services', filter_str='vacuum') to "
         f"see available services."
     )
 
@@ -536,6 +538,8 @@ async def _discover_vacuum() -> str | None:
     """Return the entity_id of the first available vacuum, or None."""
     try:
         states = await ha_request("GET", "/states")
+        if not isinstance(states, list):
+            return None
         for s in states:
             if s.get("entity_id", "").startswith("vacuum."):
                 return s["entity_id"]
@@ -609,9 +613,10 @@ def _match_rooms(
             if req_lower in room_name.lower():
                 try:
                     matched_ids.append(int(seg_id))
+                    found = True
                 except (ValueError, TypeError):
-                    matched_ids.append(seg_id)
-                found = True
+                    # seg_id not int-convertible; skip to keep matched_ids list[int]
+                    pass
                 break
         if not found:
             unmatched.append(req)

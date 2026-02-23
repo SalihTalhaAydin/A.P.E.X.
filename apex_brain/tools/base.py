@@ -159,7 +159,8 @@ DEPRECATED_TOOLS = (
     "control_media",
     "control_cover",
     "control_fan",
-    "control_area",
+    # control_area kept visible (not in DEPRECATED): accepts area_name,
+    # resolves to area_id. do() requires area_id — LLM needs control_area.
     "call_service",
     # history.py → history()
     "get_history",

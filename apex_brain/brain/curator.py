@@ -56,6 +56,7 @@ class Curator:
                 )
             )
             if low_conf:
+                pruned = 0
                 for fact in low_conf:
                     fact_id = fact.get("id")
                     if fact_id is None:
@@ -63,10 +64,20 @@ class Curator:
                             "Fact missing 'id', skipping: %s", fact
                         )
                         continue
-                    await self._knowledge_store.delete_fact_by_id(fact_id)
-                report_parts.append(
-                    f"Pruned {len(low_conf)} very low confidence facts"
-                )
+                    try:
+                        deleted = await self._knowledge_store.delete_fact_by_id(
+                            fact_id
+                        )
+                        if deleted:
+                            pruned += 1
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to prune fact %s: %s", fact_id, e
+                        )
+                if pruned:
+                    report_parts.append(
+                        f"Pruned {pruned} very low confidence facts"
+                    )
         except Exception as e:
             logger.error("Low confidence prune failed: %s", e)
 
@@ -125,7 +136,9 @@ class Curator:
                             ts_a
                         ) >= datetime.fromisoformat(ts_b)
                     except (ValueError, TypeError):
-                        keep_a = ts_a >= ts_b
+                        # Cannot parse timestamps; string comparison is wrong for
+                        # non-ISO or mixed formats. Conservatively skip resolution.
+                        continue
                     if keep_a:
                         await self._knowledge_store.delete_fact_by_id(id_b)
                     else:

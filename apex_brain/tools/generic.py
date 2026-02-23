@@ -14,8 +14,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+import uuid
 from datetime import datetime, timedelta, timezone
 
+import httpx
 from tools.base import tool
 from tools.ha_helpers import (
     format_ha_error,
@@ -36,6 +39,44 @@ PROTECTED_DOMAINS = frozenset(
         "cover",
     }
 )
+
+# Pending confirmations: token -> expires_at (UTC). 60-second TTL.
+_pending_confirmations: dict[str, datetime] = {}
+CONFIRMATION_TTL_SECONDS = 60
+
+
+def _create_confirmation_token() -> str:
+    """Generate a short-lived confirmation token and store it."""
+    token = str(uuid.uuid4())
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        seconds=CONFIRMATION_TTL_SECONDS
+    )
+    _pending_confirmations[token] = expires_at
+    _cleanup_expired_confirmations()
+    return token
+
+
+def _cleanup_expired_confirmations() -> None:
+    """Remove expired tokens from the pending store."""
+    now = datetime.now(timezone.utc)
+    expired = [t for t, exp in _pending_confirmations.items() if exp <= now]
+    for t in expired:
+        del _pending_confirmations[t]
+
+
+def _consume_confirmation_token(token: str | None) -> bool:
+    """Validate and consume a confirmation token. Returns True if valid."""
+    if not token:
+        return False
+    _cleanup_expired_confirmations()
+    expires_at = _pending_confirmations.get(token)
+    if expires_at is None:
+        return False
+    if datetime.now(timezone.utc) > expires_at:
+        del _pending_confirmations[token]
+        return False
+    del _pending_confirmations[token]
+    return True
 
 
 # ------------------------------------------------------------------
@@ -68,7 +109,7 @@ PROTECTED_DOMAINS = frozenset(
                     "devices, integrations, or info."
                 ),
             },
-            "filter": {
+            "filter_str": {
                 "type": "string",
                 "description": (
                     "Optional filter: domain "
@@ -83,23 +124,23 @@ PROTECTED_DOMAINS = frozenset(
 )
 async def discover(
     what: str,
-    filter: str = "",
+    filter_str: str = "",
 ) -> str:
     """Find entities, services, areas, floors,
     devices, integrations, or HA system info."""
     try:
         if what == "entities":
-            return await _discover_entities(filter)
+            return await _discover_entities(filter_str)
         elif what == "services":
-            return await _discover_services(filter)
+            return await _discover_services(filter_str)
         elif what == "areas":
-            return await _discover_areas(filter)
+            return await _discover_areas(filter_str)
         elif what == "floors":
-            return await _discover_floors(filter)
+            return await _discover_floors(filter_str)
         elif what == "devices":
-            return await _discover_devices(filter)
+            return await _discover_devices(filter_str)
         elif what == "integrations":
-            return await _discover_integrations(filter)
+            return await _discover_integrations(filter_str)
         elif what == "info":
             return await _discover_info()
         else:
@@ -282,9 +323,13 @@ async def _discover_floors(filter_str: str) -> str:
             "/template",
             json_data={"template": template},
         )
-    except Exception:
+    except Exception as e:
+        err_str = str(e).lower()
+        if "connect" in err_str or "timeout" in err_str or "network" in err_str:
+            return "Unable to reach Home Assistant. Check connection."
         return "Floors not available (requires Home Assistant 2024.2+)."
-
+    if isinstance(result, dict) and result.get("error"):
+        return result["error"]
     if not result or not isinstance(result, str):
         return "No floors found."
 
@@ -475,14 +520,22 @@ def _is_template(target: str) -> bool:
     return "{{" in target or "{%" in target
 
 
-_ENTITY_RE = __import__("re").compile(r"^[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+$")
+_ENTITY_RE = re.compile(r"^[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+$")
 
 
 async def _query_entity(entity_id: str) -> str:
     """Read a single entity's state and key attributes."""
     try:
         state = await read_state(entity_id)
-    except Exception:
+    except httpx.ConnectError:
+        return "Home Assistant is unreachable (connection error)."
+    except httpx.TimeoutException:
+        return "Home Assistant request timed out."
+    except Exception as exc:
+        # read_state raises RuntimeError when ha_request returns error dict
+        err_msg = str(exc)
+        if "Cannot connect" in err_msg or "timed out" in err_msg.lower():
+            return err_msg
         # Validate entity_id before template injection
         if not _ENTITY_RE.match(entity_id):
             return (
@@ -499,6 +552,8 @@ async def _query_entity(entity_id: str) -> str:
                     "template": ("{{ states('" + entity_id + "') }}")
                 },
             )
+            if isinstance(result, dict) and "error" in result:
+                return result["error"]
             if result and result != "unknown":
                 return f"{entity_id}: {result}"
         except Exception as exc:
@@ -512,6 +567,19 @@ async def _query_entity(entity_id: str) -> str:
             "Check the entity_id with "
             "discover(what='entities')."
         )
+
+    # ha_request returns error dict on ConnectError/Timeout/4xx/5xx; don't treat as state
+    if isinstance(state, dict) and "error" in state:
+        err = state["error"]
+        # Reserve "Entity not found" only for actual 404 or invalid entity
+        if "404" in err or "not found" in err.lower():
+            return (
+                f"Entity '{entity_id}' not found. "
+                "Check the entity_id with "
+                "discover(what='entities')."
+            )
+        # Connection/timeout/other: return the error message directly
+        return err
 
     attrs = state.get("attributes", {})
     fn = attrs.get("friendly_name", friendly_name(entity_id))
@@ -586,7 +654,7 @@ async def _query_template(template: str) -> str:
 @tool(
     description=(
         "Call ANY Home Assistant service. "
-        "Use discover(what='services', filter='domain') "
+        "Use discover(what='services', filter_str='domain') "
         "to see available services and their parameters."
     ),
     parameters={
@@ -618,7 +686,11 @@ async def _query_template(template: str) -> str:
                 "type": "object",
                 "description": (
                     "Service-specific parameters, e.g. "
-                    '{"brightness_pct": 50}.'
+                    '{"brightness_pct": 50}. '
+                    "For protected domains (lock, alarm, cover, camera), "
+                    "first call returns confirmation_token. Second call "
+                    "must include 'confirmed': true and "
+                    "'confirmation_token': '<token>'."
                 ),
             },
         },
@@ -633,28 +705,51 @@ async def do(
 ) -> str:
     """Call any Home Assistant service with verification."""
     try:
-        # Check if this is a confirmed protected call
+        # Two-step confirmation for protected domains: first call returns
+        # a short-lived token; second call must include that token.
         confirmed = bool(data and data.get("confirmed"))
-        if confirmed and data:
-            # Remove 'confirmed' from data before sending
-            data = {k: v for k, v in data.items() if k != "confirmed"}
-            if not data:
-                data = None
+        confirmation_token = (data or {}).get("confirmation_token") if data else None
+        if isinstance(confirmation_token, str):
+            confirmation_token = confirmation_token.strip() or None
 
         # Security gate for protected domains
-        if domain in PROTECTED_DOMAINS and not confirmed:
-            entity = ""
-            if targets:
-                entity = targets.get("entity_id", "")
-            return (
-                f"CONFIRMATION REQUIRED: About to call "
-                f"{domain}.{service}"
-                + (f" on {entity}" if entity else "")
-                + ". This is a sensitive action. "
-                "Please confirm by calling do() again "
-                "with the same parameters and add "
-                "'confirmed': true in data."
-            )
+        if domain in PROTECTED_DOMAINS:
+            token_valid = _consume_confirmation_token(confirmation_token)
+            if confirmed and token_valid:
+                # Valid two-step confirmation: strip confirmation fields
+                data = {
+                    k: v
+                    for k, v in (data or {}).items()
+                    if k not in ("confirmed", "confirmation_token")
+                }
+                if not data:
+                    data = None
+            elif confirmed and not token_valid:
+                # Bypass attempt: confirmed=true but no valid token
+                entity = targets.get("entity_id", "") if targets else ""
+                token = _create_confirmation_token()
+                return (
+                    f"CONFIRMATION REQUIRED: About to call {domain}.{service}"
+                    + (f" on {entity}" if entity else "")
+                    + ". This is a sensitive action. "
+                    "You must first call do() without confirmed to get "
+                    "a confirmation_token. Then call do() again with "
+                    "'confirmed': true and 'confirmation_token': '<token>' in data. "
+                    f"confirmation_token: {token}"
+                )
+            else:
+                # First call: no confirmation yet
+                entity = targets.get("entity_id", "") if targets else ""
+                token = _create_confirmation_token()
+                return (
+                    f"CONFIRMATION REQUIRED: About to call {domain}.{service}"
+                    + (f" on {entity}" if entity else "")
+                    + ". This is a sensitive action. "
+                    "Please confirm by calling do() again with the same "
+                    "parameters and add 'confirmed': true and "
+                    "'confirmation_token': '<token>' in data. "
+                    f"confirmation_token: {token}"
+                )
 
         # Build the payload
         payload = {}

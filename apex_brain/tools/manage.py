@@ -30,6 +30,11 @@ _supervisor_client = httpx.AsyncClient(
     ),
 )
 
+
+async def close_supervisor_client() -> None:
+    """Close the shared Supervisor API client on shutdown. Idempotent."""
+    await _supervisor_client.aclose()
+
 # Supervisor base URL (only available inside HAOS add-on)
 _SUPERVISOR_URL = "http://supervisor"
 
@@ -111,9 +116,15 @@ async def _supervisor_request(
         )
         if as_text:
             if not response.is_success:
-                return f"Error fetching text: HTTP {response.status_code}"
+                return {
+                    "error": f"Error fetching text: HTTP {response.status_code}"
+                }
             return response.text
-        response.raise_for_status()
+        if not response.is_success:
+            return {
+                "error": f"Supervisor API error {response.status_code}: "
+                f"{(response.text or '')[:300]}"
+            }
         ct = response.headers.get("content-type", "")
         if "application/json" in ct:
             return response.json()
@@ -182,6 +193,15 @@ _TIER_DETAILS: dict[tuple[str, str], str] = {
 }
 
 
+def _validate_addon_slug(slug: str) -> str | None:
+    """Return slug if safe for Supervisor URLs; None if path traversal attempt."""
+    if not slug or "/" in slug or ".." in slug:
+        return None
+    if not re.match(r"^[a-zA-Z0-9_.-]+$", slug):
+        return None
+    return slug
+
+
 def _get_detail(action: str, target: str, config: dict | None) -> str:
     """Get a human-readable detail string for a confirm."""
     # Check for exact match first
@@ -190,15 +210,15 @@ def _get_detail(action: str, target: str, config: dict | None) -> str:
         return detail
     # Addon-specific messages
     if target.startswith("addon:"):
-        slug = target.split(":", 1)[1]
-        if action == "update":
+        slug = _validate_addon_slug(target.split(":", 1)[1])
+        if slug and action == "update":
             return f"This will update add-on '{slug}' and restart it."
-        if action == "restart":
+        if slug and action == "restart":
             return (
                 f"This will restart add-on '{slug}'. "
                 f"It will be briefly unavailable."
             )
-        if action == "install":
+        if slug and action == "install":
             return f"This will install add-on '{slug}' on your system."
     return f"This will execute: {action} {target}"
 
@@ -287,7 +307,9 @@ async def _handle_update(target: str, config: dict | None) -> str:
         return "HAOS update initiated."
 
     if target.startswith("addon:"):
-        slug = target.split(":", 1)[1]
+        slug = _validate_addon_slug(target.split(":", 1)[1])
+        if not slug:
+            return "Error: invalid add-on slug (path traversal rejected)."
         result = await _supervisor_request(
             "POST", f"/addons/{slug}/update"
         )
@@ -313,7 +335,9 @@ async def _handle_restart(target: str, config: dict | None) -> str:
         return "Supervisor restart initiated."
 
     if target.startswith("addon:"):
-        slug = target.split(":", 1)[1]
+        slug = _validate_addon_slug(target.split(":", 1)[1])
+        if not slug:
+            return "Error: invalid add-on slug (path traversal rejected)."
         result = await _supervisor_request(
             "POST", f"/addons/{slug}/restart"
         )
@@ -328,7 +352,9 @@ async def _handle_install(target: str, config: dict | None) -> str:
     """Handle add-on installation."""
     if not target.startswith("addon:"):
         return "Error: target must be 'addon:<slug>' for install action."
-    slug = target.split(":", 1)[1]
+    slug = _validate_addon_slug(target.split(":", 1)[1])
+    if not slug:
+        return "Error: invalid add-on slug (path traversal rejected)."
     result = await _supervisor_request("POST", f"/addons/{slug}/install")
     if isinstance(result, dict) and "error" in result:
         return result["error"]
@@ -375,7 +401,9 @@ async def _handle_logs(target: str, config: dict | None) -> str:
     elif target == "supervisor":
         path = "/supervisor/logs"
     elif target.startswith("addon:"):
-        slug = target.split(":", 1)[1]
+        slug = _validate_addon_slug(target.split(":", 1)[1])
+        if not slug:
+            return "Error: invalid add-on slug (path traversal rejected)."
         path = f"/addons/{slug}/logs"
     else:
         return f"Unknown logs target: {target}"
@@ -439,9 +467,9 @@ async def manage(
     config = config or {}
     tier = _get_tier(action, target)
 
-    # Session-based escalation: webhook sessions
-    # are restricted to Tier 0 only
-    if session_id == "apex_events" and tier > 0:
+    # Session-based escalation: event sessions
+    # (apex_events*) are restricted to Tier 0 only
+    if (session_id or "").startswith("apex_events") and tier > 0:
         msg = (
             f"Operation '{action} {target}' requires "
             f"Tier {tier} access. Webhook sessions "
@@ -486,7 +514,20 @@ async def manage(
             f"{', '.join(sorted(_HANDLERS.keys()))}"
         )
 
-    result = await handler(target, config)
+    try:
+        result = await handler(target, config)
+    except Exception as e:
+        if _audit_store:
+            await _audit_store.log(
+                tool="manage",
+                action=action,
+                target=target,
+                config=config,
+                result=f"failed: {e}",
+                session_id=session_id,
+                user_approved=tier > 0,
+            )
+        return f"Operation failed: {e}"
 
     # Audit log
     if _audit_store:

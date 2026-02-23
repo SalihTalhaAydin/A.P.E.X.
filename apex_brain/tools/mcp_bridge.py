@@ -72,12 +72,29 @@ class MCPBridge:
                 self._transport_cm = sse_client(url=self.url)
 
             streams = await self._transport_cm.__aenter__()
-            # SDK may yield 2 or 3 values
-            if len(streams) >= 2:
-                read_stream = streams[0]
-                write_stream = streams[1]
-            else:
-                raise ValueError("MCP transport did not yield streams")
+
+            # Defensive: ensure streams is indexable (tuple/list-like)
+            if not hasattr(streams, "__len__") or not hasattr(streams, "__getitem__"):
+                raise ValueError(
+                    f"MCP transport streams must be indexable "
+                    f"(tuple/list-like), got {type(streams).__name__}"
+                )
+
+            try:
+                stream_len = len(streams)
+                if stream_len >= 2:
+                    read_stream = streams[0]
+                    write_stream = streams[1]
+                else:
+                    raise ValueError(
+                        f"MCP transport did not yield at least 2 streams "
+                        f"(got {stream_len})"
+                    )
+            except (IndexError, TypeError, AttributeError) as e:
+                raise ValueError(
+                    f"MCP transport streams unexpected format: "
+                    f"{type(streams).__name__} — {e}"
+                ) from e
 
             from mcp import ClientSession
 
@@ -118,6 +135,8 @@ class MCPBridge:
         finally:
             self._session = None
             self._connected = False
+            self._tools = []
+            self._tool_names = set()
             logger.info("MCP bridge disconnected.")
 
     async def discover_tools(
@@ -225,6 +244,9 @@ class MCPBridge:
             parts = _extract_text(result, types)
             return "\n".join(parts) if parts else "Done."
         except Exception as e:
+            self._connected = False
+            self._tools = []
+            self._tool_names = set()
             return f"MCP tool error ({name}): {e}"
 
     @property

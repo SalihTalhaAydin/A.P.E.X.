@@ -12,7 +12,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 
 from brain.config import settings
 
@@ -123,18 +123,30 @@ class Scheduler:
         self._background_tasks.clear()
         logger.info("Scheduler stopped")
 
+    def _advance_next_run(self, scheduled_task: ScheduledTask):
+        """Return a done callback that advances next_run when the task completes.
+        Prevents overlap: next_run is only updated after the task finishes.
+        """
+
+        def cb(_future):
+            scheduled_task.next_run = time.monotonic() + scheduled_task.interval_seconds
+
+        return cb
+
     async def _run_loop(self) -> None:
         """Main loop: check every tick which tasks are due."""
         # Small startup delay to let the server fully initialize
         await asyncio.sleep(5)
         while self._running:
             now = time.monotonic()
-            for task in self._tasks:
+            # Iterate over a copy to avoid RuntimeError when a task callback
+            # calls scheduler.register() and mutates _tasks during iteration.
+            for task in list(self._tasks):
                 if task.enabled and now >= task.next_run:
-                    task.next_run = now + task.interval_seconds
                     t = asyncio.create_task(self._safe_run(task))
                     self._background_tasks.add(t)
                     t.add_done_callback(self._background_tasks.discard)
+                    t.add_done_callback(self._advance_next_run(task))
             await asyncio.sleep(_TICK_INTERVAL)
 
     async def _safe_run(self, task: ScheduledTask) -> None:
@@ -193,6 +205,13 @@ class Scheduler:
                 interval_seconds=604800,  # weekly
             )
 
+        # Conversation store pruning (prevent unbounded growth)
+        self.register(
+            "conversation_cleanup",
+            self._task_conversation_cleanup,
+            interval_seconds=86400,  # daily
+        )
+
         # Proactive: briefings and health checks
         self.register(
             "morning_briefing",
@@ -228,6 +247,13 @@ class Scheduler:
         count = await self._knowledge_store.cleanup_expired()
         if count:
             logger.info("Cleaned up %d expired facts", count)
+
+    async def _task_conversation_cleanup(self) -> None:
+        count = await self._conversation.conversation_store.cleanup_old_turns(
+            settings.conversation_retention_days
+        )
+        if count:
+            logger.info("Pruned %d old conversation turns", count)
 
     async def _task_morning_briefing(self) -> None:
         """At configured morning hour, send a briefing prompt."""
@@ -337,17 +363,7 @@ class Scheduler:
     async def _task_reminder_check(self) -> None:
         """Check for due reminders and fire them."""
         try:
-            facts = await self._knowledge_store.get_all_facts(
-                category="reminder", limit=20
-            )
-            now_iso = datetime.now(timezone.utc).isoformat()
-            due = [
-                f
-                for f in facts
-                if f.get("value")
-                and f.get("expires_at")
-                and f.get("expires_at") <= now_iso
-            ]
+            due = await self._knowledge_store.get_due_reminders(limit=20)
             if not due:
                 return
             for reminder in due:

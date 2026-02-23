@@ -8,9 +8,9 @@ and only lets meaningful events through to the AI.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
-from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -56,16 +56,18 @@ class DecisionEngine:
         self._knowledge_store = knowledge_store
         self._sensor_noise_threshold = sensor_noise_threshold
         self._cooldowns: dict[str, float] = {}
-        self._event_counts: dict[str, int] = defaultdict(int)
+        self._cooldown_lock = asyncio.Lock()
 
     async def evaluate(self, event) -> EventDecision:
         """Evaluate an event's significance. Returns a decision."""
+        # Cleanup expired cooldowns on every evaluation (even when we early-exit)
+        self._cleanup_cooldowns(time.time())
         # Layer 1: Hard drop rules (zero cost)
         drop_reason = self._hard_filter(event)
         if drop_reason:
             return EventDecision(False, 0.0, drop_reason, "low")
 
-        # Layer 2: Cooldown check (don't set yet)
+        # Layer 2: Fast cooldown check (early exit; atomic acquire happens below)
         cooldown_key = f"{event.event_type}:{event.entity_id}"
         if not self._check_cooldown(cooldown_key):
             return EventDecision(False, 0.0, "cooldown active", "low")
@@ -79,8 +81,14 @@ class DecisionEngine:
 
         should_process = score >= self._significance_threshold
         if should_process:
-            self._set_cooldown(cooldown_key)
-        reason = "passed filters" if should_process else "below threshold"
+            # Atomic check-and-set: first caller wins, concurrent callers get False
+            if not await self._try_acquire_cooldown(cooldown_key):
+                should_process = False
+                reason = "cooldown (concurrent)"
+            else:
+                reason = "passed filters"
+        else:
+            reason = "below threshold"
         return EventDecision(should_process, score, reason, priority)
 
     def _hard_filter(self, event) -> str:
@@ -98,9 +106,9 @@ class DecisionEngine:
         if new == "unavailable":
             if domain not in _CRITICAL_DOMAINS:
                 return "device went unavailable"
-        if old == "unavailable" and new:
-            if domain not in _CRITICAL_DOMAINS:
-                return "recovery from unavailable"
+        # Recovery from unavailable: always process (users need to know when
+        # devices come back online; BUG-88)
+        # Removed drop for "recovery from unavailable"
 
         # Sensor noise: numeric sensors with tiny deltas
         if entity.startswith("sensor."):
@@ -126,11 +134,7 @@ class DecisionEngine:
         return ""
 
     def _check_cooldown(self, key: str) -> bool:
-        """True if cooldown elapsed (ok to act).
-
-        Does NOT set cooldown — call _set_cooldown()
-        after confirming the event will be processed.
-        """
+        """True if cooldown elapsed (ok to proceed to scoring). Fast path only."""
         now = time.time()
         last = self._cooldowns.get(key, 0)
         if now - last < self._cooldown_seconds:
@@ -138,9 +142,16 @@ class DecisionEngine:
         self._cleanup_cooldowns(now)
         return True
 
-    def _set_cooldown(self, key: str) -> None:
-        """Record that an action was taken for this key."""
-        self._cooldowns[key] = time.time()
+    async def _try_acquire_cooldown(self, key: str) -> bool:
+        """Atomically check and set cooldown. First caller wins (True); concurrent callers get False."""
+        async with self._cooldown_lock:
+            now = time.time()
+            last = self._cooldowns.get(key, 0)
+            if now - last < self._cooldown_seconds:
+                return False
+            self._cooldowns[key] = now
+            self._cleanup_cooldowns(now)
+            return True
 
     def _cleanup_cooldowns(self, now: float) -> None:
         """Remove stale cooldown entries."""
@@ -167,13 +178,14 @@ class DecisionEngine:
         hour = datetime.now(tz).hour
         score = 0.3  # base score for passing hard filter
 
-        # Security events: always high
+        # Security events: always high (cover = garage doors, security-relevant)
         if any(
             d in entity
             for d in (
                 "lock.",
                 "alarm_control_panel.",
                 "camera.",
+                "cover.",
             )
         ):
             return 0.9, "critical"
@@ -200,7 +212,7 @@ class DecisionEngine:
 
         # Device state changes (lights, switches, media)
         if entity.startswith(("light.", "switch.", "media_player.")):
-            return 0.25, "low"
+            return 0.35, "low"
 
         # Climate changes
         if entity.startswith("climate."):

@@ -6,9 +6,14 @@ Uses a cheap/fast model to keep costs low.
 
 import json
 import logging
+import math
 from datetime import datetime
 
 from memory.knowledge_store import KnowledgeStore
+
+CONFIDENCE_DEFAULT = 0.7
+CONFIDENCE_MIN = 0.0
+CONFIDENCE_MAX = 1.0
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +57,31 @@ Conversation:
 Extract new facts (JSON array only, no other text):"""
 
 
+def _validate_confidence(raw: object, *, fact_key: str = "?") -> float:
+    """Validate and clamp confidence to [0.0, 1.0]. Log warning for invalid values."""
+    if raw is None:
+        return CONFIDENCE_DEFAULT
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid confidence value %r for fact %r, using default %.1f",
+            raw,
+            fact_key,
+            CONFIDENCE_DEFAULT,
+        )
+        return CONFIDENCE_DEFAULT
+    if not math.isfinite(val):
+        logger.warning(
+            "Non-finite confidence %r for fact %r, using default %.1f",
+            raw,
+            fact_key,
+            CONFIDENCE_DEFAULT,
+        )
+        return CONFIDENCE_DEFAULT
+    return max(CONFIDENCE_MIN, min(CONFIDENCE_MAX, val))
+
+
 class FactExtractor:
     def __init__(
         self, knowledge_store: KnowledgeStore, model: str = "gpt-4o-mini"
@@ -80,14 +110,20 @@ class FactExtractor:
         if len(convo_text) < 20:
             return []
 
+        raw = ""
         try:
+            # Escape braces in conversation text so str.format()
+            # does not interpret them as placeholders (Bug #27).
+            safe_convo = convo_text.replace("{", "{{").replace(
+                "}", "}}"
+            )
             response = await litellm_completion(
                 model=self.model,
                 messages=[
                     {
                         "role": "user",
                         "content": EXTRACTION_PROMPT.format(
-                            conversation=convo_text
+                            conversation=safe_convo
                         ),
                     }
                 ],
@@ -124,12 +160,9 @@ class FactExtractor:
                     category = fact.get("category", "fact")
                     key = fact.get("key", "")
                     value = fact.get("value", "")
-                    confidence = max(
-                        0.0,
-                        min(
-                            1.0,
-                            fact.get("confidence", 0.7),
-                        ),
+                    confidence = _validate_confidence(
+                        fact.get("confidence"),
+                        fact_key=key or "?",
                     )
                     is_correction = fact.get("correction", False)
 

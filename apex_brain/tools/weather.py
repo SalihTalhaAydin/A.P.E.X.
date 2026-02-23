@@ -102,12 +102,12 @@ async def get_weather(
                         "condition", "?"
                     )
                     hi = f.get("temperature", "?")
-                    lo = f.get("templow", "")
+                    lo = f.get("templow")
                     precip = f.get(
                         "precipitation_probability"
                     )
                     entry = f"  {dt}: {cond}, {hi}"
-                    if lo != "":
+                    if lo is not None and lo != "":
                         entry += f"/{lo}"
                     entry += unit
                     if precip is not None:

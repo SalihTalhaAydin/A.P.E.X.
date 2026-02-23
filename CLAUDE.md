@@ -47,6 +47,12 @@ Every change MUST pass both layers before it is marked done:
    - For tool/capability changes: invoke the tool against HA and verify the output.
    - Log or report the validation result so the user can see proof it works.
 
+### Agent Test Restriction (CRITICAL)
+When running tests after a code change, run only the default suite:
+- Use: `pytest` or `pytest apex_brain/tests` (no extra args)
+- NEVER run: `pytest -m live`, `pytest -m model`, or any command that includes model/live tests
+- Model and live tests consume API credits; the user runs those manually before release.
+
 ### Testing Rules
 - **Tests run automatically** — do not ask the user "should I run tests?" Just run them.
 - **If tests fail, fix and re-run.** Do not report a task as complete with failing tests.

@@ -73,12 +73,14 @@ def skip_on_llm_error(response: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Session-scoped: check HA connectivity once
+# Session-scoped: check HA connectivity once (deferred to avoid blocking discovery)
 # ---------------------------------------------------------------------------
+
+_HA_AVAILABLE: bool | None = None
+
 
 def _ha_reachable() -> bool:
     """Synchronous check whether HA is reachable."""
-    # Re-instantiate settings to pick up real .env values
     s = Settings()
     url = f"{s.ha_url}/api/config"
     try:
@@ -88,11 +90,11 @@ def _ha_reachable() -> bool:
         return False
 
 
-_HA_AVAILABLE = _ha_reachable()
-
-
 def pytest_collection_modifyitems(config, items):
     """Skip tests marked 'live' when HA is not reachable."""
+    global _HA_AVAILABLE
+    if _HA_AVAILABLE is None:
+        _HA_AVAILABLE = _ha_reachable()
     if _HA_AVAILABLE:
         return
     skip = pytest.mark.skip(reason="Home Assistant not reachable")

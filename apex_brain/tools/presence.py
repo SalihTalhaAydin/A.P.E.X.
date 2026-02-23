@@ -27,10 +27,12 @@ async def get_presence_summary() -> str:
     """
     try:
         states = await ha_request("GET", "/states")
+        if not isinstance(states, list):
+            return ""
         persons = [
             s
             for s in states
-            if s["entity_id"].startswith("person.")
+            if s.get("entity_id", "").startswith("person.")
         ]
         if not persons:
             return ""

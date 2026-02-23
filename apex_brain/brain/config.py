@@ -43,6 +43,7 @@ class Settings(BaseSettings):
         10  # conversation turns to always include in context
     )
     max_facts_in_context: int = 20  # max relevant facts per AI call
+    conversation_retention_days: int = 90  # prune turns older than N days
 
     # Google Calendar (service account)
     google_calendar_credentials_path: str = ""
@@ -112,10 +113,8 @@ class Settings(BaseSettings):
         # Fallback: try reading from S6 container environment file
         if not token:
             for path in [
-                "/run/s6/container_environment"
-                "/SUPERVISOR_TOKEN",
-                "/var/run/s6/container_environment"
-                "/SUPERVISOR_TOKEN",
+                "/run/s6/container_environment/SUPERVISOR_TOKEN",
+                "/var/run/s6/container_environment/SUPERVISOR_TOKEN",
             ]:
                 try:
                     with open(path) as f:

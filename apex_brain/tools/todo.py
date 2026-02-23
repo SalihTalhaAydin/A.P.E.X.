@@ -35,6 +35,22 @@ async def _get_items(entity_id: str) -> list[dict]:
     return []
 
 
+def _resolve_item_identifier(
+    entity_id: str, item_name: str, items: list[dict]
+) -> str:
+    """Resolve item name to uid when available; otherwise return name.
+    HA todo supports both; UID is preferred for update/remove when present."""
+    item_lower = (item_name or "").strip().lower()
+    for it in items:
+        summary = (it.get("summary") or "").strip().lower()
+        if summary == item_lower or item_lower in summary:
+            uid = it.get("uid")
+            if uid:
+                return str(uid)
+            return item_name
+    return item_name
+
+
 def _format_items(items: list[dict]) -> str:
     """Format items as a numbered list."""
     if not items:
@@ -117,6 +133,9 @@ async def manage_todo(
                     f"{action}."
                 )
 
+        items_list = await _get_items(entity_id) if action in ("complete", "remove") else []
+        item_id = _resolve_item_identifier(entity_id, item, items_list) if action in ("complete", "remove") else item
+
         if action == "add":
             await ha_request(
                 "POST",
@@ -132,7 +151,7 @@ async def manage_todo(
                 "/services/todo/update_item",
                 json_data={
                     "entity_id": entity_id,
-                    "item": item,
+                    "item": item_id,
                     "status": "completed",
                 },
             )
@@ -142,7 +161,7 @@ async def manage_todo(
                 "/services/todo/remove_item",
                 json_data={
                     "entity_id": entity_id,
-                    "item": item,
+                    "item": item_id,
                 },
             )
         elif action == "clear_completed":

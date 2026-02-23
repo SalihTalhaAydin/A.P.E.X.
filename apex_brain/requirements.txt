@@ -11,6 +11,9 @@ uvicorn[standard]>=0.34.0
 # HTTP client (for HA API calls)
 httpx>=0.28.0
 
+# WebSocket client (ws_helpers, event_subscriber)
+aiohttp>=3.9.0
+
 # Database
 aiosqlite>=0.20.0
 

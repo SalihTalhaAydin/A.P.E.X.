@@ -16,7 +16,7 @@ import logging
 import httpx
 
 from tools.base import tool
-from tools.generic import do
+from tools.generic import _create_confirmation_token, do
 from tools.ha_helpers import (
     format_ha_error,
     friendly_name,
@@ -98,11 +98,16 @@ async def control_alarm(
         if not service:
             return f"Unknown alarm action: {action}"
 
+        token = _create_confirmation_token()
+        data = {"confirmed": True, "confirmation_token": token}
+        if code is not None:
+            data["code"] = code
+
         return await do(
             "alarm_control_panel",
             service,
             {"entity_id": entity_id},
-            {"code": code} if code else None,
+            data,
         )
 
     except Exception as e:

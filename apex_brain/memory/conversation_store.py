@@ -4,70 +4,93 @@ Never lose context. Every Apex interaction is searchable.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-import aiosqlite
+from memory.db_manager import SharedDbConnection
 
 
 class ConversationStore:
-    def __init__(self, db_path: str):
-        self.db_path = db_path
-        self._db: aiosqlite.Connection | None = None
+    def __init__(self, db_path: str | SharedDbConnection):
+        if isinstance(db_path, SharedDbConnection):
+            self._shared = db_path
+            self._own_connection = False
+        else:
+            self._shared = SharedDbConnection(db_path)
+            self._own_connection = True
 
     async def initialize(self):
         """Create tables if they don't exist."""
-        self._db = await aiosqlite.connect(self.db_path)
-        await self._db.execute("PRAGMA journal_mode=WAL")
-        await self._db.execute("PRAGMA busy_timeout=5000")
-        await self._db.execute("""
-            CREATE TABLE IF NOT EXISTS conversations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                timestamp TEXT NOT NULL,
-                session_id TEXT DEFAULT 'default'
+        if self._own_connection:
+            await self._shared.initialize()
+
+        async with self._shared.lock:
+            db = self._shared.connection
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS conversations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    session_id TEXT DEFAULT 'default'
+                )
+            """)
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_conv_timestamp
+                ON conversations(timestamp DESC)
+            """)
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_conv_session
+                ON conversations(session_id, timestamp DESC)
+            """)
+            await db.commit()
+
+    def _ensure_db(self) -> None:
+        """Ensure DB is initialized and not closed. Call before any DB access."""
+        if not self._shared.is_initialized:
+            raise RuntimeError(
+                "Store not initialized or already closed. Call initialize() first."
             )
-        """)
-        await self._db.execute("""
-            CREATE INDEX IF NOT EXISTS idx_conv_timestamp
-            ON conversations(timestamp DESC)
-        """)
-        await self._db.execute("""
-            CREATE INDEX IF NOT EXISTS idx_conv_session
-            ON conversations(session_id, timestamp DESC)
-        """)
-        await self._db.commit()
 
     async def save_turn(
         self, role: str, content: str, session_id: str = "default"
     ):
         """Save a conversation turn (user or assistant)."""
+        self._ensure_db()
         if not content or not content.strip():
             return
+        content = (content.strip() or "")[:10000]
         now = datetime.now(timezone.utc).isoformat()
-        await self._db.execute(
-            "INSERT INTO conversations (role, content, timestamp, session_id) VALUES (?, ?, ?, ?)",
-            (role, content.strip(), now, session_id),
-        )
-        await self._db.commit()
+
+        async with self._shared.lock:
+            db = self._shared.connection
+            await db.execute(
+                "INSERT INTO conversations (role, content, timestamp, session_id) VALUES (?, ?, ?, ?)",
+                (role, content, now, session_id),
+            )
+            await db.commit()
 
     async def get_recent(
         self, n: int = 10, session_id: str | None = None
     ) -> list[dict]:
         """Get the last N conversation turns, newest last (chronological order)."""
-        if session_id:
-            cursor = await self._db.execute(
-                "SELECT role, content, timestamp FROM conversations "
-                "WHERE session_id = ? ORDER BY id DESC LIMIT ?",
-                (session_id, n),
-            )
-        else:
-            cursor = await self._db.execute(
-                "SELECT role, content, timestamp FROM conversations "
-                "ORDER BY id DESC LIMIT ?",
-                (n,),
-            )
-        rows = await cursor.fetchall()
+        self._ensure_db()
+
+        async with self._shared.lock:
+            db = self._shared.connection
+            if session_id:
+                cursor = await db.execute(
+                    "SELECT role, content, timestamp FROM conversations "
+                    "WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+                    (session_id, n),
+                )
+            else:
+                cursor = await db.execute(
+                    "SELECT role, content, timestamp FROM conversations "
+                    "ORDER BY id DESC LIMIT ?",
+                    (n,),
+                )
+            rows = await cursor.fetchall()
+
         # Reverse so oldest is first (chronological)
         return [
             {"role": r[0], "content": r[1], "timestamp": r[2]}
@@ -80,35 +103,66 @@ class ConversationStore:
 
     async def search(self, query: str, limit: int = 20) -> list[dict]:
         """Search conversation history by keyword."""
+        self._ensure_db()
         escaped = self._escape_like(query)
-        cursor = await self._db.execute(
-            "SELECT role, content, timestamp FROM conversations "
-            "WHERE content LIKE ? ESCAPE '\\' ORDER BY timestamp DESC LIMIT ?",
-            (f"%{escaped}%", limit),
-        )
-        rows = await cursor.fetchall()
+
+        async with self._shared.lock:
+            db = self._shared.connection
+            cursor = await db.execute(
+                "SELECT role, content, timestamp FROM conversations "
+                "WHERE content LIKE ? ESCAPE '\\' ORDER BY timestamp DESC LIMIT ?",
+                (f"%{escaped}%", limit),
+            )
+            rows = await cursor.fetchall()
+
         return [
             {"role": r[0], "content": r[1], "timestamp": r[2]}
             for r in rows
         ]
 
-    async def get_turns_since(self, since_hours: int = 24) -> list[dict]:
-        """Get all conversation turns from the last N hours."""
-        from datetime import timedelta
+    async def cleanup_old_turns(self, days: int = 90) -> int:
+        """Delete conversation turns older than N days.
+
+        Returns the count of deleted rows. Call on startup or periodically
+        to prevent unbounded growth of the conversations table.
+        """
+        self._ensure_db()
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=days)
+        ).isoformat()
+
+        async with self._shared.lock:
+            db = self._shared.connection
+            cursor = await db.execute(
+                "DELETE FROM conversations WHERE timestamp < ?",
+                (cutoff,),
+            )
+            await db.commit()
+            return cursor.rowcount
+
+    async def get_turns_since(
+        self, since_hours: int = 24, limit: int = 1000
+    ) -> list[dict]:
+        """Get conversation turns from the last N hours (up to limit)."""
+        self._ensure_db()
         cutoff = (
             datetime.now(timezone.utc) - timedelta(hours=since_hours)
         ).isoformat()
-        cursor = await self._db.execute(
-            "SELECT role, content, timestamp FROM conversations "
-            "WHERE timestamp >= ? ORDER BY timestamp ASC",
-            (cutoff,),
-        )
-        rows = await cursor.fetchall()
+
+        async with self._shared.lock:
+            db = self._shared.connection
+            cursor = await db.execute(
+                "SELECT role, content, timestamp FROM conversations "
+                "WHERE timestamp >= ? ORDER BY timestamp ASC LIMIT ?",
+                (cutoff, limit),
+            )
+            rows = await cursor.fetchall()
+
         return [
             {"role": r[0], "content": r[1], "timestamp": r[2]}
             for r in rows
         ]
 
     async def close(self):
-        if self._db:
-            await self._db.close()
+        if self._own_connection:
+            await self._shared.close()

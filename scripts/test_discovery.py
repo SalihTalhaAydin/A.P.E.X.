@@ -30,8 +30,8 @@ async def main():
     # Test 1: Discover lights
     print("\n--- Discovering Lights ---")
     try:
-        # calling discover with what="entities" and filter="light"
-        result = await discover("entities", filter="light")
+        # calling discover with what="entities" and filter_str="light"
+        result = await discover("entities", filter_str="light")
         print(result)
     except Exception as e:
         print(f"Error discovering lights: {e}")

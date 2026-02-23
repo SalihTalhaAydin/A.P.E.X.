@@ -19,6 +19,23 @@ from tools.ws_helpers import ws_command
 
 logger = logging.getLogger(__name__)
 
+
+def _check_ws_result(result, fallback_msg: str = "Operation failed.") -> str | None:
+    """Check ws_command result; return error message if invalid, None if OK."""
+    if result is None:
+        return "Error: No response from Home Assistant."
+    if not isinstance(result, dict):
+        return f"Error: Unexpected response type from Home Assistant."
+    if result.get("success") is False or "error" in result:
+        err = result.get("error", {})
+        if isinstance(err, dict):
+            msg = err.get("message", err.get("code", "unknown"))
+        else:
+            msg = str(err)
+        return f"Error: {msg}"
+    return None
+
+
 # --- Tier classification ---
 
 _TIER_0_SAFE: set[str] = {
@@ -74,13 +91,19 @@ async def _handle_rename(target: str, data: dict) -> str:
     if not target:
         return "Error: target (entity_id) is required."
 
-    result = await ws_command(
-        {
-            "type": "config/entity_registry/update",
-            "entity_id": target,
-            "name": name,
-        }
-    )
+    try:
+        result = await ws_command(
+            {
+                "type": "config/entity_registry/update",
+                "entity_id": target,
+                "name": name,
+            }
+        )
+    except Exception as e:
+        return f"Error: {e}"
+    err = _check_ws_result(result)
+    if err:
+        return err
     new_name = result.get("name", name)
     return f"Renamed {target} to '{new_name}'."
 
@@ -96,24 +119,36 @@ async def _handle_assign_area(target: str, data: dict) -> str:
     # Detect if target is a device_id or entity_id
     if "." in target:
         # Entity ID (contains domain.name)
-        result = await ws_command(
-            {
-                "type": "config/entity_registry/update",
-                "entity_id": target,
-                "area_id": area_id,
-            }
-        )
-        return f"Assigned entity {target} to area '{area_id}'."
+        try:
+            result = await ws_command(
+                {
+                    "type": "config/entity_registry/update",
+                    "entity_id": target,
+                    "area_id": area_id,
+                }
+            )
+        except Exception as e:
+            return f"Error: {e}"
     else:
         # Device ID
-        result = await ws_command(
-            {
-                "type": "config/device_registry/update",
-                "device_id": target,
-                "area_id": area_id,
-            }
-        )
-        return f"Assigned device {target} to area '{area_id}'."
+        try:
+            result = await ws_command(
+                {
+                    "type": "config/device_registry/update",
+                    "device_id": target,
+                    "area_id": area_id,
+                }
+            )
+        except Exception as e:
+            return f"Error: {e}"
+    err = _check_ws_result(result)
+    if err:
+        return err
+    return (
+        f"Assigned entity {target} to area '{area_id}'."
+        if "." in target
+        else f"Assigned device {target} to area '{area_id}'."
+    )
 
 
 async def _handle_disable(target: str, data: dict) -> str:
@@ -121,13 +156,19 @@ async def _handle_disable(target: str, data: dict) -> str:
     if not target:
         return "Error: target (entity_id) is required."
 
-    result = await ws_command(
-        {
-            "type": "config/entity_registry/update",
-            "entity_id": target,
-            "disabled_by": "user",
-        }
-    )
+    try:
+        result = await ws_command(
+            {
+                "type": "config/entity_registry/update",
+                "entity_id": target,
+                "disabled_by": "user",
+            }
+        )
+    except Exception as e:
+        return f"Error: {e}"
+    err = _check_ws_result(result)
+    if err:
+        return err
     return f"Disabled entity {target}."
 
 
@@ -136,13 +177,19 @@ async def _handle_enable(target: str, data: dict) -> str:
     if not target:
         return "Error: target (entity_id) is required."
 
-    result = await ws_command(
-        {
-            "type": "config/entity_registry/update",
-            "entity_id": target,
-            "disabled_by": None,
-        }
-    )
+    try:
+        result = await ws_command(
+            {
+                "type": "config/entity_registry/update",
+                "entity_id": target,
+                "disabled_by": "",
+            }
+        )
+    except Exception as e:
+        return f"Error: {e}"
+    err = _check_ws_result(result)
+    if err:
+        return err
     return f"Enabled entity {target}."
 
 
@@ -152,13 +199,19 @@ async def _handle_create_area(target: str, data: dict) -> str:
     if not name:
         return "Error: data.name or target is required for create_area."
 
-    result = await ws_command(
-        {
-            "type": "config/area_registry/create",
-            "name": name,
-        }
-    )
-    area_id = result.get("area_id", "")
+    try:
+        result = await ws_command(
+            {
+                "type": "config/area_registry/create",
+                "name": name,
+            }
+        )
+    except Exception as e:
+        return f"Error: {e}"
+    err = _check_ws_result(result)
+    if err:
+        return err
+    area_id = result.get("area_id", "") if isinstance(result, dict) else ""
     return f"Area '{name}' created (id: {area_id})."
 
 
@@ -167,12 +220,18 @@ async def _handle_delete_area(target: str, data: dict) -> str:
     if not target:
         return "Error: target (area_id) is required."
 
-    result = await ws_command(
-        {
-            "type": "config/area_registry/delete",
-            "area_id": target,
-        }
-    )
+    try:
+        result = await ws_command(
+            {
+                "type": "config/area_registry/delete",
+                "area_id": target,
+            }
+        )
+    except Exception as e:
+        return f"Error: {e}"
+    err = _check_ws_result(result)
+    if err:
+        return err
     return f"Area '{target}' deleted."
 
 
@@ -181,12 +240,18 @@ async def _handle_remove(target: str, data: dict) -> str:
     if not target:
         return "Error: target (device_id) is required."
 
-    result = await ws_command(
-        {
-            "type": "config/device_registry/remove",
-            "device_id": target,
-        }
-    )
+    try:
+        result = await ws_command(
+            {
+                "type": "config/device_registry/remove",
+                "device_id": target,
+            }
+        )
+    except Exception as e:
+        return f"Error: {e}"
+    err = _check_ws_result(result)
+    if err:
+        return err
     return (
         f"Device '{target}' removed from registry. "
         f"All associated entities have been deleted."
@@ -197,10 +262,12 @@ async def _handle_list_stale(target: str, data: dict) -> str:
     """List entities stuck in unavailable/unknown state."""
     from tools.ha_helpers import ha_request
 
-    result = await ws_command({"type": "config/entity_registry/list"})
-
-    # result is a list of entity entries
-    entities = result if isinstance(result, list) else []
+    try:
+        result = await ws_command({"type": "config/entity_registry/list"})
+    except Exception as e:
+        return f"Error: {e}"
+    # result is a list of entity entries; ws_command can return None or non-list
+    entities = result if isinstance(result, list) else ([] if result is None else [])
 
     # Build set of non-disabled entity IDs
     active_ids: set[str] = set()
@@ -331,9 +398,9 @@ async def configure(
     data = data or {}
     tier = _get_tier(action)
 
-    # Session-based escalation: webhook sessions
-    # restricted to Tier 0
-    if session_id == "apex_events" and tier > 0:
+    # Session-based escalation: event sessions
+    # (apex_events*) restricted to Tier 0
+    if (session_id or "").startswith("apex_events") and tier > 0:
         msg = (
             f"Operation '{action} {target}' requires "
             f"Tier {tier} access. Webhook sessions "
@@ -414,6 +481,8 @@ async def configure(
         result = f"Auth error: {e}"
     except TimeoutError as e:
         result = f"Timeout: {e}"
+    except Exception as e:
+        result = f"Error: {e}"
 
     # Audit log
     if _audit_store:

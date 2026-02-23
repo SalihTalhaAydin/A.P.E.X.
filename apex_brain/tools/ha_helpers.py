@@ -5,6 +5,7 @@ Used by all smart-home tool modules. No @tool decorators here.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import httpx
@@ -12,21 +13,45 @@ from brain.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Shared client — created once at module load, reused for all HA API calls.
-# This avoids the overhead of opening/closing a TCP connection per request.
-# A module-level AsyncClient is safe for a long-running asyncio server.
-_ha_client = httpx.AsyncClient(
-    timeout=15.0,
-    limits=httpx.Limits(
-        max_connections=20,
-        max_keepalive_connections=10,
-    ),
-)
+# Lazy-initialized client — created on first use, not at import.
+# Avoids connection pool issues when the process forks (e.g. uvicorn workers):
+# each worker gets its own client in the correct process/event-loop context.
+_ha_client: httpx.AsyncClient | None = None
+_ha_client_lock: asyncio.Lock | None = None
+
+
+def _get_ha_client_lock() -> asyncio.Lock:
+    """Lazy-init lock to avoid RuntimeError when importing without event loop."""
+    global _ha_client_lock
+    if _ha_client_lock is None:
+        _ha_client_lock = asyncio.Lock()
+    return _ha_client_lock
+
+
+async def get_ha_client() -> httpx.AsyncClient:
+    """Get the shared HA client, creating it on first use (lazy init)."""
+    global _ha_client
+    if _ha_client is not None:
+        return _ha_client
+    async with _get_ha_client_lock():
+        if _ha_client is not None:
+            return _ha_client
+        _ha_client = httpx.AsyncClient(
+            timeout=15.0,
+            limits=httpx.Limits(
+                max_connections=20,
+                max_keepalive_connections=10,
+            ),
+        )
+        return _ha_client
 
 
 async def close_ha_client():
     """Close the shared HA client on shutdown."""
-    await _ha_client.aclose()
+    global _ha_client
+    if _ha_client is not None:
+        await _ha_client.aclose()
+        _ha_client = None
 
 
 def format_ha_error(entity_id: str, domain: str, e: Exception) -> str:
@@ -53,6 +78,7 @@ async def ha_request(
     json_data: dict | None = None,
     *,
     return_response: bool = False,
+    skip_auth: bool = False,
 ) -> dict | list | str:
     """Make an authenticated request to the HA REST API.
 
@@ -66,12 +92,13 @@ async def ha_request(
     if return_response:
         sep = "&" if "?" in path else "?"
         url += f"{sep}return_response"
-    headers = settings.ha_headers
+    headers = {} if skip_auth else settings.ha_headers
     token = headers.get("Authorization", "")
     tok = "set" if len(token) > 10 else "MISSING"
     logger.debug("HA API %s %s (token: %s)", method, url, tok)
     try:
-        response = await _ha_client.request(
+        client = await get_ha_client()
+        response = await client.request(
             method=method,
             url=url,
             headers=headers,
@@ -85,12 +112,14 @@ async def ha_request(
     except httpx.TimeoutException:
         return {"error": "Home Assistant API request timed out."}
     if not response.is_success:
-        logger.error(
+        # BUG-123: Log once at debug to avoid duplicate logs when caller
+        # also logs on receiving error dict
+        logger.debug(
             "HA API error: %s %s",
             response.status_code,
             response.text[:300],
         )
-    response.raise_for_status()
+        return {"error": f"HA API error {response.status_code}: {response.text[:300]}"}
     content_type = response.headers.get("content-type", "")
     if "application/json" in content_type:
         result = response.json()
@@ -137,9 +166,20 @@ async def call_ha_service(
     )
 
 
-async def read_state(entity_id: str) -> dict:
-    """Read entity state. Returns the full state dict."""
-    return await ha_request("GET", f"/states/{entity_id}")
+async def read_state(entity_id: str | list[str]) -> dict:
+    """Read entity state. Returns the full state dict.
+
+    Accepts entity_id as str or list (HA services accept both);
+    if list, uses the first element for the GET /states/{id} URL.
+
+    Raises RuntimeError with the error message when ha_request returns
+    an error dict (e.g. connection failure, timeout).
+    """
+    eid = entity_id[0] if isinstance(entity_id, list) else entity_id
+    result = await ha_request("GET", f"/states/{eid}")
+    if isinstance(result, dict) and "error" in result:
+        raise RuntimeError(result["error"])
+    return result
 
 
 # Domains whose entities are injected into the system prompt so
@@ -216,6 +256,9 @@ async def get_device_summary() -> str:
         logger.debug("Device summary fetch failed: %s", exc)
         return ""
 
+    if not isinstance(states, list):
+        return ""
+
     # Collect all entity IDs we will show; sections_data = (header, state dicts)
     all_shown_ids: list[str] = []
     sections_data: list[tuple[str, list[dict]]] = []
@@ -227,7 +270,7 @@ async def get_device_summary() -> str:
             domain, cap = entry, None
 
         entities = [
-            s for s in states if s["entity_id"].startswith(f"{domain}.")
+            s for s in states if s.get("entity_id", "").startswith(f"{domain}.")
         ]
         if not entities:
             continue
@@ -243,7 +286,7 @@ async def get_device_summary() -> str:
             shown = entities
             header = f"## {domain.replace('_', ' ').title()}:"
 
-        all_shown_ids.extend(s["entity_id"] for s in shown)
+        all_shown_ids.extend(s.get("entity_id", "") for s in shown)
         sections_data.append((header, shown))
 
     # Fetch area_id for each entity (single template call)
@@ -254,7 +297,7 @@ async def get_device_summary() -> str:
     for header, shown in sections_data:
         lines: list[str] = []
         for s in shown:
-            eid = s["entity_id"]
+            eid = s.get("entity_id", "")
             fn = s.get("attributes", {}).get(
                 "friendly_name", friendly_name(eid)
             )
@@ -304,13 +347,17 @@ async def get_battery_level(entity_id: str) -> int | None:
     return None
 
 
-async def verify_generic(entity_id: str) -> str:
-    """Read back any entity's basic state."""
+async def verify_generic(entity_id: str | list[str]) -> str:
+    """Read back any entity's basic state.
+
+    Accepts entity_id as str or list; if list, uses first element.
+    """
+    eid = entity_id[0] if isinstance(entity_id, list) else entity_id
     try:
-        state = await read_state(entity_id)
+        state = await read_state(eid)
         fn = state.get("attributes", {}).get(
-            "friendly_name", friendly_name(entity_id)
+            "friendly_name", friendly_name(eid)
         )
         return f"{fn}: {state.get('state', 'unknown')}"
     except Exception:
-        return f"{friendly_name(entity_id)}: (state unconfirmed)"
+        return f"{friendly_name(eid)}: (state unconfirmed)"

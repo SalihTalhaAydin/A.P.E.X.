@@ -43,9 +43,11 @@ class ContextBuilder:
         Returns the complete system prompt string.
         """
         # 1. Current date/time + time context
+        # Only catch KeyError (unknown timezone / ZoneInfoNotFoundError) and ValueError (bad format).
+        # Do NOT catch ImportError, RuntimeError, or Exception — those must propagate.
         try:
             tz = ZoneInfo(settings.timezone)
-        except (KeyError, Exception):
+        except (KeyError, ValueError):
             logger.warning(
                 "Invalid timezone '%s', falling back to UTC",
                 settings.timezone,
@@ -60,28 +62,25 @@ class ContextBuilder:
             session_id=session_id,
         )
 
-        # 3. Semantically relevant facts
+        # 3. Semantically relevant facts (search_semantic falls back to
+        #    search_keyword internally when embeddings are unavailable)
+        # Reserve slots for high-confidence core facts (BUG-128)
+        semantic_limit = max(1, self.max_facts - 5)
         relevant_facts = []
         if user_message:
-            results = await self.knowledge_store.search_semantic(
+            relevant_facts = await self.knowledge_store.search_semantic(
                 query=user_message,
-                limit=self.max_facts,
+                limit=semantic_limit,
             )
-            if not results:
-                results = await self.knowledge_store.search_keyword(
-                    query=user_message,
-                    limit=self.max_facts,
-                )
-            relevant_facts = results
 
-        # 4. High-confidence core facts
+        # 4. High-confidence core facts (always add; reserve ensured above)
         core_facts = await self.knowledge_store.get_all_facts(limit=50)
-        core_set = {f["id"] for f in relevant_facts}
+        core_set = {f.get("id") for f in relevant_facts if f.get("id")}
         for fact in core_facts:
             if len(relevant_facts) >= self.max_facts:
                 break
             if (
-                fact["id"] not in core_set
+                fact.get("id") not in core_set
                 and fact.get("confidence", 0) >= 0.9
             ):
                 relevant_facts.append(fact)
@@ -94,10 +93,8 @@ class ContextBuilder:
             )
 
             presence_summary = await get_presence_summary()
-        except Exception:
-            logger.warning(
-                "context_builder: Failed to fetch presence", exc_info=True
-            )
+        except (ImportError, ConnectionError, TimeoutError, OSError) as e:
+            logger.warning("context_builder: Failed to fetch presence: %s", e)
 
         # 4.6. Device discovery: current entity names
         device_summary = ""
@@ -107,20 +104,18 @@ class ContextBuilder:
             )
 
             device_summary = await get_device_summary()
-        except Exception:
+        except (ImportError, ConnectionError, TimeoutError, OSError) as e:
             logger.warning(
-                "context_builder: Failed to fetch device summary",
-                exc_info=True,
+                "context_builder: Failed to fetch device summary: %s", e
             )
 
         # 4.7. Service schemas for top domains
         service_schemas = ""
         try:
             service_schemas = await fetch_service_schemas()
-        except Exception:
+        except (ConnectionError, TimeoutError, OSError) as e:
             logger.warning(
-                "context_builder: Failed to fetch service schemas",
-                exc_info=True,
+                "context_builder: Failed to fetch service schemas: %s", e
             )
 
         # 5. Calendar summary
@@ -132,9 +127,9 @@ class ContextBuilder:
                 )
 
                 calendar_summary = await get_today_schedule()
-        except Exception:
+        except (ImportError, ConnectionError, TimeoutError, OSError) as e:
             logger.warning(
-                "context_builder: Failed to fetch calendar", exc_info=True
+                "context_builder: Failed to fetch calendar: %s", e
             )
 
         # 6. Build the system prompt

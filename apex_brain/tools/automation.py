@@ -85,6 +85,8 @@ async def list_automations(area: str = "") -> str:
     """List all HA automations."""
     try:
         states = await ha_request("GET", "/states")
+        if not isinstance(states, list):
+            return "Error: Unable to reach Home Assistant."
         automations = [
             s for s in states if s["entity_id"].startswith("automation.")
         ]
@@ -313,9 +315,12 @@ async def create_automation(
         similar_warning = ""
         try:
             states = await ha_request("GET", "/states")
+            if not isinstance(states, list):
+                return "Error: Unable to reach Home Assistant."
             existing = [
                 s for s in states
-                if s["entity_id"].startswith("automation.")
+                if isinstance(s, dict)
+                and s.get("entity_id", "").startswith("automation.")
             ]
             alias_lower = alias.lower()
             alias_words = set(alias_lower.split())
@@ -334,7 +339,7 @@ async def create_automation(
                 ):
                     similar.append(
                         a.get("attributes", {}).get(
-                            "friendly_name", a["entity_id"]
+                            "friendly_name", a.get("entity_id", "")
                         )
                     )
             if similar:
@@ -343,8 +348,13 @@ async def create_automation(
                     f" Note: similar automation(s) already exist: "
                     f"{names}. Consider updating those instead."
                 )
-        except Exception:
-            pass  # Don't block creation on search failure
+        except Exception as e:
+            logger.debug(
+                "create_automation: search-before-create failed: %s",
+                e,
+                exc_info=True,
+            )
+            # Don't block creation on search failure
 
         auto_id = secrets.token_hex(6)
 
@@ -526,6 +536,8 @@ async def list_scenes(area: str = "") -> str:
     """List all HA scenes."""
     try:
         states = await ha_request("GET", "/states")
+        if not isinstance(states, list):
+            return "Error: Unable to reach Home Assistant."
         scenes = [s for s in states if s["entity_id"].startswith("scene.")]
 
         if area:

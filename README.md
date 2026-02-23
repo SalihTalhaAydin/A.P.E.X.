@@ -184,7 +184,7 @@ After pushing changes to GitHub:
 1. In HA: **Settings > Add-ons > Add-on Store** → **⋮** → **Reload** (refresh), then open **Apex Brain** and click **Update** if available.
 2. Or from your machine (with `HA_TOKEN` in `.env`): `python scripts/ha_update_apex_addon.py` to reload the store and update the add-on.
 3. If HA doesn't see the update, remove and re-add the repository (see Troubleshooting).
-3. Click **Update** / **Rebuild** to pull the latest code
+4. Click **Update** / **Rebuild** to pull the latest code
 
 ## Troubleshooting
 

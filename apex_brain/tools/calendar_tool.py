@@ -44,18 +44,31 @@ async def _get_calendar_entity_ids() -> list[str]:
 
 
 def _parse_event_dt(dt_str: str | None) -> _dt.datetime | None:
-    """Parse an ISO datetime string into a naive local datetime.
+    """Parse an ISO datetime string into a naive datetime in the user's local timezone.
 
     HA calendar API returns strings like '2026-02-17T09:00:00+00:00'
-    or '2026-02-17T09:00:00'.  We strip tz info so callers can compare
-    dates without worrying about tz-aware vs naive arithmetic.
+    or '2026-02-17T09:00:00'.  Naive inputs are assumed UTC; all inputs are
+    converted to the user's timezone (from settings.timezone) before extracting
+    a naive datetime, so .date() and comparisons with _today_date() are correct
+    for users in any timezone.
     """
     if not dt_str:
         return None
     try:
+        from zoneinfo import ZoneInfo
+        from brain.config import settings
+        tz = ZoneInfo(getattr(settings, "timezone", "UTC"))
+        utc = ZoneInfo("UTC")
+    except Exception:
+        tz = _dt.timezone.utc
+        utc = _dt.timezone.utc
+
+    try:
         dt = _dt.datetime.fromisoformat(dt_str)
-        # Convert to naive by stripping tzinfo (treat as local-ish)
-        return dt.replace(tzinfo=None)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=utc)
+        dt_local = dt.astimezone(tz)
+        return dt_local.replace(tzinfo=None)
     except (ValueError, TypeError):
         return None
 
@@ -64,7 +77,9 @@ def _format_time(dt: _dt.datetime | None, all_day: bool = False) -> str:
     """Format a datetime as a human-readable time string."""
     if all_day or dt is None:
         return "All day"
-    return dt.strftime("%I:%M %p").lstrip("0") or dt.strftime("%I:%M %p")
+    s = dt.strftime("%I:%M %p")
+    # Strip only one leading zero from hour (removeprefix is safer than lstrip)
+    return s.removeprefix("0") or s
 
 
 def _format_event_line(
@@ -85,7 +100,43 @@ def _format_event_line(
 
 
 def _today_date() -> _dt.date:
-    return _dt.datetime.now().date()
+    try:
+        from zoneinfo import ZoneInfo
+        from brain.config import settings
+        tz = ZoneInfo(getattr(settings, "timezone", "UTC"))
+    except Exception:
+        tz = _dt.timezone.utc
+    return _dt.datetime.now(tz=tz).date()
+
+
+def _event_overlaps_today(
+    start_dt: _dt.datetime | None,
+    end_dt: _dt.datetime | None,
+    all_day: bool,
+    today: _dt.date,
+) -> bool:
+    """Return True if the event's date/time range overlaps today.
+
+    - All-day events: include when today falls within [start_date, end_date].
+    - Timed multi-day events: include when [event_start, event_end] overlaps
+      [today_start, today_end] (today_start <= event_end and event_start <= today_end).
+    - Timed single-day events (no end): include when start falls within today.
+    """
+    if start_dt is None:
+        return all_day
+    start_date = start_dt.date()
+    today_start = _dt.datetime.combine(today, _dt.time.min)
+    today_end = _dt.datetime.combine(today, _dt.time.max)
+
+    if all_day:
+        # Date-range overlap: [start_date, end_date] overlaps [today, today]
+        end_date = end_dt.date() if end_dt is not None else start_date
+        return start_date <= today <= end_date
+    if end_dt is not None:
+        # Timed multi-day: time-range overlap [start_dt, end_dt] vs [today_start, today_end]
+        return start_dt <= today_end and today_start <= end_dt
+    # Timed event with no end: single point; must fall within today
+    return today_start <= start_dt <= today_end
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -166,11 +217,8 @@ async def get_today_schedule() -> str:
             else:
                 end_dt = _parse_event_dt(str(end_info) if end_info else None)
 
-            # Filter: must overlap today
-            if start_dt is not None:
-                if not (today_start <= start_dt <= today_end):
-                    continue
-            elif not all_day:
+            # Filter: must overlap today (includes multi-day events spanning today)
+            if not _event_overlaps_today(start_dt, end_dt, all_day, today):
                 continue
 
             line = _format_event_line(summary, start_dt, end_dt, all_day, eid)
@@ -345,6 +393,14 @@ async def get_events(days_ahead: int = 7) -> str:
                 "type": "string",
                 "description": "Optional location.",
             },
+            "calendar_entity_id": {
+                "type": "string",
+                "description": (
+                    "Optional calendar entity (e.g. calendar.personal, calendar.work). "
+                    "When provided, the event is created on this calendar. "
+                    "When omitted, uses the first available calendar."
+                ),
+            },
         },
         "required": ["title", "start", "end"],
     },
@@ -355,14 +411,22 @@ async def create_event(
     end: str,
     description: str = "",
     location: str = "",
+    calendar_entity_id: str = "",
 ) -> str:
     """Create a calendar event via HA calendar service."""
     entity_ids = await _get_calendar_entity_ids()
     if not entity_ids:
         return _NO_CALENDAR_MSG
 
-    # Use the first available calendar entity
-    eid = entity_ids[0]
+    if calendar_entity_id:
+        if calendar_entity_id not in entity_ids:
+            return (
+                f"Calendar '{calendar_entity_id}' not found. "
+                f"Available: {', '.join(entity_ids)}."
+            )
+        eid = calendar_entity_id
+    else:
+        eid = entity_ids[0]
     event_body: dict = {
         "entity_id": eid,
         "summary": title,

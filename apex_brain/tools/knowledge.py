@@ -86,8 +86,8 @@ async def recall(query: str) -> str:
     lines = []
     for r in results:
         category = r.get("category", "")
-        key = r["key"]
-        value = r["value"]
+        key = r.get("key", "?")
+        value = r.get("value", "?")
         cat_label = f" [{category}]" if category else ""
         lines.append(f"- {key}: {value}{cat_label}")
 
@@ -114,6 +114,9 @@ async def forget(key: str) -> str:
     """Delete a fact from memory."""
     if not _knowledge_store:
         return "Memory system not initialized."
+    deleted = await _knowledge_store.delete_fact(key, category="explicit")
+    if deleted:
+        return f"Done. Forgot about '{key}'."
     deleted = await _knowledge_store.delete_fact(key)
     if deleted:
         return f"Done. Forgot about '{key}'."

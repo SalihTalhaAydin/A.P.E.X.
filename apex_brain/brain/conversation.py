@@ -36,20 +36,32 @@ _CONFAB_CLAIM_RE = re.compile(
     r"(?:"
     # Direct action verbs (past tense)
     r"turned\s+(?:off|on|the)|switched\s+(?:off|on|the)|"
-    r"powered\s+(?:off|on|down|up)|shut\s+(?:off|down|it)|"
+    r"powered\s+(?:off|on|down|up)|shut\s+(?:off|down)|"
     # State claims ("lights are now off", "should be off")
-    r"(?:is|are|should\s+be)\s+(?:now\s+)?(?:off|on|locked"
-    r"|unlocked|open(?:ed)?|closed|armed|disarmed|set"
+    # Note: bare "on" and "set" are excluded from the is/are pattern
+    # because they cause false positives ("meeting is on Monday",
+    # "alarm is set for 7am"). They require "now" or "to" qualifiers.
+    r"(?:is|are|should\s+be)\s+(?:now\s+)?(?:off|locked"
+    r"|unlocked|open(?:ed)?|closed|armed|disarmed"
     r"|adjusted|dimmed)|"
+    # "is/are now on/set" — require "now" to avoid false positives
+    r"(?:is|are|should\s+be)\s+now\s+(?:on|set)|"
+    # "should be on/off now" (word-order variant)
+    r"should\s+be\s+(?:on|off)\s+now|"
+    # "is/are set to <value>" — device value assignment
+    r"(?:is|are)\s+set\s+to\b|"
     # Completion claims ("it is done", "taken care of")
-    r"(?:it\s+is|it's|that's|all)\s+done|"
-    r"taken\s+care\s+of|all\s+set|"
-    r"that\s+should\s+have|corrected\s+the|"
+    r"(?:it\s+is|it's|that's)\s+done|"
+    r"taken\s+care\s+of|"
+    # "all set" only at end of text or before punctuation/dash;
+    # not "all set for tomorrow" (negative lookahead excludes "for")
+    r"all\s+set(?!\s+for)(?:\s*[.!,;\u2014\u2013\-]|\s*$)|"
+    r"all\s+done|"
     # First-person past claims ("I've turned…", "I have set…")
     r"i've\s+(?:turned|set|locked|unlocked|opened|closed|"
-    r"adjusted|activated|dimmed|toggled|armed|disarmed)|"
+    r"adjusted|activated|dimmed|toggled|armed|disarmed|switched|powered)|"
     r"i\s+have\s+(?:turned|set|locked|unlocked|opened|closed|"
-    r"adjusted|activated|dimmed|toggled|armed|disarmed)|"
+    r"adjusted|activated|dimmed|toggled|armed|disarmed|switched|powered)|"
     # Specific device action verbs
     r"\bcycled\b|adjusted\s+the|dimmed\s+the|brightened\s+the|"
     r"activated\s+the|deactivated\s+the|"
@@ -158,6 +170,72 @@ _INFO_QUESTION_RE = re.compile(
 )
 
 
+def _tc_name(tc) -> str:
+    """Safely get function name from a tool call (object or dict)."""
+    if isinstance(tc, dict):
+        fn = tc.get("function") or {}
+        return fn.get("name", "") if isinstance(fn, dict) else ""
+    try:
+        fn = getattr(tc, "function", None)
+        return getattr(fn, "name", "") or "" if fn else ""
+    except (AttributeError, TypeError):
+        return ""
+
+
+def _tc_args(tc) -> str:
+    """Safely get function arguments string from a tool call (object or dict)."""
+    if isinstance(tc, dict):
+        fn = tc.get("function") or {}
+        return fn.get("arguments", "{}") if isinstance(fn, dict) else "{}"
+    try:
+        fn = getattr(tc, "function", None)
+        return getattr(fn, "arguments", "{}") or "{}" if fn else "{}"
+    except (AttributeError, TypeError):
+        return "{}"
+
+
+def _tc_id(tc) -> str:
+    """Safely get tool_call_id from a tool call (object or dict)."""
+    if isinstance(tc, dict):
+        return tc.get("id", "") or ""
+    try:
+        return getattr(tc, "id", "") or ""
+    except (AttributeError, TypeError):
+        return ""
+
+
+def _safe_get_tool_calls(msg) -> list:
+    """Safely extract tool_calls from an LLM response message.
+    Handles object (attr) and dict (get); treats None, [], missing key
+    as no tool calls. Normalizes across providers with varying shapes.
+    """
+    if msg is None:
+        return []
+
+    def _normalize(val):
+        if val is None:
+            return []
+        if isinstance(val, list):
+            return val
+        return [val]
+
+    if isinstance(msg, dict):
+        for key in ("tool_calls", "tool_call"):
+            val = msg.get(key)
+            if val is not None and val != []:
+                return _normalize(val)
+        return []
+
+    try:
+        for attr in ("tool_calls", "tool_call"):
+            val = getattr(msg, attr, None)
+            if val is not None and val != []:
+                return _normalize(val)
+        return []
+    except (AttributeError, TypeError):
+        return []
+
+
 def _user_expects_action(content: str) -> bool:
     """Check if user message requests an action or corrects a failed one."""
     if not content or not isinstance(content, str):
@@ -190,6 +268,11 @@ class Conversation:
         self._action_traces: dict[str, str] = {}
         self._max_action_traces: int = 200
 
+        # Per-session locks to prevent concurrent handle() interleaving
+        self._session_locks: dict[str, asyncio.Lock] = {}
+        self._max_session_locks: int = 100
+        self._session_locks_meta: asyncio.Lock = asyncio.Lock()
+
         # Background tasks: keep references so GC doesn't collect them
         self._background_tasks: set = set()
 
@@ -208,7 +291,25 @@ class Conversation:
         """
         Process a user message through the full Apex pipeline.
         Returns the final response text.
+        Per-session locking prevents interleaving when concurrent requests
+        share the same session_id.
         """
+        # Get or create per-session lock (evict oldest when over capacity)
+        async with self._session_locks_meta:
+            if session_id not in self._session_locks:
+                while len(self._session_locks) >= self._max_session_locks:
+                    oldest = next(iter(self._session_locks))
+                    del self._session_locks[oldest]
+                self._session_locks[session_id] = asyncio.Lock()
+            lock = self._session_locks[session_id]
+
+        async with lock:
+            return await self._handle_locked(user_message, session_id)
+
+    async def _handle_locked(
+        self, user_message: str, session_id: str
+    ) -> str:
+        """Run the full pipeline. Caller must hold the session lock."""
         # 1. Save user turn
         await self.conversation_store.save_turn(
             "user", user_message, session_id
@@ -237,9 +338,12 @@ class Conversation:
         # 4. Get tool definitions (native + MCP)
         tool_defs = get_openai_tool_definitions()
         if self.mcp_bridge and self.mcp_bridge.connected:
-            tool_defs = (
-                tool_defs + self.mcp_bridge.get_openai_tool_definitions()
-            )
+            try:
+                mcp_tools = self.mcp_bridge.get_openai_tool_definitions()
+                if isinstance(mcp_tools, list):
+                    tool_defs = tool_defs + mcp_tools
+            except Exception as e:
+                logger.warning("Failed to get MCP tool definitions: %s", e)
 
         # 5. Call AI with tool loop
         response_text = await self._ai_tool_loop(
@@ -255,11 +359,31 @@ class Conversation:
         recent = await self.conversation_store.get_recent(
             n=4, session_id=session_id
         )
-        task = asyncio.create_task(self._safe_extract_facts(recent))
-        self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
+        total_chars = sum(
+            len((t.get("content") or "")) for t in recent
+        )
+        if total_chars >= 50:  # skip for very short exchanges (ok, thanks, etc)
+            task = asyncio.create_task(self._safe_extract_facts(recent))
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
 
         return response_text
+
+    async def shutdown(self) -> None:
+        """Cancel and await all background fact-extraction tasks on shutdown."""
+        for task in self._background_tasks:
+            task.cancel()
+        if self._background_tasks:
+            results = await asyncio.gather(
+                *self._background_tasks, return_exceptions=True
+            )
+            for result in results:
+                if isinstance(result, Exception) and not isinstance(
+                    result, asyncio.CancelledError
+                ):
+                    logger.warning("Fact extraction shutdown error: %s", result)
+        self._background_tasks.clear()
+        logger.info("Conversation background tasks shut down")
 
     async def _llm_call_with_retry(
         self,
@@ -284,8 +408,7 @@ class Conversation:
                     delay,
                 )
                 await asyncio.sleep(delay)
-        # Should never reach here, but satisfy type checker
-        return await litellm.acompletion(**kwargs)
+        raise RuntimeError("Unreachable: retry loop exhausted")
 
     async def _ai_tool_loop(
         self,
@@ -339,11 +462,12 @@ class Conversation:
                 logger.error("LLM returned empty choices list")
                 return "Error: AI returned an empty response."
             msg = response.choices[0].message
+            tool_calls = _safe_get_tool_calls(msg)
             # only system + user so far?
             is_first_response = len(messages) == 2
 
             # If no tool calls, we have our answer (or a confabulation)
-            if not msg.tool_calls:
+            if not tool_calls:
                 text = msg.content or "Done."
                 logger.debug(
                     "Text response (no tools called): %s", text[:150]
@@ -426,32 +550,33 @@ class Conversation:
                 while len(self._action_traces) > self._max_action_traces:
                     oldest_key = next(iter(self._action_traces))
                     del self._action_traces[oldest_key]
-                if self._action_traces[session_id]:
+                if self._action_traces.get(session_id):
                     logger.debug(
                         "Action trace: %s", self._action_traces[session_id]
                     )
                 return text
 
-            # Process tool calls
-            tool_names_this_turn = [
-                tc.function.name for tc in msg.tool_calls
-            ]
+            # Process tool calls (guard: tool_calls may be None/empty from provider)
+            tool_names_this_turn = [n for tc in tool_calls if (n := _tc_name(tc))]
             logger.info(
                 "LLM requested %d tool call(s): %s",
-                len(msg.tool_calls),
+                len(tool_calls),
                 ", ".join(tool_names_this_turn),
             )
             messages.append(msg.model_dump())
 
-            for tc in msg.tool_calls:
-                fn_name = tc.function.name
+            for tc in tool_calls:
+                fn_name = _tc_name(tc)
+                if not fn_name:
+                    logger.warning("Skipping tool call with missing function name")
+                    continue
                 try:
-                    args = json.loads(tc.function.arguments)
+                    args = json.loads(_tc_args(tc))
                 except json.JSONDecodeError:
                     logger.warning(
                         "Failed to parse tool args for %s: %s",
                         fn_name,
-                        tc.function.arguments[:200],
+                        _tc_args(tc)[:200],
                     )
                     args = {}
 
@@ -484,10 +609,20 @@ class Conversation:
                 messages.append(
                     {
                         "role": "tool",
-                        "tool_call_id": tc.id,
+                        "tool_call_id": _tc_id(tc),
                         "content": str(result),
                     }
                 )
+
+        # Build and store action trace before max_iterations exit
+        # (explainability: user can see which tools were called)
+        facts_used = self._extract_facts_from_system(messages)
+        self._action_traces[session_id] = self._build_action_trace(
+            tools_called, facts_used
+        )
+        while len(self._action_traces) > self._max_action_traces:
+            oldest_key = next(iter(self._action_traces))
+            del self._action_traces[oldest_key]
 
         return (
             "I ran into a loop processing your request. "

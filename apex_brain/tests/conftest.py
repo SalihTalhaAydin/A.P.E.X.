@@ -28,18 +28,79 @@ def temp_db_path(tmp_path):
     return str(tmp_path / "test.db")
 
 
+def _text_to_embedding_vector(text: str) -> list[float]:
+    """Deterministic embedding-like vector from text. Same text → same vector.
+    Texts sharing topic words get similar vectors; unrelated texts get different vectors.
+    Uses semantic clusters so e.g. coffee/espresso/cappuccino map to same direction.
+    Fast, no API calls. Used by mock_embed fixture."""
+    import hashlib
+
+    # Semantic clusters: words in same cluster → similar vector direction.
+    # Enables: dedup (espresso≈espresso shots), contradictions (coffee vs tea),
+    # and ranking (weather query matches weather fact > coffee fact).
+    CLUSTERS = {
+        # Beverage cluster (coffee, tea both beverages for contradiction tests)
+        "coffee": [1.0, 0.0, 0.0, 0.0],
+        "espresso": [1.0, 0.0, 0.0, 0.0],
+        "cappuccino": [1.0, 0.0, 0.0, 0.0],
+        "tea": [0.95, 0.0, 0.0, 0.0],
+        "green": [0.9, 0.0, 0.0, 0.0],
+        "matcha": [0.9, 0.0, 0.0, 0.0],
+        # Value/old/refined cluster (for duplicate-adopts test)
+        "value": [0.0, 0.0, 1.0, 0.0],
+        "old": [0.0, 0.0, 1.0, 0.0],
+        "refined": [0.0, 0.0, 1.0, 0.0],
+        "specific": [0.0, 0.0, 1.0, 0.0],
+        # Weather cluster (for ranking: weather query > coffee fact)
+        "weather": [0.0, 1.0, 0.0, 0.0],
+        "sunny": [0.0, 1.0, 0.0, 0.0],
+        "rain": [0.0, 1.0, 0.0, 0.0],
+        # Misc
+        "test": [0.0, 0.0, 0.0, 1.0],
+        "fallback": [0.0, 0.0, 0.0, 1.0],
+    }
+    dim = 4
+    vec = [0.0] * dim
+    words = [
+        w.lower()
+        for w in text.replace(":", " ").replace(".", " ").split()
+        if len(w) > 0 and w.isalnum()
+    ]
+    if not words:
+        return [0.1, 0.2, 0.3, 0.4]
+
+    cluster_weight = 10.0  # Cluster words dominate so similar topics ≈ high sim
+    for w in words:
+        if w in CLUSTERS:
+            for i in range(dim):
+                vec[i] += cluster_weight * CLUSTERS[w][i]
+        else:
+            h = int(hashlib.md5(w.encode()).hexdigest(), 16)
+            for i in range(dim):
+                vec[i] += ((h >> (i * 12)) % 4096) / 2048.0 - 1.0
+
+    norm_sq = sum(x * x for x in vec)
+    if norm_sq < 1e-12:
+        return [0.1, 0.2, 0.3, 0.4]
+    norm = norm_sq**0.5
+    return [x / norm for x in vec]
+
+
 @pytest.fixture
 def mock_embed():
-    """Mock embedding function returning a fixed 4-dim vector."""
+    """Mock embedding function returning text-dependent 4-dim vectors.
 
-    async def _embed(_text: str) -> list[float]:
-        return [0.1, 0.2, 0.3, 0.4]
+    Uses _text_to_embedding_vector so that:
+    - Same text → identical vector (cos sim = 1.0)
+    - Texts sharing cluster words (coffee, espresso, etc.) → similar vectors
+    - Unrelated texts → different vectors (lower cos sim)
+    This enables semantic search ranking tests to validate relevance."""
+
+    async def _embed(text: str) -> list[float]:
+        return _text_to_embedding_vector(text)
 
     return _embed
 
 
-# Import live-test fixtures and hooks so pytest discovers them.
-# conftest_live.py provides: live_settings, ha_url, ha_headers,
-# ha_client, register_tools, state_guard, any_light_entity,
-# any_sensor_entity, and the pytest_collection_modifyitems hook.
-from tests.conftest_live import *  # noqa: E402, F401, F403
+# Live-test fixtures are loaded only by model_ha/conftest.py so unit/model
+# tests stay fast and avoid loading .env, discover_tools, or HA client setup.

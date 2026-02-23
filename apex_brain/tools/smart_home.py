@@ -733,6 +733,7 @@ async def control_cover(
         "DEPRECATED: %s() called — use %s() instead",
         "control_cover", "do",
     )
+    result = None  # BUG-74: ensure assigned before use on all paths
     try:
         if position is not None:
             pos = max(0, min(100, position))
@@ -966,6 +967,12 @@ async def control_area(
             for line in str(raw).splitlines()
             if line.strip() and "|" in line
         ]
+
+        if not area_name or not area_name.strip():
+            return (
+                "Area name cannot be empty. Please specify an area "
+                "like 'kitchen', 'basement', etc."
+            )
 
         # Step 2: Find matching area_id (case-insensitive,
         #         prefer exact match, fall back to substring)
