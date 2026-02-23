@@ -429,12 +429,12 @@ class TestURLDerivation:
     def test_https_becomes_wss(self):
         with patch("brain.event_subscriber.settings") as mock_settings:
             mock_settings.ha_url = "https://homeassistant.local:8123"
-            assert _get_ws_url() == "wss://homeassistant.local:8123/websocket"
+            assert _get_ws_url() == "wss://homeassistant.local:8123/api/websocket"
 
     def test_http_becomes_ws(self):
         with patch("brain.event_subscriber.settings") as mock_settings:
             mock_settings.ha_url = "http://192.168.1.1:8123"
-            assert _get_ws_url() == "ws://192.168.1.1:8123/websocket"
+            assert _get_ws_url() == "ws://192.168.1.1:8123/api/websocket"
 
     def test_http_supervisor_core(self):
         with patch("brain.event_subscriber.settings") as mock_settings:
@@ -444,12 +444,12 @@ class TestURLDerivation:
     def test_https_with_trailing_slash(self):
         with patch("brain.event_subscriber.settings") as mock_settings:
             mock_settings.ha_url = "https://ha.example.com/"
-            assert _get_ws_url() == "wss://ha.example.com//websocket"
+            assert _get_ws_url() == "wss://ha.example.com//api/websocket"
 
     def test_http_no_port(self):
         with patch("brain.event_subscriber.settings") as mock_settings:
             mock_settings.ha_url = "http://localhost"
-            assert _get_ws_url() == "ws://localhost/websocket"
+            assert _get_ws_url() == "ws://localhost/api/websocket"
 
 
 # ------------------------------------------------------------------ #

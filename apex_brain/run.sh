@@ -20,8 +20,14 @@ export MAX_FACTS_IN_CONTEXT=$(jq -r '.max_facts_in_context' /data/options.json)
 # Database path (persistent volume)
 export DB_PATH="/data/apex.db"
 
-# HA connection (automatic inside add-on)
-export HA_URL="http://supervisor/core"
+# HA connection — use override if set (for host_network when supervisor doesn't resolve)
+HA_URL_OVERRIDE=$(jq -r '.ha_url_override // empty' /data/options.json)
+if [ -n "$HA_URL_OVERRIDE" ]; then
+  export HA_URL="$HA_URL_OVERRIDE"
+  export HA_TOKEN=$(jq -r '.ha_token_override // empty' /data/options.json)
+else
+  export HA_URL="http://supervisor/core"
+fi
 # SUPERVISOR_TOKEN is injected by HA Supervisor via S6 container environment
 
 echo "  Model: ${LITELLM_MODEL}"

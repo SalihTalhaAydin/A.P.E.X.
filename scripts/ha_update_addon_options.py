@@ -77,6 +77,8 @@ async def main():
             "fact_extraction_model": "gpt-4o-mini",
             "recent_turns": 10,
             "max_facts_in_context": 20,
+            "ha_url_override": "",
+            "ha_token_override": "",
         }
         for k, v in DEFAULTS.items():
             options.setdefault(k, v)
@@ -99,6 +101,11 @@ async def main():
         if os.environ.get("LITELLM_MODEL"):
             options["litellm_model"] = os.environ["LITELLM_MODEL"].strip()
             updates.append("litellm_model")
+        # With host_network, supervisor may not resolve; use HA URL + token override
+        if os.environ.get("HA_URL") and os.environ.get("HA_TOKEN"):
+            options["ha_url_override"] = os.environ["HA_URL"].rstrip("/")
+            options["ha_token_override"] = os.environ["HA_TOKEN"].strip()
+            updates.append("ha_url_override")
         if updates:
             print("Merging from .env:", ", ".join(updates))
         else:

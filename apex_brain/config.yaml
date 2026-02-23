@@ -9,7 +9,7 @@
 #   homeassistant_api — grants access to the HA Core API
 
 name: "Apex Brain"
-version: "0.7.6"
+version: "0.7.7"
 slug: "apex_brain"
 description: "Personal AI assistant with memory, smart home control, and semantic knowledge"
 url: "https://github.com/SalihTalhaAydin/A.P.E.X."
@@ -20,7 +20,7 @@ startup: application
 boot: auto
 init: false
 
-# Network — host_network enables outbound API calls (OpenAI, Anthropic, Gemini)
+# Network — host_network gives outbound access for LLM APIs
 host_network: true
 ports:
   8080/tcp: 8080
@@ -48,6 +48,8 @@ options:
   fact_extraction_model: "gpt-4o-mini"
   recent_turns: 10
   max_facts_in_context: 20
+  ha_url_override: ""
+  ha_token_override: ""
 
 schema:
   litellm_model: str
@@ -58,6 +60,8 @@ schema:
   fact_extraction_model: str
   recent_turns: int
   max_facts_in_context: int
+  ha_url_override: str
+  ha_token_override: password
 
 # Environment variables (available in the container at runtime)
 environment:

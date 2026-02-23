@@ -26,7 +26,8 @@ def _get_ws_url() -> str:
     ws_url = ha_url.replace("https://", "wss://").replace(
         "http://", "ws://"
     )
-    return f"{ws_url}/websocket"
+    path = "/websocket" if "supervisor" in ha_url else "/api/websocket"
+    return f"{ws_url}{path}"
 
 
 def _get_token() -> str | None:

@@ -37,7 +37,9 @@ def _get_ws_url() -> str:
             f"Invalid HA_URL for WebSocket: {ha_url}. "
             "Use http:// or https:// (e.g. http://localhost:8123)."
         )
-    return f"{ws_url}/websocket"
+    # supervisor/core uses /websocket; direct HA URL uses /api/websocket
+    path = "/websocket" if "supervisor" in ha_url else "/api/websocket"
+    return f"{ws_url}{path}"
 
 
 def _get_token() -> str | None:
