@@ -248,6 +248,7 @@ class TestConnectionLoop:
         (Early-return path; see test_msg_id_resets_on_reconnect for full reconnect scenario.)
         """
         subscriber._session = AsyncMock()
+        subscriber._session.closed = False
         subscriber._running = True
         subscriber._msg_id = 42
         with patch("brain.event_subscriber._get_token", return_value=None):
@@ -263,6 +264,7 @@ class TestConnectionLoop:
         disconnect -> reconnect -> verify _msg_id is 0 and subscribe uses id=1.
         """
         subscriber._session = AsyncMock()
+        subscriber._session.closed = False
         subscriber._running = True
         subscriber._msg_id = 99  # Simulate prior session had incremented it
 
@@ -282,7 +284,7 @@ class TestConnectionLoop:
                 side_effect=[auth_required, auth_ok, sub_ok]
             )
             ws.send_json = AsyncMock()
-            ws.__aiter__ = lambda: one_closed_then_stop()
+            ws.__aiter__ = lambda self: one_closed_then_stop()
             return ws
 
         mock_ws_first = make_mock_ws()
@@ -338,6 +340,7 @@ class TestConnectionLoop:
     async def test_auth_invalid_token_raises_permission_error(self, subscriber):
         """Auth failure with invalid token raises PermissionError."""
         subscriber._session = AsyncMock()
+        subscriber._session.closed = False
         subscriber._running = True
 
         auth_required = {"type": "auth_required"}
@@ -365,6 +368,7 @@ class TestConnectionLoop:
     async def test_auth_expired_token_raises_permission_error(self, subscriber):
         """Auth failure with expired token raises PermissionError."""
         subscriber._session = AsyncMock()
+        subscriber._session.closed = False
         subscriber._running = True
 
         auth_required = {"type": "auth_required"}
@@ -392,6 +396,7 @@ class TestConnectionLoop:
     async def test_auth_unknown_error_message_in_exception(self, subscriber):
         """Auth failure with unknown message still raises PermissionError."""
         subscriber._session = AsyncMock()
+        subscriber._session.closed = False
         subscriber._running = True
 
         auth_required = {"type": "auth_required"}

@@ -84,16 +84,17 @@ def _categorize_power_reading(p: dict) -> str:
         for kw in ("solar", "pv", "generat")
     ):
         return "generating"
-    if any(
-        kw in eid_lower or kw in name_lower
-        for kw in ("grid", "import", "mains")
-    ):
-        return "from_grid"
+    # Check export/feed before grid/import (grid_export → exporting, grid_import → from_grid)
     if any(
         kw in eid_lower or kw in name_lower
         for kw in ("export", "feed")
     ):
         return "exporting"
+    if any(
+        kw in eid_lower or kw in name_lower
+        for kw in ("grid", "import", "mains")
+    ):
+        return "from_grid"
     return "consumption"
 
 
@@ -101,7 +102,7 @@ def _fmt_w(val_w: float) -> str:
     """Format watts as kW or W string."""
     if abs(val_w) >= 1000:
         return f"{round(val_w / 1000, 2)} kW"
-    return f"{round(val_w, 1)} W"
+    return f"{round(val_w, 1):.1f} W"
 
 
 def _categorize_reading(

@@ -13,7 +13,8 @@ This document applies to **all contributors** — human and AI agents alike.
 - No PR is accepted without accompanying tests.
 - New features require new test cases.
 - Bug fixes require a regression test that would have caught the bug.
-- Run the full suite before submitting: `PYTHONPATH=apex_brain python -m pytest apex_brain/tests -v --tb=short`
+- Run the full suite before submitting: `PYTHONPATH=apex_brain python -m pytest -v --tb=short`
+- This runs only free tests (unit + model). Paid tests consume API — run manually with `RUN_PAID_TESTS=1 pytest apex_brain/tests/paid -v` when needed.
 - All tests must pass. Zero exceptions.
 
 ### 3. Lint and Format

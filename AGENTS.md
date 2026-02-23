@@ -1,6 +1,7 @@
 # Apex Brain – Agent Instructions
 
 - You are working on the Apex Brain add-on. See `README.md` for architecture, deployment, and conventions.
+- NEVER run paid tests (`apex_brain/tests/paid/`) or set `RUN_PAID_TESTS`. They consume API credits; the user runs them manually.
 - For full rules (parallel execution, testing, "do it" mandate), see `CLAUDE.md`.
 - Run tasks in parallel when possible; complete implementations end-to-end without asking for confirmation unless critical.
 - Source code lives in `apex_brain/`; helper scripts in `scripts/`; docs in `docs/`.

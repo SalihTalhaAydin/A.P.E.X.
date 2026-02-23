@@ -76,9 +76,8 @@ def test_format_reading_includes_entity_id():
     """_format_reading includes entity_id in output."""
     entity = {
         "entity_id": "sensor.solar",
-        "attributes": {"friendly_name": "Solar"},
+        "attributes": {"friendly_name": "Solar", "unit_of_measurement": "W"},
         "state": "1500",
-        "unit_of_measurement": "W",
     }
     result = _format_reading(entity)
     assert "sensor.solar" in result

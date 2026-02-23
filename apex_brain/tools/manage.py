@@ -116,9 +116,7 @@ async def _supervisor_request(
         )
         if as_text:
             if not response.is_success:
-                return {
-                    "error": f"Error fetching text: HTTP {response.status_code}"
-                }
+                return f"Error fetching text: HTTP {response.status_code}"
             return response.text
         if not response.is_success:
             return {

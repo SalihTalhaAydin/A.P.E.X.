@@ -21,11 +21,12 @@ async def store(tmp_path):
 @pytest.mark.asyncio
 async def test_initialize_creates_table(store):
     """Table exists after initialize."""
-    cursor = await store._db.execute(
-        "SELECT name FROM sqlite_master "
-        "WHERE type='table' AND name='system_audit_log'"
-    )
-    row = await cursor.fetchone()
+    async with store._shared.lock:
+        cursor = await store._shared.connection.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='system_audit_log'"
+        )
+        row = await cursor.fetchone()
     assert row is not None
 
 

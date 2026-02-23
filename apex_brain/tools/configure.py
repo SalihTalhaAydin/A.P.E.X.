@@ -99,6 +99,8 @@ async def _handle_rename(target: str, data: dict) -> str:
                 "name": name,
             }
         )
+    except (ConnectionError, PermissionError, TimeoutError):
+        raise
     except Exception as e:
         return f"Error: {e}"
     err = _check_ws_result(result)
@@ -164,6 +166,8 @@ async def _handle_disable(target: str, data: dict) -> str:
                 "disabled_by": "user",
             }
         )
+    except (ConnectionError, PermissionError, TimeoutError):
+        raise
     except Exception as e:
         return f"Error: {e}"
     err = _check_ws_result(result)
@@ -185,6 +189,8 @@ async def _handle_enable(target: str, data: dict) -> str:
                 "disabled_by": "",
             }
         )
+    except (ConnectionError, PermissionError, TimeoutError):
+        raise
     except Exception as e:
         return f"Error: {e}"
     err = _check_ws_result(result)

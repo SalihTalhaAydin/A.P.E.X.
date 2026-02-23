@@ -7,7 +7,7 @@ These tests exercise the LLM's ability to:
   - Handle multi-entity operations
   - Perform safe write + verify cycles
 
-Run with:  pytest -m live apex_brain/tests/test_live_tier3.py -v
+Run with:  RUN_PAID_TESTS=1 pytest apex_brain/tests/paid/test_live_tier3.py -v
 
 NOTE: These tests consume more LLM tokens than Tier 2 (2-5 calls each).
 """
@@ -18,18 +18,16 @@ import asyncio
 import tempfile
 
 import pytest
-
 from brain.config import Settings
 from brain.conversation import Conversation
 from memory.context_builder import ContextBuilder
 from memory.conversation_store import ConversationStore
 from memory.fact_extractor import FactExtractor
 from memory.knowledge_store import KnowledgeStore
+
 from tests.conftest_live import skip_on_llm_error
 
 pytestmark = pytest.mark.live
-
-pytest.skip("Live tier 3 tests disabled", allow_module_level=True)
 
 
 @pytest.fixture(autouse=True)
@@ -45,7 +43,7 @@ async def rate_limit_pause():
 
 
 @pytest.fixture
-async def live_conversation(live_settings):
+async def live_conversation(live_settings):  # noqa: ARG001
     """Real Conversation with real HA + real LLM, isolated DB."""
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
@@ -55,7 +53,7 @@ async def live_conversation(live_settings):
 
     knowledge_store = KnowledgeStore(db_path)
 
-    async def _dummy_embed(text: str) -> list[float]:
+    async def _dummy_embed(_text: str) -> list[float]:
         return [0.1, 0.2, 0.3, 0.4]
 
     knowledge_store.set_embed_function(_dummy_embed)
@@ -112,9 +110,15 @@ class TestMultiToolChaining:
         assert any(
             word in lower
             for word in [
-                "sensor", "temperature", "value", "°",
-                "currently", "reading", "degrees",
-                "no temperature", "no sensor",
+                "sensor",
+                "temperature",
+                "value",
+                "°",
+                "currently",
+                "reading",
+                "degrees",
+                "no temperature",
+                "no sensor",
             ]
         ), f"Expected sensor data in response: {result}"
 
@@ -131,13 +135,19 @@ class TestMultiToolChaining:
         )
         skip_on_llm_error(result)
         # Should contain numbers and domain names
-        assert any(
-            c.isdigit() for c in result
-        ), f"Expected numbers in response: {result}"
+        assert any(c.isdigit() for c in result), (
+            f"Expected numbers in response: {result}"
+        )
         lower = result.lower()
         assert any(
             word in lower
-            for word in ["light", "sensor", "switch", "automation", "domain"]
+            for word in [
+                "light",
+                "sensor",
+                "switch",
+                "automation",
+                "domain",
+            ]
         ), f"Expected domain names in response: {result}"
 
 
@@ -185,9 +195,9 @@ class TestCrossEntityAnalysis:
             for word in ["version", "entities", "area", "home assistant"]
         ), f"Expected overview data in response: {result}"
         # Should contain at least one number (entity count or version)
-        assert any(
-            c.isdigit() for c in result
-        ), f"Expected numbers in response: {result}"
+        assert any(c.isdigit() for c in result), (
+            f"Expected numbers in response: {result}"
+        )
 
 
 # ===================================================================
@@ -213,9 +223,17 @@ class TestHistoryAnalysis:
         assert any(
             word in lower
             for word in [
-                "sun", "rise", "set", "above", "below",
-                "horizon", "transition", "am", "pm",
-                "no history", "no state change",
+                "sun",
+                "rise",
+                "set",
+                "above",
+                "below",
+                "horizon",
+                "transition",
+                "am",
+                "pm",
+                "no history",
+                "no state change",
             ]
         ), f"Expected sun history in response: {result}"
 
@@ -233,7 +251,15 @@ class TestHistoryAnalysis:
         lower = result.lower()
         assert any(
             word in lower
-            for word in ["sun", "current", "above", "below", "horizon", "change", "last"]
+            for word in [
+                "sun",
+                "current",
+                "above",
+                "below",
+                "horizon",
+                "change",
+                "last",
+            ]
         ), f"Expected sun state + history in response: {result}"
 
 
@@ -271,7 +297,14 @@ class TestSafeWriteVerify:
             lower = result.lower()
             assert any(
                 word in lower
-                for word in ["done", "turned", "on", "off", "basement", entity_id.split(".")[1]]
+                for word in [
+                    "done",
+                    "turned",
+                    "on",
+                    "off",
+                    "basement",
+                    entity_id.split(".")[1],
+                ]
             ), f"Expected confirmation in response: {result}"
 
     async def test_update_entity_via_chat(self, live_conversation):
@@ -312,7 +345,6 @@ class TestMultiTurnConversation:
             session_id="multi_1",
         )
         skip_on_llm_error(result1)
-        lower1 = result1.lower()
 
         # Turn 2 — follow up
         result2 = await live_conversation.handle(
@@ -339,7 +371,9 @@ class TestMultiTurnConversation:
             session_id="multi_3turn",
         )
         skip_on_llm_error(r1)
-        assert any(c.isdigit() for c in r1), f"Expected number in turn 1: {r1}"
+        assert any(c.isdigit() for c in r1), (
+            f"Expected number in turn 1: {r1}"
+        )
 
         # Turn 2
         r2 = await live_conversation.handle(
@@ -361,7 +395,16 @@ class TestMultiTurnConversation:
         lower3 = r3.lower()
         assert any(
             word in lower3
-            for word in ["history", "sun", "change", "horizon", "transition", "above", "below", "no"]
+            for word in [
+                "history",
+                "sun",
+                "change",
+                "horizon",
+                "transition",
+                "above",
+                "below",
+                "no",
+            ]
         ), f"Expected history in turn 3: {r3}"
 
 
@@ -384,10 +427,17 @@ class TestEdgeCases:
         assert any(
             word in lower
             for word in [
-                "not found", "doesn't exist", "no entity",
-                "couldn't find", "unknown", "not available",
-                "cannot find", "can't find", "no such",
-                "unable to find", "doesn't seem",
+                "not found",
+                "doesn't exist",
+                "no entity",
+                "couldn't find",
+                "unknown",
+                "not available",
+                "cannot find",
+                "can't find",
+                "no such",
+                "unable to find",
+                "doesn't seem",
             ]
         ), f"Expected graceful error in response: {result}"
 
@@ -412,5 +462,10 @@ class TestEdgeCases:
         lower = result.lower()
         assert any(
             word in lower
-            for word in ["above_horizon", "below_horizon", "horizon", "sun"]
+            for word in [
+                "above_horizon",
+                "below_horizon",
+                "horizon",
+                "sun",
+            ]
         ), f"Expected template result in response: {result}"

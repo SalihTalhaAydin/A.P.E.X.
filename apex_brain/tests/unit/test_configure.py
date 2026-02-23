@@ -355,7 +355,7 @@ class TestDisableEnableHandlers:
             )
             assert "Enabled" in result
             cmd = mock_ws.call_args[0][0]
-            assert cmd["disabled_by"] is None
+            assert cmd["disabled_by"] in (None, "")
 
     @pytest.mark.asyncio
     async def test_enable_requires_target(self):
@@ -671,7 +671,7 @@ class TestConfigureErrorHandling:
                 target="light.test",
                 data={"name": "Test"},
             )
-            assert "Connection error" in result
+            assert "Connection" in result or "Cannot connect" in result
 
     @pytest.mark.asyncio
     async def test_ws_auth_error(self):

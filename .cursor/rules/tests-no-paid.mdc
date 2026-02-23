@@ -1,0 +1,19 @@
+---
+description: Never run paid tests or set RUN_PAID_TESTS — consumes API credits
+alwaysApply: true
+---
+
+# Paid Tests — AI Must Never Run
+
+Paid tests in `apex_brain/tests/paid/` consume API credits (LLM, etc.). Only the user runs them manually.
+
+**AI (Cursor, Claude, Copilot) must NEVER:**
+- Run `pytest apex_brain/tests/paid` or any path including `paid/`
+- Set `RUN_PAID_TESTS=1` or any env var to enable paid tests
+- Invoke or suggest commands that would execute paid tests
+
+**When running tests after a code change:**
+- Use: `pytest` or `pytest apex_brain/tests/unit apex_brain/tests/model`
+- Default `pytest` runs only free tests (testpaths excludes paid)
+
+The user runs paid tests manually with: `RUN_PAID_TESTS=1 pytest apex_brain/tests/paid -v`

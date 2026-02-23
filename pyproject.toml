@@ -26,11 +26,10 @@ quote-style = "double"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-testpaths = ["apex_brain/tests"]
-addopts = "-v --tb=short -m \"not live and not model\""
+testpaths = ["apex_brain/tests/unit", "apex_brain/tests/model"]
+addopts = "-v --tb=short"
 markers = [
-    "live: tests against real HA + real LLM (user runs before release)",
-    "model: tests that use real LLM (user runs before release)",
+    "live: tests against real HA + real LLM (user runs with RUN_PAID_TESTS=1 only)",
 ]
 
 [tool.coverage.run]

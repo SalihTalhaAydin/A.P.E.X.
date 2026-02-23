@@ -38,4 +38,4 @@ jobs:
           PYTHONPATH: apex_brain
           DB_PATH: /tmp/apex_brain_test.db
           HA_URL: http://127.0.0.1:99999
-        run: python -m pytest apex_brain/tests -v --tb=short
+        run: python -m pytest -v --tb=short

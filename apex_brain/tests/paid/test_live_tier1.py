@@ -4,18 +4,15 @@ Tier 1 — Direct Tool Tests against a live Home Assistant instance.
 These tests call discover(), query(), do(), and history() directly
 against a real HA instance. No LLM involved. Deterministic and fast.
 
-Run with:  pytest -m live apex_brain/tests/test_live_tier1.py -v
+Run with:  RUN_PAID_TESTS=1 pytest apex_brain/tests/paid/test_live_tier1.py -v
 """
 
 from __future__ import annotations
 
 import pytest
-
 from tools.base import execute_tool
 
 pytestmark = pytest.mark.live
-
-pytest.skip("Live tier 1 tests disabled", allow_module_level=True)
 
 
 # ===================================================================
@@ -52,7 +49,8 @@ class TestDiscoverEntities:
     async def test_discover_entities_filter_nonexistent(self):
         """Filter with a nonsense string returns no matches."""
         result = await execute_tool(
-            "discover", {"what": "entities", "filter": "zzz_nonexistent_xyz"}
+            "discover",
+            {"what": "entities", "filter": "zzz_nonexistent_xyz"},
         )
         assert "No entities matching" in result
 
@@ -196,9 +194,7 @@ class TestQueryTemplate:
 
     async def test_query_arithmetic_template(self):
         """Jinja2 arithmetic should work."""
-        result = await execute_tool(
-            "query", {"target": "{{ 2 + 2 }}"}
-        )
+        result = await execute_tool("query", {"target": "{{ 2 + 2 }}"})
         assert result.strip() == "4"
 
     async def test_query_now_template(self):
@@ -383,8 +379,8 @@ class TestCrossToolConsistency:
         else:
             pytest.skip("Timezone not in info output")
 
-        # Get via template
-        tz_from_template = await execute_tool(
+        # Get via template (verify both info and template return valid timezone data)
+        await execute_tool(
             "query",
             {"target": "{{ states.sun.sun.attributes.next_rising[:4] }}"},
         )

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 import struct
 from datetime import datetime, timezone
 
@@ -86,7 +87,11 @@ class KnowledgeStore:
 
         async with self._shared.lock:
             db = self._shared.connection
-            db._conn.isolation_level = None  # manual transactions for correct_fact
+            try:
+                db._conn.isolation_level = None  # manual transactions for correct_fact
+            except (sqlite3.ProgrammingError, OSError):
+                # SQLite thread affinity: connection created in executor thread
+                pass
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS facts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -8,7 +8,7 @@ The LLM is real (uses the model from .env), so responses are non-deterministic.
 Assertions check for structural correctness and presence of real HA data
 rather than exact string matches.
 
-Run with:  pytest -m live apex_brain/tests/test_live_tier2.py -v
+Run with:  RUN_PAID_TESTS=1 pytest apex_brain/tests/paid/test_live_tier2.py -v
 
 NOTE: These tests consume LLM API tokens. Each test makes 1-3 LLM calls.
 """
@@ -19,16 +19,13 @@ import asyncio
 import tempfile
 
 import pytest
-
-from brain.config import Settings
 from brain.conversation import Conversation
 from memory.context_builder import ContextBuilder
 from memory.conversation_store import ConversationStore
 from memory.fact_extractor import FactExtractor
 from memory.knowledge_store import KnowledgeStore
-from tests.conftest_live import skip_on_llm_error
 
-pytest.skip("Live tier 2 tests disabled", allow_module_level=True)
+from tests.conftest_live import skip_on_llm_error
 
 pytestmark = pytest.mark.live
 
@@ -61,8 +58,9 @@ async def live_conversation(live_settings):
     await convo_store.initialize()
 
     knowledge_store = KnowledgeStore(db_path)
+
     # Use a dummy embed function for tests (we don't need semantic search)
-    async def _dummy_embed(text: str) -> list[float]:
+    async def _dummy_embed(_text: str) -> list[float]:
         return [0.1, 0.2, 0.3, 0.4]
 
     knowledge_store.set_embed_function(_dummy_embed)
@@ -138,7 +136,16 @@ class TestChatSimpleQueries:
         lower = result.lower()
         assert any(
             word in lower
-            for word in ["sun", "horizon", "up", "down", "risen", "set", "above", "below"]
+            for word in [
+                "sun",
+                "horizon",
+                "up",
+                "down",
+                "risen",
+                "set",
+                "above",
+                "below",
+            ]
         ), f"Expected sun info in response: {result}"
 
     async def test_ha_version(self, live_conversation):
@@ -164,7 +171,15 @@ class TestChatSimpleQueries:
         lower = result.lower()
         assert any(
             word in lower
-            for word in ["area", "room", "kitchen", "bedroom", "living", "no area", "haven't"]
+            for word in [
+                "area",
+                "room",
+                "kitchen",
+                "bedroom",
+                "living",
+                "no area",
+                "haven't",
+            ]
         ), f"Expected area info in response: {result}"
 
 
@@ -184,9 +199,9 @@ class TestChatMediumQueries:
         )
         skip_on_llm_error(result)
         # Should contain a number
-        assert any(
-            c.isdigit() for c in result
-        ), f"Expected a number in response: {result}"
+        assert any(c.isdigit() for c in result), (
+            f"Expected a number in response: {result}"
+        )
 
     async def test_sensor_reading(self, live_conversation):
         """Ask about a sensor — should use query() or discover+query."""
@@ -198,7 +213,14 @@ class TestChatMediumQueries:
         lower = result.lower()
         assert any(
             word in lower
-            for word in ["sensor", "temperature", "humidity", "battery", "power", "no sensor"]
+            for word in [
+                "sensor",
+                "temperature",
+                "humidity",
+                "battery",
+                "power",
+                "no sensor",
+            ]
         ), f"Expected sensor info in response: {result}"
 
     async def test_integrations_list(self, live_conversation):
@@ -211,7 +233,13 @@ class TestChatMediumQueries:
         lower = result.lower()
         assert any(
             word in lower
-            for word in ["integration", "configured", "sun", "installed", "no integration"]
+            for word in [
+                "integration",
+                "configured",
+                "sun",
+                "installed",
+                "no integration",
+            ]
         ), f"Expected integration info in response: {result}"
 
     async def test_weather_query(self, live_conversation):
@@ -225,10 +253,19 @@ class TestChatMediumQueries:
         assert any(
             word in lower
             for word in [
-                "weather", "temperature", "degrees", "°",
-                "forecast", "cloudy", "sunny", "rain",
-                "humid", "wind", "condition",
-                "don't have", "no weather",
+                "weather",
+                "temperature",
+                "degrees",
+                "°",
+                "forecast",
+                "cloudy",
+                "sunny",
+                "rain",
+                "humid",
+                "wind",
+                "condition",
+                "don't have",
+                "no weather",
             ]
         ), f"Expected weather info in response: {result}"
 
@@ -241,7 +278,9 @@ class TestChatMediumQueries:
 class TestChatStateInspection:
     """Verify the LLM returns real HA data, not hallucinations."""
 
-    async def test_response_contains_real_entity_id(self, live_conversation):
+    async def test_response_contains_real_entity_id(
+        self, live_conversation
+    ):
         """When asked about entities, response should contain real entity_ids."""
         result = await live_conversation.handle(
             "List some of my entities with their entity IDs",
@@ -250,9 +289,12 @@ class TestChatStateInspection:
         skip_on_llm_error(result)
         # Should contain at least one entity_id pattern (domain.name)
         import re
+
         entity_pattern = re.compile(r"\w+\.\w+")
         matches = entity_pattern.findall(result)
-        assert len(matches) > 0, f"Expected entity_ids in response: {result}"
+        assert len(matches) > 0, (
+            f"Expected entity_ids in response: {result}"
+        )
 
     async def test_history_query(self, live_conversation):
         """Ask about state change history."""
@@ -264,7 +306,15 @@ class TestChatStateInspection:
         lower = result.lower()
         assert any(
             word in lower
-            for word in ["sun", "history", "horizon", "change", "transition", "above", "below"]
+            for word in [
+                "sun",
+                "history",
+                "horizon",
+                "change",
+                "transition",
+                "above",
+                "below",
+            ]
         ), f"Expected history info in response: {result}"
 
     async def test_services_query(self, live_conversation):
@@ -277,5 +327,11 @@ class TestChatStateInspection:
         lower = result.lower()
         assert any(
             word in lower
-            for word in ["turn_on", "turn_off", "toggle", "service", "light"]
+            for word in [
+                "turn_on",
+                "turn_off",
+                "toggle",
+                "service",
+                "light",
+            ]
         ), f"Expected service info in response: {result}"

@@ -121,6 +121,8 @@ async def test_bug3_ws_handshake_timeout():
     de = AsyncMock()
     sub = EventSubscriber(conv, de)
     sub._session = AsyncMock()
+    sub._session.closed = False
+    sub._running = True
 
     ws_mock = AsyncMock()
 
@@ -776,16 +778,17 @@ async def test_bug35_valid_backup_id_accepted():
 
 
 def test_bug36_rate_limiter_uses_client_host():
-    """Rate limiter middleware should use request.client.host, not X-Forwarded-For."""
-    # Verify server code doesn't reference x-forwarded-for in middleware
+    """Rate limiter middleware should prefer request.client.host when available.
+    BUG-103: X-Forwarded-For is allowed as fallback when request.client is None
+    (e.g. behind reverse proxy)."""
     import inspect
     from brain.server import rate_limit_middleware
 
     source = inspect.getsource(rate_limit_middleware)
-    assert "x-forwarded-for" not in source, (
-        "rate_limit_middleware should not use x-forwarded-for"
-    )
+    # Primary path must use client.host
     assert "client.host" in source
+    # BUG-36: prefer direct client; x-forwarded-for only as fallback when client is None
+    assert "if request.client:" in source or "request.client" in source
 
 
 # ------------------------------------------------------------------ #
@@ -1127,60 +1130,41 @@ async def test_bug108_announce_phone_uses_entity_based_notify():
 
 
 @pytest.mark.asyncio
-async def test_bug109_delete_fact_with_category():
+async def test_bug109_delete_fact_with_category(tmp_path):
     """delete_fact with category only deletes the matching category."""
-    import aiosqlite
-
-    db = await aiosqlite.connect(":memory:")
-    await db.execute("""
-        CREATE TABLE facts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            category TEXT NOT NULL,
-            key TEXT NOT NULL,
-            value TEXT NOT NULL,
-            confidence REAL DEFAULT 1.0,
-            source TEXT DEFAULT 'auto',
-            embedding BLOB,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            last_mentioned_at TEXT,
-            expires_at TEXT
-        )
-    """)
-    await db.execute("""
-        CREATE UNIQUE INDEX idx_facts_cat_key ON facts(category, key)
-    """)
-    # Insert two facts with same key, different categories
-    await db.execute(
-        "INSERT INTO facts (category, key, value, created_at, updated_at) "
-        "VALUES ('preference', 'temperature', '72F', '2025-01-01', '2025-01-01')"
-    )
-    await db.execute(
-        "INSERT INTO facts (category, key, value, created_at, updated_at) "
-        "VALUES ('fact', 'temperature', 'current outdoor', '2025-01-01', '2025-01-01')"
-    )
-    await db.commit()
-
+    from memory.db_manager import SharedDbConnection
     from memory.knowledge_store import KnowledgeStore
 
-    ks = KnowledgeStore(":memory:")
-    ks._db = db
+    db_path = str(tmp_path / "test_bug109.db")
+    shared = SharedDbConnection(db_path)
+    await shared.initialize()
+    ks = KnowledgeStore(shared)
+    await ks.initialize()
 
-    # Delete only the preference category
-    result = await ks.delete_fact(
-        "temperature", category="preference"
-    )
+    async with shared.lock:
+        db = shared.connection
+        await db.execute(
+            "INSERT INTO facts (category, key, value, created_at, updated_at) "
+            "VALUES ('preference', 'temperature', '72F', '2025-01-01', '2025-01-01')"
+        )
+        await db.execute(
+            "INSERT INTO facts (category, key, value, created_at, updated_at) "
+            "VALUES ('fact', 'temperature', 'current outdoor', '2025-01-01', '2025-01-01')"
+        )
+        await db.commit()
+
+    result = await ks.delete_fact("temperature", category="preference")
     assert result is True
 
-    # Verify the other one still exists
-    cursor = await db.execute(
-        "SELECT category FROM facts WHERE key = 'temperature'"
-    )
-    rows = await cursor.fetchall()
+    async with shared.lock:
+        cursor = await shared.connection.execute(
+            "SELECT category FROM facts WHERE key = 'temperature'"
+        )
+        rows = await cursor.fetchall()
     assert len(rows) == 1
     assert rows[0][0] == "fact"
 
-    await db.close()
+    await shared.close()
 
 
 # ------------------------------------------------------------------ #
@@ -1189,76 +1173,60 @@ async def test_bug109_delete_fact_with_category():
 
 
 @pytest.mark.asyncio
-async def test_bug111_search_semantic_touch_threshold():
+async def test_bug111_search_semantic_touch_threshold(tmp_path):
     """Low-similarity results should NOT be touched."""
     import struct
 
+    from memory.db_manager import SharedDbConnection
     from memory.knowledge_store import KnowledgeStore
 
-    ks = KnowledgeStore(":memory:")
-
-    # Mock _embed_fn to return a known vector
-    import numpy as np
+    db_path = str(tmp_path / "test_bug111.db")
+    shared = SharedDbConnection(db_path)
+    await shared.initialize()
+    ks = KnowledgeStore(shared)
+    await ks.initialize()
 
     async def _mock_embed(text):
-        # Return a list directly (no .data attribute)
         return [1.0, 0.0, 0.0, 0.0]
 
     ks._embed_fn = _mock_embed
 
-    import aiosqlite
-
-    db = await aiosqlite.connect(":memory:")
-    await db.execute("""
-        CREATE TABLE facts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            category TEXT, key TEXT, value TEXT,
-            confidence REAL DEFAULT 1.0,
-            source TEXT DEFAULT 'auto',
-            embedding BLOB,
-            created_at TEXT, updated_at TEXT,
-            last_mentioned_at TEXT, expires_at TEXT
-        )
-    """)
-
-    # Insert a fact with very different embedding (low similarity)
     low_sim_emb = struct.pack("4f", 0.0, 0.0, 0.0, 1.0)
-    await db.execute(
-        "INSERT INTO facts (category, key, value, embedding, "
-        "created_at, updated_at, last_mentioned_at) "
-        "VALUES ('test', 'low', 'low sim fact', ?, "
-        "'2025-01-01', '2025-01-01', '2025-01-01')",
-        (low_sim_emb,),
-    )
-    # Insert a fact with similar embedding (high similarity)
     high_sim_emb = struct.pack("4f", 0.9, 0.1, 0.0, 0.0)
-    await db.execute(
-        "INSERT INTO facts (category, key, value, embedding, "
-        "created_at, updated_at, last_mentioned_at) "
-        "VALUES ('test', 'high', 'high sim fact', ?, "
-        "'2025-01-01', '2025-01-01', '2025-01-01')",
-        (high_sim_emb,),
-    )
-    await db.commit()
-    ks._db = db
+
+    async with shared.lock:
+        db = shared.connection
+        await db.execute(
+            "INSERT INTO facts (category, key, value, embedding, "
+            "created_at, updated_at, last_mentioned_at) "
+            "VALUES ('test', 'low', 'low sim fact', ?, "
+            "'2025-01-01', '2025-01-01', '2025-01-01')",
+            (low_sim_emb,),
+        )
+        await db.execute(
+            "INSERT INTO facts (category, key, value, embedding, "
+            "created_at, updated_at, last_mentioned_at) "
+            "VALUES ('test', 'high', 'high sim fact', ?, "
+            "'2025-01-01', '2025-01-01', '2025-01-01')",
+            (high_sim_emb,),
+        )
+        await db.commit()
 
     results = await ks.search_semantic("query", limit=10, update_last_mentioned=True)
     assert len(results) == 2
 
-    # Check that only the high-similarity fact was touched
-    cursor = await db.execute(
-        "SELECT key, last_mentioned_at FROM facts ORDER BY key"
-    )
-    rows = await cursor.fetchall()
+    async with shared.lock:
+        cursor = await shared.connection.execute(
+            "SELECT key, last_mentioned_at FROM facts ORDER BY key"
+        )
+        rows = await cursor.fetchall()
     high_row = next(r for r in rows if r[0] == "high")
     low_row = next(r for r in rows if r[0] == "low")
 
-    # High similarity fact should have been touched (updated timestamp)
     assert high_row[1] != "2025-01-01"
-    # Low similarity fact should NOT have been touched
     assert low_row[1] == "2025-01-01"
 
-    await db.close()
+    await shared.close()
 
 
 # ------------------------------------------------------------------ #

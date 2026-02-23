@@ -5,6 +5,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.7.5] - 2026-02-22
+
+### Added
+- **Paid tests** — Live tier tests moved to `apex_brain/tests/paid/` (run with `RUN_PAID_TESTS=1`; CI skips to avoid API credits).
+- **Configuration and event handling** — Enhanced configure tool and event subscriber features.
+- **HA discovery test scripts** — Scripts for HA connectivity and discovery validation.
+
+### Changed
+- **Test structure** — `model_ha` tests migrated to `paid/`; testpaths updated in pyproject.toml.
+- **Default model** — Switched to Gemini 2.5 Pro.
+- **API key naming** — `google_api_key` renamed to `gemini_api_key` across config schema.
+- **ha_update_apex_addon.py** — Adds add-on restart after update.
+
+### Fixed
+- **Confabulation guard** — Hardened to prevent phantom device actions; `tool_choice=required` for device requests.
+- **Deprecated per-entity tools** — Hidden so model uses `control_area`/`do` generic tools.
+- **Camera tools** — Unhidden; cameras added to device discovery.
+- **Basement lights** — Fixed "turn off" claims success but does nothing.
+- **Supervisor API** — Correct response parsing in update scripts.
+- **Production bugs** — 8 bugs resolved across tools, memory, and brain layers; cooldown module and regression tests.
+- **Dynamic vacuum action** — Resolution no longer uses hardcoded enums.
+
+### Technical
+- **MCP Bridge** — Tool discovery and execution integration.
+- **OpenSSL versioning** — encrypt/decrypt scripts use pinned version.
+- **SQLite** — WAL/SHM files gitignored and removed from tracking.
+
+---
+
 ## [0.5.0] - 2026-02-17
 
 ### Changed
