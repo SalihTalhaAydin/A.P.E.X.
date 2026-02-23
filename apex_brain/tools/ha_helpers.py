@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 import httpx
 from brain.config import settings
@@ -249,14 +250,172 @@ async def _fetch_area_ids(entity_ids: list[str]) -> dict[str, str]:
         return {}
 
 
+# ---------------------------------------------------------------------------
+# Area directory cache — refreshed every 5 minutes.
+# Provides instant area_name→area_id resolution without a tool call.
+# ---------------------------------------------------------------------------
+_area_cache: dict = {
+    "directory": "",  # formatted string for prompt
+    "map": {},  # area_id -> area_name
+    "reverse": {},  # area_name_lower -> area_id
+    "timestamp": 0.0,
+}
+_area_cache_lock: asyncio.Lock | None = None
+_AREA_CACHE_SECONDS = 300  # 5 minutes
+
+
+def _get_area_cache_lock() -> asyncio.Lock:
+    global _area_cache_lock
+    if _area_cache_lock is None:
+        _area_cache_lock = asyncio.Lock()
+    return _area_cache_lock
+
+
+async def get_area_directory() -> str:
+    """Return cached area directory string for the system prompt."""
+    await _refresh_area_cache()
+    return _area_cache["directory"]
+
+
+async def resolve_area_name(name: str) -> str | None:
+    """Resolve a human area name to area_id.
+
+    Case-insensitive. Tries exact match first, then substring.
+    Returns area_id or None.
+    """
+    await _refresh_area_cache()
+    reverse = _area_cache["reverse"]
+    if not reverse:
+        return None
+    search = name.strip().lower()
+    # Exact match
+    if search in reverse:
+        return reverse[search]
+    # Substring match
+    for area_name_lower, area_id in reverse.items():
+        if search in area_name_lower:
+            return area_id
+    return None
+
+
+async def _refresh_area_cache() -> None:
+    """Refresh area cache if stale."""
+    global _area_cache
+    now = time.monotonic()
+    if (
+        _area_cache["directory"]
+        and (now - _area_cache["timestamp"]) < _AREA_CACHE_SECONDS
+    ):
+        return
+
+    async with _get_area_cache_lock():
+        now = time.monotonic()
+        if (
+            _area_cache["directory"]
+            and (now - _area_cache["timestamp"])
+            < _AREA_CACHE_SECONDS
+        ):
+            return
+
+        try:
+            template = (
+                "{% for area in areas() %}"
+                "{{ area }}|{{ area_name(area) }}\n"
+                "{% endfor %}"
+            )
+            raw = await ha_request(
+                "POST",
+                "/template",
+                json_data={"template": template},
+            )
+            if not isinstance(raw, str) or not raw.strip():
+                return
+
+            area_map: dict[str, str] = {}
+            reverse: dict[str, str] = {}
+            lines: list[str] = []
+            for line in raw.strip().split("\n"):
+                line = line.strip()
+                if "|" not in line:
+                    continue
+                area_id, area_nm = line.split("|", 1)
+                area_id = area_id.strip()
+                area_nm = area_nm.strip()
+                if not area_id:
+                    continue
+                area_map[area_id] = area_nm
+                reverse[area_nm.lower()] = area_id
+                lines.append(
+                    f"  - {area_nm} (area_id: {area_id})"
+                )
+
+            directory = (
+                f"## Areas ({len(lines)}):\n"
+                + "\n".join(lines)
+            )
+
+            _area_cache["directory"] = directory
+            _area_cache["map"] = area_map
+            _area_cache["reverse"] = reverse
+            _area_cache["timestamp"] = now
+            logger.info(
+                "Area directory refreshed: %d areas",
+                len(lines),
+            )
+        except Exception as exc:
+            logger.warning(
+                "Area directory refresh failed: %s", exc
+            )
+
+
+# ---------------------------------------------------------------------------
+# Device summary cache — refreshed every 5 minutes
+# ---------------------------------------------------------------------------
+_device_cache: dict = {"summary": "", "timestamp": 0.0}
+_device_cache_lock: asyncio.Lock | None = None
+_DEVICE_CACHE_SECONDS = 300  # 5 minutes
+
+
+def _get_device_cache_lock() -> asyncio.Lock:
+    global _device_cache_lock
+    if _device_cache_lock is None:
+        _device_cache_lock = asyncio.Lock()
+    return _device_cache_lock
+
+
 async def get_device_summary() -> str:
     """Fetch key device entities from HA for the system prompt.
 
     Returns a short summary string the AI can reference
     to know exact entity IDs, friendly names, and area_id.
-    Area info helps the model map "basement" / "kitchen" to
-    correct area_id for do() targets.
+    Cached for 5 minutes to avoid hammering HA on every turn.
     """
+    global _device_cache
+    now = time.monotonic()
+    if (
+        _device_cache["summary"]
+        and (now - _device_cache["timestamp"])
+        < _DEVICE_CACHE_SECONDS
+    ):
+        return _device_cache["summary"]
+
+    async with _get_device_cache_lock():
+        now = time.monotonic()
+        if (
+            _device_cache["summary"]
+            and (now - _device_cache["timestamp"])
+            < _DEVICE_CACHE_SECONDS
+        ):
+            return _device_cache["summary"]
+
+        summary = await _build_device_summary()
+        _device_cache["summary"] = summary
+        _device_cache["timestamp"] = now
+        return summary
+
+
+async def _build_device_summary() -> str:
+    """Build device summary (uncached inner function)."""
     try:
         states = await ha_request("GET", "/states")
     except Exception as exc:

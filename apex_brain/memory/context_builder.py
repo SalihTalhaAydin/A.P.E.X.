@@ -36,9 +36,14 @@ class ContextBuilder:
         self.max_facts = max_facts
 
     async def build(
-        self, user_message: str, session_id: str = "default"
+        self, user_message: str, session_id: str = "default",
+        voice_mode: bool = False,
     ) -> str:
         """Build a full system prompt with all context.
+
+        voice_mode: when True, builds a lighter prompt — skips
+        conversation history, service schemas, proactive hints,
+        and calendar to cut prompt tokens for fast voice responses.
 
         Returns the complete system prompt string.
         """
@@ -56,16 +61,19 @@ class ContextBuilder:
         now = datetime.datetime.now(tz=tz)
         time_context = _build_time_context(now)
 
-        # 2. Recent conversation turns (for continuity)
-        recent_turns = await self.conversation_store.get_recent(
-            n=self.recent_turns_count,
-            session_id=session_id,
-        )
+        # 2. Recent conversation turns (skip in voice mode — stateless)
+        recent_turns = None
+        if not voice_mode:
+            recent_turns = await self.conversation_store.get_recent(
+                n=self.recent_turns_count,
+                session_id=session_id,
+            )
 
         # 3. Semantically relevant facts (search_semantic falls back to
         #    search_keyword internally when embeddings are unavailable)
-        # Reserve slots for high-confidence core facts (BUG-128)
-        semantic_limit = max(1, self.max_facts - 5)
+        # Voice mode: fewer facts (just core identity facts)
+        fact_limit = 5 if voice_mode else self.max_facts
+        semantic_limit = max(1, fact_limit - 5)
         relevant_facts = []
         if user_message:
             relevant_facts = await self.knowledge_store.search_semantic(
@@ -77,7 +85,7 @@ class ContextBuilder:
         core_facts = await self.knowledge_store.get_all_facts(limit=50)
         core_set = {f.get("id") for f in relevant_facts if f.get("id")}
         for fact in core_facts:
-            if len(relevant_facts) >= self.max_facts:
+            if len(relevant_facts) >= fact_limit:
                 break
             if (
                 fact.get("id") not in core_set
@@ -96,41 +104,46 @@ class ContextBuilder:
         except (ImportError, ConnectionError, TimeoutError, OSError) as e:
             logger.warning("context_builder: Failed to fetch presence: %s", e)
 
-        # 4.6. Device discovery: current entity names
+        # 4.6. Device discovery: current entity names + area directory
         device_summary = ""
+        area_directory = ""
         try:
             from tools.ha_helpers import (
+                get_area_directory,
                 get_device_summary,
             )
 
             device_summary = await get_device_summary()
+            area_directory = await get_area_directory()
         except (ImportError, ConnectionError, TimeoutError, OSError) as e:
             logger.warning(
                 "context_builder: Failed to fetch device summary: %s", e
             )
 
-        # 4.7. Service schemas for top domains
+        # 4.7. Service schemas for top domains (skip in voice mode)
         service_schemas = ""
-        try:
-            service_schemas = await fetch_service_schemas()
-        except (ConnectionError, TimeoutError, OSError) as e:
-            logger.warning(
-                "context_builder: Failed to fetch service schemas: %s", e
-            )
-
-        # 5. Calendar summary
-        calendar_summary = ""
-        try:
-            if settings.google_calendar_credentials_path:
-                from tools.calendar_tool import (
-                    get_today_schedule,
+        if not voice_mode:
+            try:
+                service_schemas = await fetch_service_schemas()
+            except (ConnectionError, TimeoutError, OSError) as e:
+                logger.warning(
+                    "context_builder: Failed to fetch service schemas: %s", e
                 )
 
-                calendar_summary = await get_today_schedule()
-        except (ImportError, ConnectionError, TimeoutError, OSError) as e:
-            logger.warning(
-                "context_builder: Failed to fetch calendar: %s", e
-            )
+        # 5. Calendar summary (skip in voice mode)
+        calendar_summary = ""
+        if not voice_mode:
+            try:
+                if settings.google_calendar_credentials_path:
+                    from tools.calendar_tool import (
+                        get_today_schedule,
+                    )
+
+                    calendar_summary = await get_today_schedule()
+            except (ImportError, ConnectionError, TimeoutError, OSError) as e:
+                logger.warning(
+                    "context_builder: Failed to fetch calendar: %s", e
+                )
 
         # 6. Build the system prompt
         return build_system_prompt(
@@ -141,4 +154,6 @@ class ContextBuilder:
             time_context=time_context,
             device_summary=device_summary,
             service_schemas=service_schemas,
+            area_directory=area_directory,
+            voice_mode=voice_mode,
         )

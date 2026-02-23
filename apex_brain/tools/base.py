@@ -134,6 +134,50 @@ def get_openai_tool_definitions() -> list[dict]:
     return definitions
 
 
+# Core tools for voice mode — minimal set for fast responses.
+# Only action/query tools; no automation CRUD, routines, etc.
+VOICE_TOOLS = frozenset({
+    "do",
+    "query",
+    "discover",
+    "history",
+    "control_vacuum",
+    "clean_rooms",
+    "get_weather",
+    "manage_todo",
+    "send_notification",
+    "announce",
+    "remember",
+    "recall",
+    "get_current_datetime",
+    "activate_scene",
+    "trigger_automation",
+})
+
+
+def get_voice_tool_definitions() -> list[dict]:
+    """Reduced tool set for voice mode — faster LLM decisions.
+
+    Only includes ~15 core tools instead of ~30, cutting prompt
+    tokens and reducing the chance the LLM picks wrong tools.
+    """
+    definitions = []
+    for name, info in TOOL_REGISTRY.items():
+        if name not in VOICE_TOOLS:
+            continue
+        definitions.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": info["description"],
+                    "parameters": info["parameters"],
+                },
+            }
+        )
+    return definitions
+
+
 def hide_tools(*names: str) -> None:
     """Mark tools as hidden (not advertised to LLM but still callable).
 
@@ -159,8 +203,8 @@ DEPRECATED_TOOLS = (
     "control_media",
     "control_cover",
     "control_fan",
-    # control_area kept visible (not in DEPRECATED): accepts area_name,
-    # resolves to area_id. do() requires area_id — LLM needs control_area.
+    # control_area now deprecated: do() accepts area_name directly
+    "control_area",
     "call_service",
     # history.py → history()
     "get_history",

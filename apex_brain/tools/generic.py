@@ -642,6 +642,8 @@ async def _query_template(template: str) -> str:
 @tool(
     description=(
         "Call ANY Home Assistant service. "
+        "Accepts area_name in targets for automatic "
+        "resolution (no need to discover areas first). "
         "Use discover(what='services', filter_str='domain') "
         "to see available services and their parameters."
     ),
@@ -667,7 +669,9 @@ async def _query_template(template: str) -> str:
                 "description": (
                     'Target(s): {"entity_id": "..."} or '
                     '{"area_id": "..."} or '
-                    '{"device_id": "..."}.'
+                    '{"area_name": "basement"} or '
+                    '{"device_id": "..."}. '
+                    "area_name is auto-resolved to area_id."
                 ),
             },
             "data": {
@@ -692,7 +696,27 @@ async def do(
     data: dict = None,
 ) -> str:
     """Call any Home Assistant service with verification."""
+    from tools.ha_helpers import resolve_area_name
+
     try:
+        # Resolve area_name -> area_id if provided
+        if targets and "area_name" in targets:
+            area_name_raw = targets.pop("area_name", "")
+            if area_name_raw and "area_id" not in targets:
+                resolved = await resolve_area_name(area_name_raw)
+                if resolved:
+                    targets["area_id"] = resolved
+                    logger.info(
+                        "do() resolved area_name '%s' -> area_id '%s'",
+                        area_name_raw,
+                        resolved,
+                    )
+                else:
+                    return (
+                        f"No area matching '{area_name_raw}' found. "
+                        "Use discover(what='areas') to see available areas."
+                    )
+
         # Two-step confirmation for protected domains: first call returns
         # a short-lived token; second call must include that token.
         confirmed = bool(data and data.get("confirmed"))
@@ -770,10 +794,7 @@ async def do(
             json_data=payload or None,
         )
 
-        # Wait for state to settle
-        await asyncio.sleep(0.5)
-
-        # Verify by reading back entity state
+        # Verify by reading back entity state (no artificial delay)
         if entity_id:
             status = await verify_generic(entity_id)
             return f"Done. {status}"

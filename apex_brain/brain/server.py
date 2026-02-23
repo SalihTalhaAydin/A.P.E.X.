@@ -683,10 +683,17 @@ async def openai_compatible(request: Request):
     sanitized = re.sub(r"[^a-zA-Z0-9_-]", "", str(raw_session) if raw_session else "")[:64]
     session_id = sanitized or "default"
 
+    # Voice mode: HA voice pipeline uses this endpoint.
+    # Shorter timeout, reduced tool set, lighter prompt.
+    voice_mode = True
+
     try:
         response_text = await asyncio.wait_for(
-            conversation.handle(user_message, session_id),
-            timeout=180,
+            conversation.handle(
+                user_message, session_id,
+                voice_mode=voice_mode,
+            ),
+            timeout=60,
         )
     except TimeoutError:
         return JSONResponse(

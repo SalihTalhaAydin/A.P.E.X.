@@ -20,6 +20,7 @@ from tools.base import (
     TOOL_REGISTRY,
     execute_tool,
     get_openai_tool_definitions,
+    get_voice_tool_definitions,
 )
 
 from brain.config import settings
@@ -286,13 +287,19 @@ class Conversation:
         litellm.suppress_debug_info = True
 
     async def handle(
-        self, user_message: str, session_id: str = "default"
+        self,
+        user_message: str,
+        session_id: str = "default",
+        voice_mode: bool = False,
     ) -> str:
         """
         Process a user message through the full Apex pipeline.
         Returns the final response text.
         Per-session locking prevents interleaving when concurrent requests
         share the same session_id.
+
+        voice_mode: when True, uses reduced tool set and
+        shorter max_tokens for faster responses.
         """
         # Get or create per-session lock (evict oldest when over capacity)
         async with self._session_locks_meta:
@@ -304,10 +311,13 @@ class Conversation:
             lock = self._session_locks[session_id]
 
         async with lock:
-            return await self._handle_locked(user_message, session_id)
+            return await self._handle_locked(
+                user_message, session_id, voice_mode
+            )
 
     async def _handle_locked(
-        self, user_message: str, session_id: str
+        self, user_message: str, session_id: str,
+        voice_mode: bool = False,
     ) -> str:
         """Run the full pipeline. Caller must hold the session lock."""
         # 1. Save user turn
@@ -317,17 +327,19 @@ class Conversation:
 
         # 2. Build rich context (recent history + relevant facts + time)
         system_prompt = await self.context_builder.build(
-            user_message, session_id=session_id
+            user_message, session_id=session_id,
+            voice_mode=voice_mode,
         )
 
         # 2.5. Inject last action trace for explainability
-        last_trace = self._action_traces.get(session_id, "")
-        if last_trace:
-            system_prompt += (
-                "\n\nLAST ACTION TRACE (reference if the user "
-                "asks why you did something):\n"
-                f"{last_trace}"
-            )
+        if not voice_mode:
+            last_trace = self._action_traces.get(session_id, "")
+            if last_trace:
+                system_prompt += (
+                    "\n\nLAST ACTION TRACE (reference if the user "
+                    "asks why you did something):\n"
+                    f"{last_trace}"
+                )
 
         # 3. Prepare messages for the AI
         messages = [
@@ -336,18 +348,26 @@ class Conversation:
         ]
 
         # 4. Get tool definitions (native + MCP)
-        tool_defs = get_openai_tool_definitions()
-        if self.mcp_bridge and self.mcp_bridge.connected:
-            try:
-                mcp_tools = self.mcp_bridge.get_openai_tool_definitions()
-                if isinstance(mcp_tools, list):
-                    tool_defs = tool_defs + mcp_tools
-            except Exception as e:
-                logger.warning("Failed to get MCP tool definitions: %s", e)
+        if voice_mode:
+            tool_defs = get_voice_tool_definitions()
+        else:
+            tool_defs = get_openai_tool_definitions()
+            if self.mcp_bridge and self.mcp_bridge.connected:
+                try:
+                    mcp_tools = (
+                        self.mcp_bridge.get_openai_tool_definitions()
+                    )
+                    if isinstance(mcp_tools, list):
+                        tool_defs = tool_defs + mcp_tools
+                except Exception as e:
+                    logger.warning(
+                        "Failed to get MCP tool definitions: %s", e
+                    )
 
         # 5. Call AI with tool loop
         response_text = await self._ai_tool_loop(
-            messages, tool_defs, session_id=session_id
+            messages, tool_defs, session_id=session_id,
+            voice_mode=voice_mode,
         )
 
         # 6. Save assistant response
@@ -416,10 +436,15 @@ class Conversation:
         tool_defs: list[dict],
         max_iterations: int = 15,
         session_id: str = "default",
+        voice_mode: bool = False,
     ) -> str:
         """Call AI, handle tool calls, repeat until text."""
         nudge_count = 0
         tools_called: list[str] = []
+
+        # Voice mode: fewer iterations, shorter output
+        if voice_mode:
+            max_iterations = min(max_iterations, 5)
 
         # Detect if user message expects a device action
         user_msg = next(
@@ -438,7 +463,7 @@ class Conversation:
                     "model": settings.litellm_model,
                     "messages": messages,
                     "temperature": 0.2,
-                    "max_tokens": 2000,
+                    "max_tokens": 500 if voice_mode else 2000,
                 }
                 if tool_defs:
                     kwargs["tools"] = tool_defs

@@ -96,22 +96,20 @@ delete_routine, list_automations, trigger_automation, \
 toggle_automation, create_automation, update_automation, \
 delete_automation, list_scenes, activate_scene, get_entity_power, \
 fire_webhook, fire_event, get_camera_snapshot, get_camera_state.
+{area_directory_block}
 {devices_block}
 {service_schemas_block}\
 
-AREA-BASED CONTROL:
-- When the user mentions a ROOM or AREA name (e.g. "basement", "kitchen") \
-without specifying a particular fixture (like "ceiling light"), target the \
-ENTIRE AREA using do(domain="light", service="turn_on", \
-targets={{"area_id": "the_area_id"}}).
-- ALWAYS call discover(what="areas", filter_str="room_name") FIRST to get the \
-exact area_id before calling do(). Area IDs may differ from display names \
-(e.g. "lower_level" not "basement"). Do not guess.
-- Device summary shows [area: area_id] per entity — use that to infer \
-area_id when present; otherwise discover(what="areas") first.
-- "Turn on the basement lights" → discover(what="areas", filter_str="basement") \
-→ then do("light", "turn_on", targets={{"area_id": "<exact_id>"}})
+AREA-BASED CONTROL (use do() directly — NO discover step needed):
+- When the user mentions a ROOM or AREA name (e.g. "basement", "kitchen"), \
+use do() with area_name in targets. It auto-resolves to area_id. \
+Example: do("light", "turn_off", targets={{"area_name": "basement"}})
+- You can also use area_id directly if you see it in the area directory or \
+device summary above. Example: do("light", "turn_on", targets={{"area_id": "lower_level"}})
+- "Turn off the basement lights" → do("light", "turn_off", targets={{"area_name": "basement"}})
 - "Turn on the basement ceiling light" → use entity_id from device summary.
+- Do NOT call discover(what="areas") before do() — do() handles area \
+resolution automatically.
 - For floors, use discover(what="floors") then target with \
 {{"floor_id": "..."}}.
 
@@ -374,6 +372,30 @@ def _build_proactive_hints(
     )
 
 
+VOICE_PROMPT_TEMPLATE = """\
+You are Apex, a smart home voice assistant. Be brief — \
+this is voice output, not a screen. One short sentence max.
+
+{context_block}
+
+TOOLS:
+- do(domain, service, targets, data) — call any HA service.
+  For rooms, use area_name: do("light", "turn_off", \
+targets={{"area_name": "basement"}})
+- query(target) — read entity state.
+- discover(what, filter_str) — find entities or areas.
+{area_directory_block}
+{devices_block}
+
+RULES:
+- ONLY do what the user asked. Nothing extra.
+- If the tool fails, say so. Never claim success without \
+a successful tool result.
+- Confirm actions in ≤8 words. "Done — basement lights off."
+- Never fabricate. If unsure, say so.\
+"""
+
+
 def build_system_prompt(
     current_datetime: str = "",
     calendar_summary: str = "",
@@ -383,8 +405,14 @@ def build_system_prompt(
     time_context: dict | None = None,
     device_summary: str = "",
     service_schemas: str = "",
+    area_directory: str = "",
+    voice_mode: bool = False,
 ) -> str:
-    """Build the full system prompt with injected context."""
+    """Build the full system prompt with injected context.
+
+    voice_mode: use compact VOICE_PROMPT_TEMPLATE instead
+    of the full template (fewer tokens, faster LLM response).
+    """
     sections = []
 
     # Time & context (rich version if available)
@@ -431,6 +459,15 @@ def build_system_prompt(
         calendar=calendar_summary,
     )
 
+    # Build the area directory block
+    area_directory_block = ""
+    if area_directory:
+        area_directory_block = (
+            "\nAREA DIRECTORY (use area_id or "
+            "area_name in do() targets):\n"
+            f"{area_directory}"
+        )
+
     # Build the devices block for the prompt
     devices_block = ""
     if device_summary:
@@ -450,9 +487,17 @@ def build_system_prompt(
             f"{service_schemas}\n"
         )
 
+    if voice_mode:
+        return VOICE_PROMPT_TEMPLATE.format(
+            context_block=context_block,
+            area_directory_block=area_directory_block,
+            devices_block=devices_block,
+        )
+
     return SYSTEM_PROMPT_TEMPLATE.format(
         context_block=context_block,
         proactive_block=proactive_block,
+        area_directory_block=area_directory_block,
         devices_block=devices_block,
         service_schemas_block=service_schemas_block,
     )
