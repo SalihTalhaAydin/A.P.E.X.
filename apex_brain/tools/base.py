@@ -133,6 +133,7 @@ VOICE_TOOLS = frozenset({
     "query",
     "discover",
     "history",
+    "configure",
     "control_vacuum",
     "clean_rooms",
     "get_weather",

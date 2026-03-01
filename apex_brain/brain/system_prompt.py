@@ -239,6 +239,9 @@ auto-resolves: do("light", "turn_off", \
 targets={{"area_name": "basement"}})
 - query(target) — read entity state.
 - discover(what, filter_str) — find entities or areas.
+- configure(action, target, data) — rename entities, \
+manage areas, assign devices. Actions: rename, \
+assign_area, create_area, enable, disable, list_stale.
 {area_directory_block}
 {devices_block}
 
