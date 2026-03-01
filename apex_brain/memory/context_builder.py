@@ -237,7 +237,10 @@ class ContextBuilder:
         #    recent turns from any session so the AI still has
         #    context from the previous conversation.
         recent_turns = fetched.get("recent_turns") or []
-        if not recent_turns and session_id != "default":
+        # If session has ≤1 turn (just the user's own message,
+        # saved before context build), treat as empty and load
+        # from previous sessions for continuity.
+        if len(recent_turns) <= 1 and session_id != "default":
             try:
                 recent_turns = await self.conversation_store.get_recent(
                     n=turns_count,
