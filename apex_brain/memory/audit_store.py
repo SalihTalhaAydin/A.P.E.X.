@@ -2,6 +2,7 @@
 Audit Store - Logs every manage() and configure() call.
 Provides a full audit trail for post-incident review.
 """
+
 from __future__ import annotations
 
 import json
@@ -54,7 +55,9 @@ class AuditStore:
 
     def _ensure_db(self):
         if not self._shared.is_initialized:
-            raise RuntimeError("Store not initialized. Call initialize() first.")
+            raise RuntimeError(
+                "Store not initialized. Call initialize() first."
+            )
 
     async def log(
         self,
@@ -92,9 +95,7 @@ class AuditStore:
             await db.commit()
             return cursor.lastrowid
 
-    async def get_recent(
-        self, limit: int = 50
-    ) -> list[dict]:
+    async def get_recent(self, limit: int = 50) -> list[dict]:
         """Get the most recent audit entries."""
         self._ensure_db()
 
@@ -124,9 +125,7 @@ class AuditStore:
             for r in rows
         ]
 
-    async def get_by_tool(
-        self, tool: str, limit: int = 50
-    ) -> list[dict]:
+    async def get_by_tool(self, tool: str, limit: int = 50) -> list[dict]:
         """Get audit entries filtered by tool name."""
         self._ensure_db()
 

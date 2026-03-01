@@ -11,7 +11,7 @@ Covers:
 
 from __future__ import annotations
 
-import json
+from datetime import timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -38,15 +38,13 @@ class TestRegistration:
         assert info is not None
 
     def test_discover_required_params(self):
-        required = TOOL_REGISTRY["discover"]["parameters"][
-            "required"
-        ]
+        required = TOOL_REGISTRY["discover"]["parameters"]["required"]
         assert "what" in required
 
     def test_discover_what_enum(self):
-        enum = TOOL_REGISTRY["discover"]["parameters"][
-            "properties"
-        ]["what"]["enum"]
+        enum = TOOL_REGISTRY["discover"]["parameters"]["properties"][
+            "what"
+        ]["enum"]
         assert set(enum) == {
             "entities",
             "services",
@@ -62,9 +60,7 @@ class TestRegistration:
         assert info is not None
 
     def test_query_required_params(self):
-        required = TOOL_REGISTRY["query"]["parameters"][
-            "required"
-        ]
+        required = TOOL_REGISTRY["query"]["parameters"]["required"]
         assert "target" in required
 
     def test_do_registered(self):
@@ -72,16 +68,12 @@ class TestRegistration:
         assert info is not None
 
     def test_do_required_params(self):
-        required = TOOL_REGISTRY["do"]["parameters"][
-            "required"
-        ]
+        required = TOOL_REGISTRY["do"]["parameters"]["required"]
         assert "domain" in required
         assert "service" in required
 
     def test_do_has_targets_and_data(self):
-        props = TOOL_REGISTRY["do"]["parameters"][
-            "properties"
-        ]
+        props = TOOL_REGISTRY["do"]["parameters"]["properties"]
         assert "targets" in props
         assert "data" in props
 
@@ -90,15 +82,13 @@ class TestRegistration:
         assert info is not None
 
     def test_history_required_params(self):
-        required = TOOL_REGISTRY["history"]["parameters"][
-            "required"
-        ]
+        required = TOOL_REGISTRY["history"]["parameters"]["required"]
         assert "entity_id" in required
 
     def test_history_mode_enum(self):
-        enum = TOOL_REGISTRY["history"]["parameters"][
-            "properties"
-        ]["mode"]["enum"]
+        enum = TOOL_REGISTRY["history"]["parameters"]["properties"][
+            "mode"
+        ]["enum"]
         assert set(enum) == {"changes", "logbook"}
 
 
@@ -117,16 +107,12 @@ class TestDiscover:
             {
                 "entity_id": "light.kitchen",
                 "state": "on",
-                "attributes": {
-                    "friendly_name": "Kitchen Light"
-                },
+                "attributes": {"friendly_name": "Kitchen Light"},
             },
             {
                 "entity_id": "sensor.temp",
                 "state": "72",
-                "attributes": {
-                    "friendly_name": "Temperature"
-                },
+                "attributes": {"friendly_name": "Temperature"},
             },
         ]
         with patch(
@@ -148,16 +134,12 @@ class TestDiscover:
             {
                 "entity_id": "light.kitchen",
                 "state": "on",
-                "attributes": {
-                    "friendly_name": "Kitchen Light"
-                },
+                "attributes": {"friendly_name": "Kitchen Light"},
             },
             {
                 "entity_id": "sensor.temp",
                 "state": "72",
-                "attributes": {
-                    "friendly_name": "Temperature"
-                },
+                "attributes": {"friendly_name": "Temperature"},
             },
         ]
         with patch(
@@ -165,9 +147,7 @@ class TestDiscover:
             new_callable=AsyncMock,
             return_value=states,
         ):
-            result = await discover(
-                what="entities", filter_str="light"
-            )
+            result = await discover(what="entities", filter_str="light")
 
         assert "light.kitchen" in result
         assert "sensor.temp" not in result
@@ -179,16 +159,12 @@ class TestDiscover:
             {
                 "entity_id": "light.kitchen",
                 "state": "on",
-                "attributes": {
-                    "friendly_name": "Kitchen Light"
-                },
+                "attributes": {"friendly_name": "Kitchen Light"},
             },
             {
                 "entity_id": "light.bedroom",
                 "state": "off",
-                "attributes": {
-                    "friendly_name": "Bedroom Light"
-                },
+                "attributes": {"friendly_name": "Bedroom Light"},
             },
         ]
         with patch(
@@ -196,9 +172,7 @@ class TestDiscover:
             new_callable=AsyncMock,
             return_value=states,
         ):
-            result = await discover(
-                what="entities", filter_str="kitchen"
-            )
+            result = await discover(what="entities", filter_str="kitchen")
 
         assert "light.kitchen" in result
         assert "light.bedroom" not in result
@@ -218,9 +192,7 @@ class TestDiscover:
             new_callable=AsyncMock,
             return_value=states,
         ):
-            result = await discover(
-                what="entities", filter_str="garage"
-            )
+            result = await discover(what="entities", filter_str="garage")
 
         assert "No entities matching" in result
 
@@ -245,9 +217,7 @@ class TestDiscover:
             {
                 "entity_id": f"sensor.item_{i}",
                 "state": str(i),
-                "attributes": {
-                    "friendly_name": f"Item {i}"
-                },
+                "attributes": {"friendly_name": f"Item {i}"},
             }
             for i in range(60)
         ]
@@ -262,9 +232,7 @@ class TestDiscover:
         assert "showing first 50" in result
         # Only 50 entity lines
         entity_lines = [
-            l
-            for l in result.splitlines()
-            if "sensor.item_" in l
+            l for l in result.splitlines() if "sensor.item_" in l
         ]
         assert len(entity_lines) == 50
 
@@ -320,9 +288,7 @@ class TestDiscover:
             new_callable=AsyncMock,
             return_value=services,
         ):
-            result = await discover(
-                what="services", filter_str="light"
-            )
+            result = await discover(what="services", filter_str="light")
 
         assert "light.turn_on" in result
         assert "light.turn_off" in result
@@ -339,9 +305,7 @@ class TestDiscover:
             new_callable=AsyncMock,
             return_value=services,
         ):
-            result = await discover(
-                what="services", filter_str="vacuum"
-            )
+            result = await discover(what="services", filter_str="vacuum")
 
         assert "No services matching" in result
 
@@ -367,9 +331,7 @@ class TestDiscover:
             new_callable=AsyncMock,
             return_value="kitchen|Kitchen\nbedroom|Bedroom\n",
         ):
-            result = await discover(
-                what="areas", filter_str="kitchen"
-            )
+            result = await discover(what="areas", filter_str="kitchen")
 
         assert "Kitchen" in result
         assert "Bedroom" not in result
@@ -457,8 +419,7 @@ class TestDiscover:
         from tools.generic import discover
 
         template_result = (
-            "light.kitchen|Kitchen Light|on\n"
-            "sensor.temp|Temperature|72\n"
+            "light.kitchen|Kitchen Light|on\nsensor.temp|Temperature|72\n"
         )
         with patch(
             "tools.generic.ha_request",
@@ -482,9 +443,7 @@ class TestDiscover:
             new_callable=AsyncMock,
             return_value=template_result,
         ):
-            result = await discover(
-                what="devices", filter_str="kitchen"
-            )
+            result = await discover(what="devices", filter_str="kitchen")
 
         assert "Kitchen Light" in result
         assert "Bedroom Light" not in result
@@ -519,9 +478,7 @@ class TestDiscover:
             new_callable=AsyncMock,
             return_value=floor_response,
         ):
-            result = await discover(
-                what="floors", filter_str="basement"
-            )
+            result = await discover(what="floors", filter_str="basement")
 
         assert "Basement" in result
         assert "First Floor" not in result
@@ -601,9 +558,7 @@ class TestQuery:
             new_callable=AsyncMock,
             return_value=state,
         ):
-            result = await query(
-                target="climate.living_room"
-            )
+            result = await query(target="climate.living_room")
 
         assert "heat" in result
         assert "target: 72" in result
@@ -628,9 +583,7 @@ class TestQuery:
             new_callable=AsyncMock,
             return_value=state,
         ):
-            result = await query(
-                target="media_player.tv"
-            )
+            result = await query(target="media_player.tv")
 
         assert "playing" in result
         assert "Movie Night" in result
@@ -645,9 +598,7 @@ class TestQuery:
             new_callable=AsyncMock,
             return_value="72°F",
         ):
-            result = await query(
-                target='{{ states("sensor.temp") }}°F'
-            )
+            result = await query(target='{{ states("sensor.temp") }}°F')
 
         assert "72°F" in result
 
@@ -672,10 +623,11 @@ class TestQuery:
     async def test_entity_not_found_fallback_to_template(
         self,
     ):
+        from tools.ha_helpers import HomeAssistantError
         from tools.generic import query
 
         async def mock_read_state(eid):
-            raise Exception("404 Not Found")
+            raise HomeAssistantError("404 Not Found")
 
         with patch(
             "tools.generic.read_state",
@@ -686,9 +638,7 @@ class TestQuery:
                 new_callable=AsyncMock,
                 return_value="on",
             ):
-                result = await query(
-                    target="light.kitchen"
-                )
+                result = await query(target="light.kitchen")
 
         assert "light.kitchen" in result
         assert "on" in result
@@ -708,9 +658,7 @@ class TestQuery:
                 new_callable=AsyncMock,
                 side_effect=Exception("also failed"),
             ):
-                result = await query(
-                    target="light.nonexistent"
-                )
+                result = await query(target="light.nonexistent")
 
         assert "not found" in result.lower()
 
@@ -761,9 +709,7 @@ class TestQuery:
             new_callable=AsyncMock,
             return_value=state,
         ):
-            result = await query(
-                target="sensor.outdoor_temp"
-            )
+            result = await query(target="sensor.outdoor_temp")
 
         assert "72.5" in result
         assert "unit: °F" in result
@@ -815,9 +761,7 @@ class TestDo:
                     result = await do(
                         domain="light",
                         service="turn_on",
-                        targets={
-                            "entity_id": "light.kitchen"
-                        },
+                        targets={"entity_id": "light.kitchen"},
                     )
 
         assert "Done" in result
@@ -828,9 +772,7 @@ class TestDo:
 
         captured = {}
 
-        async def mock_ha_request(
-            method, path, json_data=None, **kw
-        ):
+        async def mock_ha_request(method, path, json_data=None, **kw):
             if "/services/" in path:
                 captured.update(json_data or {})
             return {}
@@ -848,9 +790,7 @@ class TestDo:
                     result = await do(
                         domain="light",
                         service="turn_on",
-                        targets={
-                            "entity_id": "light.kitchen"
-                        },
+                        targets={"entity_id": "light.kitchen"},
                         data={"brightness_pct": 50},
                     )
 
@@ -863,9 +803,7 @@ class TestDo:
 
         captured = {}
 
-        async def mock_ha_request(
-            method, path, json_data=None, **kw
-        ):
+        async def mock_ha_request(method, path, json_data=None, **kw):
             if "/services/" in path:
                 captured.update(json_data or {})
                 return {}
@@ -894,17 +832,15 @@ class TestDo:
         assert "Done" in result
         assert captured.get("area_id") == "kitchen"
         assert "entity_id" not in captured
-        # Verification should show entity states
-        assert "Kitchen Ceiling" in result
-        assert "Kitchen Lamp" in result
+        # Concise verification: count-based summary
+        assert "2" in result
+        assert "kitchen" in result
 
     async def test_service_call_area_target_empty(self):
         """Area call with no entities in area."""
         from tools.generic import do
 
-        async def mock_ha_request(
-            method, path, json_data=None, **kw
-        ):
+        async def mock_ha_request(method, path, json_data=None, **kw):
             if "/services/" in path:
                 return {}
             # Template returns empty (no entities)
@@ -933,9 +869,7 @@ class TestDo:
 
         captured = {}
 
-        async def mock_ha_request(
-            method, path, json_data=None, **kw
-        ):
+        async def mock_ha_request(method, path, json_data=None, **kw):
             if "/services/" in path:
                 captured.update(json_data or {})
                 return {}
@@ -957,16 +891,14 @@ class TestDo:
                 result = await do(
                     domain="light",
                     service="turn_on",
-                    targets={
-                        "floor_id": "floor_basement"
-                    },
+                    targets={"floor_id": "floor_basement"},
                 )
 
         assert "Done" in result
-        assert captured.get("floor_id") == (
-            "floor_basement"
-        )
-        assert "Basement Ceiling" in result
+        assert captured.get("floor_id") == ("floor_basement")
+        # Concise verification: count-based summary
+        assert "2" in result
+        assert "floor_basement" in result
 
     async def test_no_targets_no_data(self):
         from tools.generic import do
@@ -1004,9 +936,7 @@ class TestDo:
         result = await do(
             domain="alarm_control_panel",
             service="alarm_disarm",
-            targets={
-                "entity_id": "alarm_control_panel.home"
-            },
+            targets={"entity_id": "alarm_control_panel.home"},
         )
 
         assert "CONFIRMATION REQUIRED" in result
@@ -1028,9 +958,7 @@ class TestDo:
         result = await do(
             domain="camera",
             service="turn_off",
-            targets={
-                "entity_id": "camera.front_porch"
-            },
+            targets={"entity_id": "camera.front_porch"},
         )
 
         assert "CONFIRMATION REQUIRED" in result
@@ -1068,7 +996,9 @@ class TestDo:
         assert "CONFIRMATION REQUIRED" in result1
         token = result1.split("confirmation_token:")[-1].strip().split()[0]
 
-        with patch("tools.generic.ha_request", side_effect=mock_ha_request):
+        with patch(
+            "tools.generic.ha_request", side_effect=mock_ha_request
+        ):
             with patch(
                 "tools.generic.verify_generic",
                 new_callable=AsyncMock,
@@ -1079,7 +1009,10 @@ class TestDo:
                         domain="alarm_control_panel",
                         service="alarm_disarm",
                         targets={"entity_id": "alarm_control_panel.home"},
-                        data={"confirmed": True, "confirmation_token": token},
+                        data={
+                            "confirmed": True,
+                            "confirmation_token": token,
+                        },
                     )
 
         assert "Done" in result2
@@ -1088,7 +1021,7 @@ class TestDo:
 
     async def test_confirmation_expired_token_fails(self):
         """Expired confirmation token returns CONFIRMATION REQUIRED again."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         from tools.generic import do
 
@@ -1104,9 +1037,9 @@ class TestDo:
         # Expire the token by setting its expiry to the past
         import tools.generic as generic_module
 
-        generic_module._pending_confirmations[token] = (
-            datetime.now(timezone.utc) - timedelta(seconds=1)
-        )
+        generic_module._pending_confirmations[token] = datetime.now(
+            timezone.utc
+        ) - timedelta(seconds=1)
 
         # Second call with expired token should fail
         result2 = await do(
@@ -1124,9 +1057,7 @@ class TestDo:
 
         captured = {}
 
-        async def mock_ha_request(
-            method, path, json_data=None, **kw
-        ):
+        async def mock_ha_request(method, path, json_data=None, **kw):
             if "/services/" in path:
                 captured.update(json_data or {})
             return {}
@@ -1156,7 +1087,10 @@ class TestDo:
                         domain="lock",
                         service="unlock",
                         targets={"entity_id": "lock.front_door"},
-                        data={"confirmed": True, "confirmation_token": token},
+                        data={
+                            "confirmed": True,
+                            "confirmation_token": token,
+                        },
                     )
 
         assert "Done" in result2
@@ -1176,9 +1110,7 @@ class TestDo:
                 result = await do(
                     domain="light",
                     service="turn_on",
-                    targets={
-                        "entity_id": "light.kitchen"
-                    },
+                    targets={"entity_id": "light.kitchen"},
                 )
 
         assert "Error" in result or "error" in result
@@ -1189,9 +1121,7 @@ class TestDo:
 
         captured = {}
 
-        async def mock_ha_request(
-            method, path, json_data=None, **kw
-        ):
+        async def mock_ha_request(method, path, json_data=None, **kw):
             if "/services/" in path:
                 captured.update(json_data or {})
             return {}
@@ -1383,9 +1313,7 @@ class TestHistory:
 
         captured_path = []
 
-        async def mock_ha_request(
-            method, path, json_data=None, **kw
-        ):
+        async def mock_ha_request(method, path, json_data=None, **kw):
             captured_path.append(path)
             return [[]]
 
@@ -1410,9 +1338,7 @@ class TestHistory:
             new_callable=AsyncMock,
             side_effect=Exception("Connection refused"),
         ):
-            result = await history(
-                entity_id="light.kitchen"
-            )
+            result = await history(entity_id="light.kitchen")
 
         assert "Error" in result
 
@@ -1421,9 +1347,7 @@ class TestHistory:
 
         captured_path = []
 
-        async def mock_ha_request(
-            method, path, json_data=None, **kw
-        ):
+        async def mock_ha_request(method, path, json_data=None, **kw):
             captured_path.append(path)
             return [[]]
 
@@ -1434,9 +1358,7 @@ class TestHistory:
             await history(entity_id="light.kitchen")
 
         # Should use history/period endpoint, not logbook
-        assert any(
-            "/history/period" in p for p in captured_path
-        )
+        assert any("/history/period" in p for p in captured_path)
 
     async def test_dedup_consecutive_same_state(self):
         """Consecutive identical states are deduplicated."""
@@ -1544,9 +1466,7 @@ class TestHelpers:
     def test_selector_to_type_number(self):
         from tools.generic import _selector_to_type
 
-        result = _selector_to_type(
-            {"number": {"min": 0, "max": 100}}
-        )
+        result = _selector_to_type({"number": {"min": 0, "max": 100}})
         assert "number" in result
         assert "0" in result
         assert "100" in result
@@ -1560,9 +1480,7 @@ class TestHelpers:
     def test_selector_to_type_entity(self):
         from tools.generic import _selector_to_type
 
-        result = _selector_to_type(
-            {"entity": {"domain": "light"}}
-        )
+        result = _selector_to_type({"entity": {"domain": "light"}})
         assert "entity" in result
         assert "light" in result
 
@@ -1575,9 +1493,7 @@ class TestHelpers:
     def test_format_timestamp_iso(self):
         from tools.generic import _format_timestamp
 
-        result = _format_timestamp(
-            "2024-01-15T09:30:45+00:00"
-        )
+        result = _format_timestamp("2024-01-15T09:30:45+00:00")
         assert "09:30:45" in result
 
     def test_format_timestamp_empty(self):
@@ -1589,9 +1505,7 @@ class TestHelpers:
     def test_format_timestamp_z_suffix(self):
         from tools.generic import _format_timestamp
 
-        result = _format_timestamp(
-            "2024-01-15T09:30:45Z"
-        )
+        result = _format_timestamp("2024-01-15T09:30:45Z")
         assert "09:30:45" in result
 
     def test_protected_domains_set(self):

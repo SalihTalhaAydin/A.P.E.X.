@@ -7,6 +7,7 @@ import datetime
 import zoneinfo
 
 from brain.config import settings
+
 from tools.base import tool
 
 
@@ -20,5 +21,5 @@ def get_current_datetime() -> str:
         tz = zoneinfo.ZoneInfo(settings.timezone)
         now = datetime.datetime.now(tz=tz)
     except Exception:
-        now = datetime.datetime.now(tz=datetime.timezone.utc)
+        now = datetime.datetime.now(tz=datetime.UTC)
     return now.strftime("%A, %B %d, %Y at %I:%M %p")

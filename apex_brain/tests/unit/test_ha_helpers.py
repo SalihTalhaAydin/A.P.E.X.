@@ -14,11 +14,25 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _reset_device_cache():
+    """Reset the ha_helpers device cache before each test to avoid leaking
+    cached data between tests (the cache has a 5-minute TTL)."""
+    import tools.ha_helpers as hh
+
+    hh._device_cache = {"summary": "", "timestamp": 0.0}
+    yield
+    hh._device_cache = {"summary": "", "timestamp": 0.0}
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_state(entity_id: str, state: str = "on", friendly: str | None = None) -> dict:
+
+def _make_state(
+    entity_id: str, state: str = "on", friendly: str | None = None
+) -> dict:
     """Return a minimal HA state dict."""
     attrs = {}
     if friendly is not None:
@@ -140,8 +154,7 @@ async def test_get_device_summary_caps_light_at_15():
 
     # Count how many light entity_ids appear in output
     light_lines = [
-        line for line in result.splitlines()
-        if "light.room_" in line
+        line for line in result.splitlines() if "light.room_" in line
     ]
     assert len(light_lines) == 15, (
         f"Expected 15 light lines, got {len(light_lines)}"
@@ -157,7 +170,9 @@ async def test_get_device_summary_includes_climate():
     from tools.ha_helpers import get_device_summary
 
     states = [
-        _make_state("climate.living_room", "heat", "Living Room Thermostat"),
+        _make_state(
+            "climate.living_room", "heat", "Living Room Thermostat"
+        ),
     ]
 
     with patch(
@@ -178,7 +193,9 @@ async def test_get_device_summary_includes_media_player():
     from tools.ha_helpers import get_device_summary
 
     states = [
-        _make_state("media_player.living_room_tv", "playing", "Living Room TV"),
+        _make_state(
+            "media_player.living_room_tv", "playing", "Living Room TV"
+        ),
     ]
 
     with patch(
@@ -309,9 +326,7 @@ async def test_get_device_summary_light_no_cap_header_when_under_limit():
     """When <= 15 lights exist, the header does NOT show a cap notation."""
     from tools.ha_helpers import get_device_summary
 
-    states = [
-        _make_state(f"light.room_{i}", "on") for i in range(10)
-    ]
+    states = [_make_state(f"light.room_{i}", "on") for i in range(10)]
 
     with patch(
         "tools.ha_helpers.ha_request",
@@ -589,7 +604,9 @@ async def test_get_device_summary_includes_area_when_available():
         _make_state("light.kitchen_overhead", "off", "Kitchen Light"),
     ]
     # Template returns entity_id|area_id per line
-    area_response = "light.basement_ceiling|basement\nlight.kitchen_overhead|kitchen\n"
+    area_response = (
+        "light.basement_ceiling|basement\nlight.kitchen_overhead|kitchen\n"
+    )
 
     async def mock_ha_request(method, path, json_data=None, **kwargs):
         if method == "GET" and path == "/states":

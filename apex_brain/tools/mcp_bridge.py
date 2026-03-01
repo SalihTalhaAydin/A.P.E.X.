@@ -74,7 +74,9 @@ class MCPBridge:
             streams = await self._transport_cm.__aenter__()
 
             # Defensive: ensure streams is indexable (tuple/list-like)
-            if not hasattr(streams, "__len__") or not hasattr(streams, "__getitem__"):
+            if not hasattr(streams, "__len__") or not hasattr(
+                streams, "__getitem__"
+            ):
                 raise ValueError(
                     f"MCP transport streams must be indexable "
                     f"(tuple/list-like), got {type(streams).__name__}"
@@ -104,9 +106,7 @@ class MCPBridge:
                 await self._session.initialize()
             except Exception:
                 # Clean up transport if session init fails
-                await self._transport_cm.__aexit__(
-                    None, None, None
-                )
+                await self._transport_cm.__aexit__(None, None, None)
                 raise
             self._connected = True
             logger.info(

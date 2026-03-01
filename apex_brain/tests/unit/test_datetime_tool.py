@@ -3,8 +3,6 @@
 import datetime
 from unittest.mock import patch
 
-import pytest
-
 from tools.datetime_tool import get_current_datetime
 
 
@@ -18,16 +16,21 @@ def test_get_current_datetime_returns_formatted_string():
 
 def test_get_current_datetime_fallback_timezone_aware():
     """Bug 37: When ZoneInfo fails, fallback must use timezone-aware UTC datetime."""
-    with patch("tools.datetime_tool.zoneinfo.ZoneInfo", side_effect=Exception("ZoneInfo failed")):
+    with patch(
+        "tools.datetime_tool.zoneinfo.ZoneInfo",
+        side_effect=Exception("ZoneInfo failed"),
+    ):
         with patch("tools.datetime_tool.datetime.datetime") as mock_dt:
-            aware = datetime.datetime(2025, 2, 22, 12, 0, 0, tzinfo=datetime.timezone.utc)
+            aware = datetime.datetime(
+                2025, 2, 22, 12, 0, 0, tzinfo=datetime.UTC
+            )
             mock_dt.now.return_value = aware
 
             result = get_current_datetime()
 
             assert result is not None
             # Verify fallback path called now() with timezone.utc
-            mock_dt.now.assert_called_once_with(tz=datetime.timezone.utc)
+            mock_dt.now.assert_called_once_with(tz=datetime.UTC)
             # Returned value used for strftime must be timezone-aware
             assert aware.tzinfo is not None
 
@@ -41,8 +44,23 @@ def test_get_current_datetime_format_contains_day_and_time():
     assert " at " in result
     assert "AM" in result or "PM" in result
     # Date components
-    assert any(m in result for m in ("January", "February", "March", "April", "May", "June",
-                                    "July", "August", "September", "October", "November", "December"))
+    assert any(
+        m in result
+        for m in (
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
+        )
+    )
 
 
 def test_get_current_datetime_with_custom_timezone():

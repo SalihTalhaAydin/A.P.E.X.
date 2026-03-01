@@ -29,8 +29,7 @@ logger = logging.getLogger(__name__)
             "entity_id": {
                 "type": "string",
                 "description": (
-                    "Weather entity. Defaults to "
-                    "'weather.forecast_home'."
+                    "Weather entity. Defaults to 'weather.forecast_home'."
                 ),
             },
             "forecast_type": {
@@ -56,18 +55,13 @@ async def get_weather(
         attrs = state.get("attributes", {})
         condition = state.get("state", "unknown")
         temp = attrs.get("temperature", "?")
-        unit = attrs.get(
-            "temperature_unit", "°F"
-        )
+        unit = attrs.get("temperature_unit", "°F")
         humidity = attrs.get("humidity", "?")
         wind = attrs.get("wind_speed", "?")
-        wind_unit = attrs.get(
-            "wind_speed_unit", "mph"
-        )
+        wind_unit = attrs.get("wind_speed_unit", "mph")
 
         lines = [
-            f"Current: {condition}, "
-            f"{temp}{unit}",
+            f"Current: {condition}, {temp}{unit}",
             f"Humidity: {humidity}%",
             f"Wind: {wind} {wind_unit}",
         ]
@@ -84,28 +78,19 @@ async def get_weather(
             )
             # Response: {entity_id: {"forecast": [...]}}
             forecasts = (
-                fc.get(entity_id, {})
-                .get("forecast", [])
+                fc.get(entity_id, {}).get("forecast", [])
                 if isinstance(fc, dict)
                 else []
             )
             if forecasts:
                 cap = 5 if forecast_type == "daily" else 8
-                lines.append(
-                    f"\n{forecast_type.title()} forecast:"
-                )
+                lines.append(f"\n{forecast_type.title()} forecast:")
                 for f in forecasts[:cap]:
-                    dt = (
-                        f.get("datetime") or ""
-                    )[:16]
-                    cond = f.get(
-                        "condition", "?"
-                    )
+                    dt = (f.get("datetime") or "")[:16]
+                    cond = f.get("condition", "?")
                     hi = f.get("temperature", "?")
                     lo = f.get("templow")
-                    precip = f.get(
-                        "precipitation_probability"
-                    )
+                    precip = f.get("precipitation_probability")
                     entry = f"  {dt}: {cond}, {hi}"
                     if lo is not None and lo != "":
                         entry += f"/{lo}"
@@ -117,8 +102,6 @@ async def get_weather(
         return "\n".join(lines)
 
     except httpx.HTTPStatusError as e:
-        return format_ha_error(
-            entity_id, "weather", e
-        )
+        return format_ha_error(entity_id, "weather", e)
     except Exception as e:
         return f"Error getting weather: {e}"

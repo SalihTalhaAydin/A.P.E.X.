@@ -4,13 +4,13 @@ import datetime as dt
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from tools.base import TOOL_REGISTRY
 
 
 @pytest.fixture(scope="module")
 def _tools_loaded():
     from tools import discover_tools
+
     discover_tools()
 
 
@@ -71,6 +71,7 @@ def test_delete_event_registered():
 @pytest.mark.asyncio
 async def test_create_event_uses_first_calendar_when_no_entity_specified():
     """When calendar_entity_id is omitted, use first available calendar."""
+
     async def mock_ha_request(method, path, json_data=None, **_kwargs):
         if method == "GET" and path == "/states":
             return [
@@ -105,6 +106,7 @@ async def test_create_event_uses_first_calendar_when_no_entity_specified():
 @pytest.mark.asyncio
 async def test_create_event_uses_specified_calendar_when_valid():
     """When calendar_entity_id is provided and valid, use that calendar."""
+
     async def mock_ha_request(method, path, json_data=None, **_kwargs):
         if method == "GET" and path == "/states":
             return [
@@ -140,6 +142,7 @@ async def test_create_event_uses_specified_calendar_when_valid():
 @pytest.mark.asyncio
 async def test_create_event_rejects_invalid_calendar_entity_id():
     """When calendar_entity_id is not in available calendars, return error."""
+
     async def mock_ha_request(method, path, **_kwargs):
         if method == "GET" and path == "/states":
             return [
@@ -235,11 +238,14 @@ async def test_multi_day_all_day_event_included_when_today_in_range():
             ]
         return []
 
-    with patch(
-        "tools.calendar_tool.ha_request",
-        new_callable=AsyncMock,
-        side_effect=mock_ha_request,
-    ), patch("tools.calendar_tool._today_date", return_value=today):
+    with (
+        patch(
+            "tools.calendar_tool.ha_request",
+            new_callable=AsyncMock,
+            side_effect=mock_ha_request,
+        ),
+        patch("tools.calendar_tool._today_date", return_value=today),
+    ):
         from tools.calendar_tool import get_today_schedule
 
         result = await get_today_schedule()
@@ -268,11 +274,14 @@ async def test_multi_day_all_day_event_excluded_when_today_outside_range():
             ]
         return []
 
-    with patch(
-        "tools.calendar_tool.ha_request",
-        new_callable=AsyncMock,
-        side_effect=mock_ha_request,
-    ), patch("tools.calendar_tool._today_date", return_value=today):
+    with (
+        patch(
+            "tools.calendar_tool.ha_request",
+            new_callable=AsyncMock,
+            side_effect=mock_ha_request,
+        ),
+        patch("tools.calendar_tool._today_date", return_value=today),
+    ):
         from tools.calendar_tool import get_today_schedule
 
         result = await get_today_schedule()
@@ -301,11 +310,14 @@ async def test_single_day_all_day_event_without_end_dt_still_included():
             ]
         return []
 
-    with patch(
-        "tools.calendar_tool.ha_request",
-        new_callable=AsyncMock,
-        side_effect=mock_ha_request,
-    ), patch("tools.calendar_tool._today_date", return_value=today):
+    with (
+        patch(
+            "tools.calendar_tool.ha_request",
+            new_callable=AsyncMock,
+            side_effect=mock_ha_request,
+        ),
+        patch("tools.calendar_tool._today_date", return_value=today),
+    ):
         from tools.calendar_tool import get_today_schedule
 
         result = await get_today_schedule()
@@ -341,11 +353,14 @@ async def test_get_events_skips_calendar_when_api_returns_error_dict():
             return {"message": "error", "code": 500}
         return []
 
-    with patch(
-        "tools.calendar_tool.ha_request",
-        new_callable=AsyncMock,
-        side_effect=mock_ha_request,
-    ), patch("tools.calendar_tool._today_date", return_value=today):
+    with (
+        patch(
+            "tools.calendar_tool.ha_request",
+            new_callable=AsyncMock,
+            side_effect=mock_ha_request,
+        ),
+        patch("tools.calendar_tool._today_date", return_value=today),
+    ):
         from tools.calendar_tool import get_events
 
         result = await get_events(days_ahead=3)
@@ -368,11 +383,14 @@ async def test_get_events_returns_no_events_when_all_calendars_return_error_dict
             return {"error": "forbidden"}
         return []
 
-    with patch(
-        "tools.calendar_tool.ha_request",
-        new_callable=AsyncMock,
-        side_effect=mock_ha_request,
-    ), patch("tools.calendar_tool._today_date", return_value=today):
+    with (
+        patch(
+            "tools.calendar_tool.ha_request",
+            new_callable=AsyncMock,
+            side_effect=mock_ha_request,
+        ),
+        patch("tools.calendar_tool._today_date", return_value=today),
+    ):
         from tools.calendar_tool import get_events
 
         result = await get_events(days_ahead=7)
@@ -404,11 +422,14 @@ async def test_get_today_schedule_skips_calendar_when_api_returns_error_dict():
             return {"message": "API error", "code": 500}
         return []
 
-    with patch(
-        "tools.calendar_tool.ha_request",
-        new_callable=AsyncMock,
-        side_effect=mock_ha_request,
-    ), patch("tools.calendar_tool._today_date", return_value=today):
+    with (
+        patch(
+            "tools.calendar_tool.ha_request",
+            new_callable=AsyncMock,
+            side_effect=mock_ha_request,
+        ),
+        patch("tools.calendar_tool._today_date", return_value=today),
+    ):
         from tools.calendar_tool import get_today_schedule
 
         result = await get_today_schedule()

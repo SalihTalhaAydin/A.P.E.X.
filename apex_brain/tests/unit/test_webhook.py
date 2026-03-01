@@ -3,7 +3,6 @@
 from unittest.mock import AsyncMock
 
 import pytest
-
 from brain.event_handler import (
     EventHandler,
     WebhookEvent,
@@ -22,9 +21,7 @@ def test_webhook_event_model():
         timestamp="2026-02-17T23:30:00",
     )
     assert event.event_type == "motion"
-    assert event.entity_id == (
-        "binary_sensor.hallway_motion"
-    )
+    assert event.entity_id == ("binary_sensor.hallway_motion")
 
 
 def test_webhook_event_defaults():
@@ -50,9 +47,7 @@ def test_webhook_response_model():
 
 def test_event_handler_cooldown():
     """Cooldown prevents rapid re-processing."""
-    handler = EventHandler(
-        conversation=None, cooldown=60
-    )
+    handler = EventHandler(conversation=None, cooldown=60)
     key = "motion:binary_sensor.hallway"
 
     # First call: should pass
@@ -64,9 +59,7 @@ def test_event_handler_cooldown():
 
 def test_event_handler_cooldown_expires():
     """Cooldown expires after the specified time."""
-    handler = EventHandler(
-        conversation=None, cooldown=0
-    )
+    handler = EventHandler(conversation=None, cooldown=0)
     key = "motion:binary_sensor.hallway"
 
     assert handler._cooldown.check_and_set(key) is True
@@ -76,16 +69,12 @@ def test_event_handler_cooldown_expires():
 
 def test_event_message_motion():
     """Motion events build correct message."""
-    handler = EventHandler(
-        conversation=None, cooldown=60
-    )
+    handler = EventHandler(conversation=None, cooldown=60)
     event = WebhookEvent(
         event_type="motion",
         entity_id="binary_sensor.hallway_motion",
         new_state="on",
-        attributes={
-            "friendly_name": "Hallway Motion"
-        },
+        attributes={"friendly_name": "Hallway Motion"},
     )
     msg = handler._build_event_message(event)
     assert "Motion detected" in msg
@@ -94,9 +83,7 @@ def test_event_message_motion():
 
 def test_event_message_door():
     """Door events build correct message."""
-    handler = EventHandler(
-        conversation=None, cooldown=60
-    )
+    handler = EventHandler(conversation=None, cooldown=60)
     event = WebhookEvent(
         event_type="door",
         entity_id="binary_sensor.front_door",
@@ -109,9 +96,7 @@ def test_event_message_door():
 
 def test_event_message_generic():
     """Unknown event types get generic message."""
-    handler = EventHandler(
-        conversation=None, cooldown=60
-    )
+    handler = EventHandler(conversation=None, cooldown=60)
     event = WebhookEvent(
         event_type="custom_alert",
         entity_id="sensor.smoke",
@@ -192,9 +177,7 @@ def test_allow_event_without_old_state():
 @pytest.mark.asyncio
 async def test_process_event_filters_redundant():
     """process_event returns ignored for redundant."""
-    handler = EventHandler(
-        conversation=None, cooldown=60
-    )
+    handler = EventHandler(conversation=None, cooldown=60)
     event = WebhookEvent(
         event_type="state_changed",
         entity_id="light.kasa_plug",
@@ -211,9 +194,7 @@ async def test_process_event_processes_real_change():
     """process_event passes genuine changes to conversation."""
     mock_convo = AsyncMock()
     mock_convo.handle.return_value = "Turning on the lights."
-    handler = EventHandler(
-        conversation=mock_convo, cooldown=0
-    )
+    handler = EventHandler(conversation=mock_convo, cooldown=0)
     event = WebhookEvent(
         event_type="motion",
         entity_id="binary_sensor.hallway_motion",
@@ -258,4 +239,6 @@ async def test_bug63_bug64_unique_session_id_per_event():
     sid1 = mock_convo.handle.call_args_list[0].kwargs["session_id"]
     sid2 = mock_convo.handle.call_args_list[1].kwargs["session_id"]
     assert sid1 != sid2
-    assert sid1.startswith("apex_events") and sid2.startswith("apex_events")
+    assert sid1.startswith("apex_events") and sid2.startswith(
+        "apex_events"
+    )

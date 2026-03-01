@@ -8,10 +8,10 @@ integration, plus /api/chat for testing and
 from __future__ import annotations
 
 import asyncio
-import re
 import hmac
 import logging
 import os
+import re
 import time
 import uuid
 from collections import defaultdict
@@ -36,15 +36,11 @@ from tools.routines import set_routine_store
 
 from brain.config import settings
 from brain.conversation import Conversation
-from brain.curator import Curator
-from brain.decision_engine import DecisionEngine
 from brain.event_handler import (
     EventHandler,
     WebhookEvent,
     WebhookResponse,
 )
-from brain.event_subscriber import EventSubscriber
-from brain.scheduler import Scheduler
 from brain.version import __version__
 
 logger = logging.getLogger(__name__)
@@ -56,7 +52,7 @@ async def _close_stores_if_present(
     convo_store,
     knowledge_store,
 ) -> None:
-    """Close store connections if present. No-op when None (e.g. startup failed)."""
+    """Close store connections if present."""
     if routine_store is not None:
         await routine_store.close()
     if convo_store is not None:
@@ -72,16 +68,11 @@ async def _close_stores_if_present(
 # ---------------------------------------------------------
 conversation: Conversation | None = None
 event_handler: EventHandler | None = None
-scheduler: Scheduler | None = None
-event_subscriber: EventSubscriber | None = None
 startup_time: float = 0
 
 
 async def _check_ha_reachable() -> tuple[bool, str | None]:
-    """Perform one GET to HA Core API.
-
-    Returns (success, error_message).
-    """
+    """Perform one GET to HA Core API."""
     url = f"{settings.ha_api_url}/config"
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
@@ -105,7 +96,10 @@ async def _embed_text(
             input=[text],
         )
         if not response.data:
-            logger.warning("Embedding API returned empty data for text: %s", text[:50])
+            logger.warning(
+                "Embedding API returned empty data for text: %s",
+                text[:50],
+            )
             return None
         item = response.data[0]
         if isinstance(item, dict):
@@ -116,10 +110,42 @@ async def _embed_text(
         return None
 
 
+async def _check_llm_reachable() -> None:
+    """Best-effort connectivity check to the configured LLM provider."""
+    model = settings.litellm_model
+    if model.startswith("gpt-") or "openai" in model.lower():
+        url = "https://api.openai.com/v1/models"
+        label = "OpenAI"
+    elif model.startswith("claude-") or "anthropic" in model.lower():
+        url = "https://api.anthropic.com/v1/messages"
+        label = "Anthropic"
+    elif model.startswith("gemini/"):
+        url = "https://generativelanguage.googleapis.com/"
+        label = "Google Gemini"
+    else:
+        return
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(url)
+            logger.info(
+                "  LLM provider %s: reachable (HTTP %d)",
+                label,
+                r.status_code,
+            )
+    except Exception as e:
+        logger.warning(
+            "  LLM provider %s: NOT reachable (%s). "
+            "Outbound API calls will fail until connectivity is restored.",
+            label,
+            e,
+        )
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Startup and shutdown logic."""
-    global conversation, event_handler, scheduler, event_subscriber, startup_time
+    global conversation, event_handler, startup_time
     startup_time = time.time()
 
     logging.basicConfig(
@@ -139,23 +165,13 @@ async def lifespan(_app: FastAPI):
     model = settings.litellm_model
     if model.startswith("gpt-") or "openai" in model.lower():
         if not settings.openai_api_key:
-            logger.error(
-                "Model %s requires openai_api_key. Set it in Add-on Configuration.",
-                model,
-            )
+            logger.error("Model %s requires openai_api_key.", model)
     elif model.startswith("claude-") or "anthropic" in model.lower():
         if not settings.anthropic_api_key:
-            logger.error(
-                "Model %s requires anthropic_api_key. Set it in Add-on Configuration.",
-                model,
-            )
+            logger.error("Model %s requires anthropic_api_key.", model)
     elif model.startswith("gemini/"):
         if not settings.gemini_api_key:
-            logger.error(
-                "Model %s requires gemini_api_key. Get one at "
-                "https://aistudio.google.com/apikey and set it in Add-on Configuration.",
-                model,
-            )
+            logger.error("Model %s requires gemini_api_key.", model)
 
     # Set API keys
     if settings.openai_api_key:
@@ -165,41 +181,41 @@ async def lifespan(_app: FastAPI):
     if settings.gemini_api_key:
         os.environ["GEMINI_API_KEY"] = settings.gemini_api_key
 
-    # Track initialized resources for cleanup on failure
+    await _check_llm_reachable()
+
     shared_db: SharedDbConnection | None = None
     convo_store = None
     knowledge_store = None
     routine_store = None
     audit_store = None
     mcp_bridge: MCPBridge | None = None
-    scheduler = None
-    event_subscriber = None
+    fact_cleanup_task: asyncio.Task | None = None
 
     try:
-        # Single shared DB connection for all stores (prevents "database is locked" BUG-52)
+        # Database
         shared_db = SharedDbConnection(settings.db_path)
         await shared_db.initialize()
 
-        # Initialize memory stores (all share the same connection + lock)
+        # Memory stores
         convo_store = ConversationStore(shared_db)
         await convo_store.initialize()
         pruned = await convo_store.cleanup_old_turns(
             settings.conversation_retention_days
         )
         if pruned:
-            logger.info("Pruned %d old conversation turns at startup", pruned)
+            logger.info("Pruned %d old conversation turns", pruned)
 
         knowledge_store = KnowledgeStore(shared_db)
         knowledge_store.set_embed_function(_embed_text)
         await knowledge_store.initialize()
 
-        # Initialize fact extractor
+        # Fact extractor
         fact_extractor = FactExtractor(
             knowledge_store=knowledge_store,
             model=settings.fact_extraction_model,
         )
 
-        # Initialize context builder
+        # Context builder
         context_builder = ContextBuilder(
             conversation_store=convo_store,
             knowledge_store=knowledge_store,
@@ -207,7 +223,7 @@ async def lifespan(_app: FastAPI):
             max_facts=settings.max_facts_in_context,
         )
 
-        # Initialize routine store (dedicated table with lifecycle tracking)
+        # Routine store
         routine_store = RoutineStore(shared_db)
         await routine_store.initialize()
         await routine_store.migrate_from_knowledge_store(knowledge_store)
@@ -221,12 +237,12 @@ async def lifespan(_app: FastAPI):
             ", ".join(TOOL_REGISTRY.keys()),
         )
 
-        # Initialize audit store for manage/configure logging
+        # Audit store
         from memory.audit_store import AuditStore
-        from tools.manage import set_audit_store as set_manage_audit
         from tools.configure import (
             set_audit_store as set_configure_audit,
         )
+        from tools.manage import set_audit_store as set_manage_audit
 
         audit_store = AuditStore(shared_db)
         await audit_store.initialize()
@@ -234,7 +250,7 @@ async def lifespan(_app: FastAPI):
         set_configure_audit(audit_store)
         logger.info("  Audit store: initialized")
 
-        # Connect MCP bridge (optional)
+        # MCP bridge (optional)
         if settings.mcp_server_url:
             mcp_bridge = MCPBridge(
                 url=settings.mcp_server_url,
@@ -251,7 +267,7 @@ async def lifespan(_app: FastAPI):
                     settings.mcp_server_url,
                 )
 
-        # Create conversation handler
+        # Conversation handler
         conversation = Conversation(
             conversation_store=convo_store,
             knowledge_store=knowledge_store,
@@ -260,7 +276,7 @@ async def lifespan(_app: FastAPI):
             mcp_bridge=mcp_bridge,
         )
 
-        # Create event handler (webhook reactions)
+        # Event handler (webhook reactions)
         if settings.webhook_enabled:
             event_handler = EventHandler(
                 conversation=conversation,
@@ -268,51 +284,20 @@ async def lifespan(_app: FastAPI):
             )
             logger.info("  Webhook endpoint: enabled")
 
-        # Create curator for self-maintenance
-        curator = None
-        if settings.curator_enabled:
-            curator = Curator(
-                conversation=conversation,
-                knowledge_store=knowledge_store,
-            )
-            logger.info("  Curator: enabled")
+        # Background fact cleanup
+        from brain.fact_cleanup import FactCleanupTimer
 
-        # Start scheduler (autonomous loop)
-        if settings.scheduler_enabled:
-            scheduler = Scheduler(
-                conversation=conversation,
-                knowledge_store=knowledge_store,
-                curator=curator,
-            )
-            await scheduler.start()
-            logger.info(
-                "  Scheduler: %d tasks registered",
-                scheduler.task_count,
-            )
-
-        # Start event subscriber (real-time HA events via WebSocket)
-        if settings.event_subscription_enabled:
-            decision_engine = DecisionEngine(
-                cooldown_seconds=settings.webhook_cooldown_seconds,
-                significance_threshold=settings.event_significance_threshold,
-                knowledge_store=knowledge_store,
-            )
-            event_subscriber = EventSubscriber(
-                conversation=conversation,
-                decision_engine=decision_engine,
-            )
-            await event_subscriber.start()
-            logger.info("  Event subscriber: enabled")
+        fact_cleanup = FactCleanupTimer(
+            knowledge_store=knowledge_store,
+            interval_hours=settings.fact_cleanup_interval_hours,
+        )
+        fact_cleanup_task = await fact_cleanup.start()
 
         logger.info("  Apex Brain is online.")
         logger.info("=" * 50)
 
     except Exception:
         logger.exception("Startup failed — cleaning up")
-        if event_subscriber:
-            await event_subscriber.stop()
-        if scheduler:
-            await scheduler.stop()
         if conversation:
             await conversation.shutdown()
         if mcp_bridge and mcp_bridge.connected:
@@ -326,11 +311,13 @@ async def lifespan(_app: FastAPI):
 
     yield
 
-    # Shutdown (stop event sources first, then conversation's background tasks)
-    if event_subscriber:
-        await event_subscriber.stop()
-    if scheduler:
-        await scheduler.stop()
+    # Shutdown
+    if fact_cleanup_task and not fact_cleanup_task.done():
+        fact_cleanup_task.cancel()
+        try:
+            await fact_cleanup_task
+        except asyncio.CancelledError:
+            pass
     if conversation:
         await conversation.shutdown()
     if mcp_bridge and mcp_bridge.connected:
@@ -367,25 +354,20 @@ app = FastAPI(
 
 
 class RateLimiter:
-    """Simple in-memory rate limiter using a dict of timestamps."""
+    """Simple in-memory rate limiter."""
 
     def __init__(self):
         self._requests: dict[str, list[float]] = defaultdict(list)
         self._last_cleanup: float = time.time()
-        self._cleanup_interval: float = 60.0  # seconds
+        self._cleanup_interval: float = 60.0
 
     def is_allowed(
         self, key: str, max_requests: int, window_seconds: int = 60
     ) -> bool:
-        """Check if a request is allowed under the rate limit.
-
-        Returns True if allowed, False if rate-limited.
-        """
         now = time.time()
         self._maybe_cleanup(now)
 
         cutoff = now - window_seconds
-        # Prune old timestamps for this key
         self._requests[key] = [
             t for t in self._requests[key] if t > cutoff
         ]
@@ -397,12 +379,10 @@ class RateLimiter:
         return True
 
     def _maybe_cleanup(self, now: float) -> None:
-        """Periodically remove stale keys to prevent memory growth."""
         if now - self._last_cleanup < self._cleanup_interval:
             return
         self._last_cleanup = now
-        max_window = 300  # 5 minutes
-        cutoff = now - max_window
+        cutoff = now - 300
         stale_keys = [
             k
             for k, v in self._requests.items()
@@ -421,22 +401,17 @@ async def rate_limit_middleware(request: Request, call_next):
     path = request.url.path
 
     if path == "/api/chat":
-        # Rate limit by client IP (not X-Forwarded-For which is spoofable).
         if request.client:
             client_ip = request.client.host
         else:
-            # BUG-103: behind reverse proxy, client can be None; fallback to
-            # X-Real-IP or X-Forwarded-For to avoid all sharing "chat:unknown"
             forwarded = request.headers.get("x-forwarded-for", "")
-            client_ip = forwarded.split(",")[0].strip() if forwarded else "unknown"
+            client_ip = (
+                forwarded.split(",")[0].strip() if forwarded else "unknown"
+            )
         key = f"chat:{client_ip}"
         if not rate_limiter.is_allowed(
             key, max_requests=30, window_seconds=60
         ):
-            logger.warning(
-                "Rate limit exceeded for /api/chat from %s",
-                client_ip,
-            )
             return JSONResponse(
                 status_code=429,
                 content={
@@ -450,18 +425,18 @@ async def rate_limit_middleware(request: Request, call_next):
             client_ip = request.client.host
         else:
             forwarded = request.headers.get("x-forwarded-for", "")
-            client_ip = forwarded.split(",")[0].strip() if forwarded else "unknown"
+            client_ip = (
+                forwarded.split(",")[0].strip() if forwarded else "unknown"
+            )
         key = f"webhook:{client_ip}"
         if not rate_limiter.is_allowed(
             key, max_requests=60, window_seconds=60
         ):
-            logger.warning(
-                "Rate limit exceeded for /api/webhook from %s", client_ip
-            )
             return JSONResponse(
                 status_code=429,
                 content={
-                    "error": "Too many requests. Limit: 60/min for /api/webhook."
+                    "error": "Too many requests. "
+                    "Limit: 60/min for /api/webhook."
                 },
             )
 
@@ -505,11 +480,6 @@ async def health():
         bridge = conversation.mcp_bridge
         out["mcp_connected"] = bridge.connected
         out["mcp_tools"] = bridge.tool_names
-    if scheduler:
-        out["scheduler_running"] = scheduler.running
-        out["scheduler_tasks"] = scheduler.task_names
-    if event_subscriber:
-        out["event_subscriber_connected"] = event_subscriber.connected
     return out
 
 
@@ -551,12 +521,7 @@ async def simple_chat(req: ChatRequest):
 
 @app.post("/api/webhook")
 async def handle_webhook(event: WebhookEvent):
-    """Receive events from HA automations.
-
-    HA automations call this endpoint to push events
-    like motion, door, temperature thresholds.
-    Apex processes and reacts intelligently.
-    """
+    """Receive events from HA automations."""
     if not settings.webhook_enabled:
         return WebhookResponse(
             status="ignored",
@@ -569,7 +534,6 @@ async def handle_webhook(event: WebhookEvent):
             content={"error": "Not ready"},
         )
 
-    # Optional shared-secret auth (timing-safe comparison)
     if settings.webhook_secret:
         provided = event.attributes.get("secret", "") or ""
         expected = settings.webhook_secret
@@ -588,41 +552,13 @@ async def webhook_config():
     """Return supported event types and example YAML."""
     return {
         "enabled": settings.webhook_enabled,
-        "cooldown_seconds": (settings.webhook_cooldown_seconds),
+        "cooldown_seconds": settings.webhook_cooldown_seconds,
         "supported_event_types": [
             "motion",
             "door",
             "temperature",
             "state_changed",
         ],
-        "example_ha_automation": {
-            "alias": "Motion - notify Apex",
-            "trigger": {
-                "platform": "state",
-                "entity_id": ("binary_sensor.hallway_motion"),
-                "to": "on",
-            },
-            "action": {
-                "service": "rest_command.apex_webhook",
-                "data": {
-                    "event_type": "motion",
-                    "entity_id": ("binary_sensor.hallway_motion"),
-                    "new_state": "on",
-                },
-            },
-        },
-        "example_rest_command": {
-            "apex_webhook": {
-                "url": "http://localhost:8080/api/webhook",
-                "method": "POST",
-                "content_type": "application/json",
-                "payload": (
-                    '{"event_type":"{{ event_type }}",'
-                    '"entity_id":"{{ entity_id }}",'
-                    '"new_state":"{{ new_state }}"}'
-                ),
-            }
-        },
     }
 
 
@@ -647,7 +583,6 @@ async def openai_compatible(request: Request):
         )
     messages = body.get("messages", [])
 
-    # Extract the last user message
     user_message = ""
     for msg in reversed(messages):
         if msg.get("role") == "user":
@@ -670,17 +605,17 @@ async def openai_compatible(request: Request):
             content={"error": "No user message found"},
         )
 
-    # Extract session identifier from the request.
-    # The HA Extended OpenAI Conversation integration may send
-    # a 'user' field or conversation_id in the body.
-    # All sources are untrusted; sanitize to prevent path traversal, SQL, or collision.
     raw_session = (
         body.get("user")
         or body.get("conversation_id")
         or request.headers.get("x-session-id")
         or request.headers.get("x-conversation-id")
     )
-    sanitized = re.sub(r"[^a-zA-Z0-9_-]", "", str(raw_session) if raw_session else "")[:64]
+    sanitized = re.sub(
+        r"[^a-zA-Z0-9_-]",
+        "",
+        str(raw_session) if raw_session else "",
+    )[:64]
     session_id = sanitized or "default"
 
     # Voice mode: HA voice pipeline uses this endpoint.

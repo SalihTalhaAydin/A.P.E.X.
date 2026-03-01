@@ -5,6 +5,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [0.8.0] - 2026-02-28
+
+### Added
+- **Vision tool** (`tools/vision.py`) — Camera snapshot + AI analysis. Fetches snapshots from HA camera proxy, sends to LLM for vision analysis with optional question.
+- **Shell tool** (`tools/shell.py`) — Full shell access for filesystem ops, package management, log reading, and system commands inside the container.
+- **Fact cleanup timer** (`brain/fact_cleanup.py`) — Background maintenance for knowledge store: confidence decay, expired fact cleanup, and low-confidence pruning on a configurable interval.
+- **New tests** — `test_shell.py`, `test_vision.py`, `test_fact_cleanup.py` covering new tools.
+
+### Removed
+- **13 legacy deprecated tool wrappers** — Deleted `smart_home.py`, `lock.py`, `switch.py`, `energy.py`, `history.py`, `presence.py`, `security.py`, `script.py`, `template.py`, `system_info.py`, `input_helpers.py`, `config_reload.py`. All functionality replaced by generic tools (`do`, `query`, `discover`, `history`) since Phase 1.
+- **Decision engine** (`brain/decision_engine.py`) — Removed unused decision engine module.
+- **Curator** (`brain/curator.py`) — Removed unused curation layer.
+- **Event subscriber** (`brain/event_subscriber.py`) — Removed unused event subscription module.
+- **Scheduler** (`brain/scheduler.py`) — Removed unused scheduling module.
+- **Associated tests** — Removed 15+ test files for deleted modules.
+
+### Changed
+- **Conversation loop** (`brain/conversation.py`) — Simplified confabulation detection regex, removed correction detection, streamlined tool-calling loop. ~460 lines removed.
+- **Server** (`brain/server.py`) — Simplified startup, removed references to deleted modules, integrated fact cleanup timer.
+- **System prompt** (`brain/system_prompt.py`) — Streamlined prompt construction, removed references to deprecated tools.
+- **Context builder** (`memory/context_builder.py`) — Simplified context assembly, removed unused service schema injection paths.
+- **Config** (`brain/config.py`) — Added `fact_cleanup_interval_hours`, `cache_refresh_seconds` settings. Cleaned up unused settings.
+- **Tool base** (`tools/base.py`) — Simplified tool registry, removed deprecated tool visibility flags.
+- **Test infrastructure** — Fixed mock embed fixture to handle underscored words; fixed test isolation for audit store; 773 tests passing.
+
+### Technical
+- Net reduction: **~9,200 lines deleted**, ~700 lines added. Codebase significantly leaner.
+- All 773 unit/model tests passing.
+
+---
+
 ## [0.7.10] - 2026-02-23
 
 ### Changed

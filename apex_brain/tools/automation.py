@@ -318,7 +318,8 @@ async def create_automation(
             if not isinstance(states, list):
                 return "Error: Unable to reach Home Assistant."
             existing = [
-                s for s in states
+                s
+                for s in states
                 if isinstance(s, dict)
                 and s.get("entity_id", "").startswith("automation.")
             ]
@@ -326,9 +327,11 @@ async def create_automation(
             alias_words = set(alias_lower.split())
             similar = []
             for a in existing:
-                name = a.get("attributes", {}).get(
-                    "friendly_name", ""
-                ).lower()
+                name = (
+                    a.get("attributes", {})
+                    .get("friendly_name", "")
+                    .lower()
+                )
                 name_words = set(name.split())
                 # Match if 50%+ words overlap or name is substring
                 overlap = alias_words & name_words

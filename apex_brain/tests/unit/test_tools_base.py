@@ -7,7 +7,6 @@ from tools.base import (
     _schema_from_hints,
     execute_tool,
     get_openai_tool_definitions,
-    hide_tools,
     tool,
 )
 
@@ -76,42 +75,6 @@ async def test_execute_tool_unknown():
     """execute_tool returns error message for unknown tool."""
     result = await execute_tool("nonexistent_tool", {})
     assert "Unknown tool" in result
-
-
-def test_hidden_tool_not_in_definitions():
-    """Hidden tools should not appear in OpenAI tool definitions."""
-
-    @tool(description="Hidden test tool")
-    def _hidden_test(msg: str) -> str:
-        return msg
-
-    name = "_hidden_test"
-    try:
-        # Verify it's visible initially
-        defs = get_openai_tool_definitions()
-        names = [d["function"]["name"] for d in defs]
-        assert name in names
-
-        # Hide it
-        hide_tools(name)
-        defs = get_openai_tool_definitions()
-        names = [d["function"]["name"] for d in defs]
-        assert name not in names
-
-        # But still callable
-        import asyncio
-
-        result = asyncio.get_event_loop().run_until_complete(
-            execute_tool(name, {"msg": "test"})
-        )
-        assert result == "test"
-    finally:
-        TOOL_REGISTRY.pop(name, None)
-
-
-def test_hide_tools_ignores_unknown():
-    """hide_tools should not raise for unknown tool names."""
-    hide_tools("totally_nonexistent_tool_xyz")  # no error
 
 
 def test_hidden_decorator_flag():

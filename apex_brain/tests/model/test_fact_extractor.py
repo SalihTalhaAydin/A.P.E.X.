@@ -5,13 +5,12 @@ import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from memory.fact_extractor import FactExtractor
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_llm_response(content: str) -> MagicMock:
     """Build a mock LLM response object with the given content string."""
@@ -107,8 +106,12 @@ async def test_extract_boundary_19_chars_skips_20_extracts():
     llm = _make_litellm("[]")
 
     # "User: " = 6 chars. Need 13 more for 19 total (skip), 14 for 20 (extract).
-    turns_19 = [{"role": "user", "content": "x" * 13}]  # "User: xxxxxxxxxxxxx" = 19
-    turns_20 = [{"role": "user", "content": "x" * 14}]  # "User: xxxxxxxxxxxxxx" = 20
+    turns_19 = [
+        {"role": "user", "content": "x" * 13}
+    ]  # "User: xxxxxxxxxxxxx" = 19
+    turns_20 = [
+        {"role": "user", "content": "x" * 14}
+    ]  # "User: xxxxxxxxxxxxxx" = 20
 
     result_19 = await extractor.extract_from_conversation(turns_19, llm)
     assert result_19 == []
@@ -192,9 +195,16 @@ async def test_extract_valid_json_stores_facts():
     """A well-formed JSON array is parsed and each fact is stored."""
     ks = _make_knowledge_store()
     extractor = FactExtractor(ks)
-    facts_json = json.dumps([
-        {"category": "preference", "key": "food", "value": "loves sushi", "confidence": 0.9},
-    ])
+    facts_json = json.dumps(
+        [
+            {
+                "category": "preference",
+                "key": "food",
+                "value": "loves sushi",
+                "confidence": 0.9,
+            },
+        ]
+    )
     llm = _make_litellm(facts_json)
 
     await extractor.extract_from_conversation(_long_turns(), llm)
@@ -214,9 +224,16 @@ async def test_extract_json_with_markdown_backticks():
     """Markdown code fences around JSON are stripped before parsing."""
     ks = _make_knowledge_store()
     extractor = FactExtractor(ks)
-    inner = json.dumps([
-        {"category": "fact", "key": "address", "value": "123 Main St", "confidence": 0.95},
-    ])
+    inner = json.dumps(
+        [
+            {
+                "category": "fact",
+                "key": "address",
+                "value": "123 Main St",
+                "confidence": 0.95,
+            },
+        ]
+    )
     wrapped = f"```json\n{inner}\n```"
     llm = _make_litellm(wrapped)
 
@@ -243,7 +260,9 @@ async def test_extract_invalid_json_logs_warning(caplog):
 
 
 @pytest.mark.asyncio
-async def test_extract_json_decode_error_before_raw_assigned_no_name_error(caplog):
+async def test_extract_json_decode_error_before_raw_assigned_no_name_error(
+    caplog,
+):
     """JSONDecodeError raised before raw is assigned must not cause NameError.
 
     Regression: if JSONDecodeError occurs early (e.g. from future code paths),
@@ -265,7 +284,9 @@ async def test_extract_json_decode_error_before_raw_assigned_no_name_error(caplo
     llm = AsyncMock(return_value=response)
 
     with caplog.at_level(logging.WARNING):
-        result = await extractor.extract_from_conversation(_long_turns(), llm)
+        result = await extractor.extract_from_conversation(
+            _long_turns(), llm
+        )
 
     assert result == []
     assert any("Failed to parse" in r.message for r in caplog.records)
@@ -303,7 +324,9 @@ async def test_extract_non_list_response_returns():
     """If the parsed JSON is a dict (not a list), return without storing."""
     ks = _make_knowledge_store()
     extractor = FactExtractor(ks)
-    llm = _make_litellm(json.dumps({"category": "fact", "key": "k", "value": "v"}))
+    llm = _make_litellm(
+        json.dumps({"category": "fact", "key": "k", "value": "v"})
+    )
 
     result = await extractor.extract_from_conversation(_long_turns(), llm)
 
@@ -321,9 +344,16 @@ async def test_extract_normal_fact_calls_store_fact():
     """A fact without correction=true routes to store_fact."""
     ks = _make_knowledge_store()
     extractor = FactExtractor(ks)
-    facts_json = json.dumps([
-        {"category": "habit", "key": "exercise", "value": "runs every morning", "confidence": 0.85},
-    ])
+    facts_json = json.dumps(
+        [
+            {
+                "category": "habit",
+                "key": "exercise",
+                "value": "runs every morning",
+                "confidence": 0.85,
+            },
+        ]
+    )
     llm = _make_litellm(facts_json)
 
     await extractor.extract_from_conversation(_long_turns(), llm)
@@ -337,15 +367,17 @@ async def test_extract_correction_calls_correct_fact():
     """A fact with correction=true routes to correct_fact instead."""
     ks = _make_knowledge_store()
     extractor = FactExtractor(ks)
-    facts_json = json.dumps([
-        {
-            "category": "preference",
-            "key": "thermostat",
-            "value": "prefers 72 degrees",
-            "confidence": 1.0,
-            "correction": True,
-        },
-    ])
+    facts_json = json.dumps(
+        [
+            {
+                "category": "preference",
+                "key": "thermostat",
+                "value": "prefers 72 degrees",
+                "confidence": 1.0,
+                "correction": True,
+            },
+        ]
+    )
     llm = _make_litellm(facts_json)
 
     await extractor.extract_from_conversation(_long_turns(), llm)
@@ -364,15 +396,17 @@ async def test_extract_fact_with_expires():
     """An 'expires' field is forwarded as expires_at to store_fact."""
     ks = _make_knowledge_store()
     extractor = FactExtractor(ks)
-    facts_json = json.dumps([
-        {
-            "category": "event",
-            "key": "dentist",
-            "value": "Thursday 2pm",
-            "confidence": 0.95,
-            "expires": "2026-02-20",
-        },
-    ])
+    facts_json = json.dumps(
+        [
+            {
+                "category": "event",
+                "key": "dentist",
+                "value": "Thursday 2pm",
+                "confidence": 0.95,
+                "expires": "2026-02-20",
+            },
+        ]
+    )
     llm = _make_litellm(facts_json)
 
     await extractor.extract_from_conversation(_long_turns(), llm)
@@ -386,9 +420,11 @@ async def test_extract_fact_default_confidence():
     """Missing 'confidence' key defaults to 0.7."""
     ks = _make_knowledge_store()
     extractor = FactExtractor(ks)
-    facts_json = json.dumps([
-        {"category": "fact", "key": "pet", "value": "has a cat"},
-    ])
+    facts_json = json.dumps(
+        [
+            {"category": "fact", "key": "pet", "value": "has a cat"},
+        ]
+    )
     llm = _make_litellm(facts_json)
 
     await extractor.extract_from_conversation(_long_turns(), llm)
@@ -402,9 +438,11 @@ async def test_extract_fact_default_category():
     """Missing 'category' key defaults to 'fact'."""
     ks = _make_knowledge_store()
     extractor = FactExtractor(ks)
-    facts_json = json.dumps([
-        {"key": "zipcode", "value": "90210", "confidence": 0.9},
-    ])
+    facts_json = json.dumps(
+        [
+            {"key": "zipcode", "value": "90210", "confidence": 0.9},
+        ]
+    )
     llm = _make_litellm(facts_json)
 
     await extractor.extract_from_conversation(_long_turns(), llm)
@@ -418,9 +456,16 @@ async def test_extract_skips_fact_without_key():
     """A fact with an empty or missing key is skipped entirely."""
     ks = _make_knowledge_store()
     extractor = FactExtractor(ks)
-    facts_json = json.dumps([
-        {"category": "preference", "key": "", "value": "something", "confidence": 0.9},
-    ])
+    facts_json = json.dumps(
+        [
+            {
+                "category": "preference",
+                "key": "",
+                "value": "something",
+                "confidence": 0.9,
+            },
+        ]
+    )
     llm = _make_litellm(facts_json)
 
     await extractor.extract_from_conversation(_long_turns(), llm)
@@ -434,9 +479,16 @@ async def test_extract_skips_fact_without_value():
     """A fact with an empty or missing value is skipped entirely."""
     ks = _make_knowledge_store()
     extractor = FactExtractor(ks)
-    facts_json = json.dumps([
-        {"category": "preference", "key": "color", "value": "", "confidence": 0.9},
-    ])
+    facts_json = json.dumps(
+        [
+            {
+                "category": "preference",
+                "key": "color",
+                "value": "",
+                "confidence": 0.9,
+            },
+        ]
+    )
     llm = _make_litellm(facts_json)
 
     await extractor.extract_from_conversation(_long_turns(), llm)
@@ -450,11 +502,28 @@ async def test_extract_multiple_facts_all_stored():
     """Multiple facts in the JSON array each produce a separate store call."""
     ks = _make_knowledge_store()
     extractor = FactExtractor(ks)
-    facts_json = json.dumps([
-        {"category": "preference", "key": "food", "value": "sushi", "confidence": 0.9},
-        {"category": "person", "key": "Sarah", "value": "friend", "confidence": 0.8},
-        {"category": "habit", "key": "jogging", "value": "every morning", "confidence": 0.85},
-    ])
+    facts_json = json.dumps(
+        [
+            {
+                "category": "preference",
+                "key": "food",
+                "value": "sushi",
+                "confidence": 0.9,
+            },
+            {
+                "category": "person",
+                "key": "Sarah",
+                "value": "friend",
+                "confidence": 0.8,
+            },
+            {
+                "category": "habit",
+                "key": "jogging",
+                "value": "every morning",
+                "confidence": 0.85,
+            },
+        ]
+    )
     llm = _make_litellm(facts_json)
 
     await extractor.extract_from_conversation(_long_turns(), llm)
@@ -469,12 +538,19 @@ async def test_extract_non_dict_items_skipped():
     """Non-dict items inside the JSON array are silently skipped."""
     ks = _make_knowledge_store()
     extractor = FactExtractor(ks)
-    facts_json = json.dumps([
-        "just a string",
-        42,
-        None,
-        {"category": "fact", "key": "real", "value": "fact here", "confidence": 0.9},
-    ])
+    facts_json = json.dumps(
+        [
+            "just a string",
+            42,
+            None,
+            {
+                "category": "fact",
+                "key": "real",
+                "value": "fact here",
+                "confidence": 0.9,
+            },
+        ]
+    )
     llm = _make_litellm(facts_json)
 
     await extractor.extract_from_conversation(_long_turns(), llm)
@@ -500,7 +576,9 @@ async def test_extract_llm_api_error_handled(caplog):
         # Must not raise
         await extractor.extract_from_conversation(_long_turns(), llm)
 
-    assert any("Fact extraction error" in r.message for r in caplog.records)
+    assert any(
+        "Fact extraction error" in r.message for r in caplog.records
+    )
     ks.store_fact.assert_not_awaited()
 
 
@@ -514,10 +592,22 @@ async def test_extract_store_continues_on_error():
     # First call raises, second succeeds
     ks.store_fact.side_effect = [RuntimeError("DB error"), None]
     extractor = FactExtractor(ks)
-    facts_json = json.dumps([
-        {"category": "fact", "key": "first", "value": "v1", "confidence": 0.9},
-        {"category": "fact", "key": "second", "value": "v2", "confidence": 0.9},
-    ])
+    facts_json = json.dumps(
+        [
+            {
+                "category": "fact",
+                "key": "first",
+                "value": "v1",
+                "confidence": 0.9,
+            },
+            {
+                "category": "fact",
+                "key": "second",
+                "value": "v2",
+                "confidence": 0.9,
+            },
+        ]
+    )
     llm = _make_litellm(facts_json)
 
     # Should not propagate
@@ -542,8 +632,14 @@ async def test_extract_user_and_assistant_roles_formatted():
     llm = _make_litellm("[]")
 
     turns = [
-        {"role": "user", "content": "What is the weather like today in Seattle?"},
-        {"role": "assistant", "content": "It is currently sunny and 65 degrees."},
+        {
+            "role": "user",
+            "content": "What is the weather like today in Seattle?",
+        },
+        {
+            "role": "assistant",
+            "content": "It is currently sunny and 65 degrees.",
+        },
         {"role": "user", "content": "Thanks, I love sunny days."},
     ]
 
@@ -551,7 +647,10 @@ async def test_extract_user_and_assistant_roles_formatted():
 
     prompt_content = llm.call_args.kwargs["messages"][0]["content"]
     # Verify user lines
-    assert "User: What is the weather like today in Seattle?" in prompt_content
+    assert (
+        "User: What is the weather like today in Seattle?"
+        in prompt_content
+    )
     assert "User: Thanks, I love sunny days." in prompt_content
     # Verify assistant lines use "Apex:" not "Assistant:"
     assert "Apex: It is currently sunny and 65 degrees." in prompt_content
@@ -572,14 +671,16 @@ async def test_extract_conversation_with_curly_braces_no_crash():
     """
     ks = _make_knowledge_store()
     extractor = FactExtractor(ks)
-    facts_json = json.dumps([
-        {
-            "category": "fact",
-            "key": "regex_knowledge",
-            "value": "knows regex",
-            "confidence": 0.8,
-        },
-    ])
+    facts_json = json.dumps(
+        [
+            {
+                "category": "fact",
+                "key": "regex_knowledge",
+                "value": "knows regex",
+                "confidence": 0.8,
+            },
+        ]
+    )
     llm = _make_litellm(facts_json)
 
     turns = [

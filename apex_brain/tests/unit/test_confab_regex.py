@@ -1,4 +1,5 @@
 """Quick test to validate the improved _CONFAB_CLAIM_RE."""
+
 import re
 
 _CONFAB_CLAIM_RE = re.compile(

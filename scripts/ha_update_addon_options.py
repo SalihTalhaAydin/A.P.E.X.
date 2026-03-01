@@ -39,11 +39,16 @@ async def main():
         print("Set HA_TOKEN in .env", file=sys.stderr)
         sys.exit(1)
 
-    ws_url = HA_URL.replace("http://", "ws://").replace("https://", "wss://") + "/api/websocket"
+    ws_url = (
+        HA_URL.replace("http://", "ws://").replace("https://", "wss://")
+        + "/api/websocket"
+    )
 
     async with websockets.connect(ws_url) as ws:
         await ws.recv()
-        await ws.send(json.dumps({"type": "auth", "access_token": HA_TOKEN}))
+        await ws.send(
+            json.dumps({"type": "auth", "access_token": HA_TOKEN})
+        )
         auth = json.loads(await ws.recv())
         if auth.get("type") != "auth_ok":
             print("Auth failed:", auth, file=sys.stderr)
@@ -51,12 +56,14 @@ async def main():
 
         # 1. GET addon info (includes options)
         await ws.send(
-            json.dumps({
-                "id": 1,
-                "type": "supervisor/api",
-                "endpoint": f"/addons/{ADDON_SLUG}/info",
-                "method": "get",
-            })
+            json.dumps(
+                {
+                    "id": 1,
+                    "type": "supervisor/api",
+                    "endpoint": f"/addons/{ADDON_SLUG}/info",
+                    "method": "get",
+                }
+            )
         )
         r1 = json.loads(await ws.recv())
         if not r1.get("success"):
@@ -64,7 +71,11 @@ async def main():
             return
 
         _res = r1.get("result") or {}
-        data = _res.get("data") if isinstance(_res.get("data"), dict) else _res
+        data = (
+            _res.get("data")
+            if isinstance(_res.get("data"), dict)
+            else _res
+        )
         options = dict(data.get("options") or {})
 
         # Schema defaults (from config.yaml) if options empty (e.g. addon not yet configured)
@@ -88,13 +99,23 @@ async def main():
         # 2. Merge API keys and model from .env into add-on options
         updates = []
         if os.environ.get("OPENAI_API_KEY"):
-            options["openai_api_key"] = os.environ["OPENAI_API_KEY"].strip()
+            options["openai_api_key"] = os.environ[
+                "OPENAI_API_KEY"
+            ].strip()
             updates.append("openai_api_key")
         if os.environ.get("ANTHROPIC_API_KEY"):
-            options["anthropic_api_key"] = os.environ["ANTHROPIC_API_KEY"].strip()
+            options["anthropic_api_key"] = os.environ[
+                "ANTHROPIC_API_KEY"
+            ].strip()
             updates.append("anthropic_api_key")
-        if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
-            key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
+        if os.environ.get("GEMINI_API_KEY") or os.environ.get(
+            "GOOGLE_API_KEY"
+        ):
+            key = (
+                os.environ.get("GEMINI_API_KEY")
+                or os.environ.get("GOOGLE_API_KEY")
+                or ""
+            ).strip()
             if key:
                 options["gemini_api_key"] = key
                 updates.append("gemini_api_key")
@@ -113,13 +134,15 @@ async def main():
 
         # 3. POST updated options (WebSocket uses "data", Supervisor expects options in data.options)
         await ws.send(
-            json.dumps({
-                "id": 2,
-                "type": "supervisor/api",
-                "endpoint": f"/addons/{ADDON_SLUG}/options",
-                "method": "post",
-                "data": {"options": options},
-            })
+            json.dumps(
+                {
+                    "id": 2,
+                    "type": "supervisor/api",
+                    "endpoint": f"/addons/{ADDON_SLUG}/options",
+                    "method": "post",
+                    "data": {"options": options},
+                }
+            )
         )
         r2 = json.loads(await ws.recv())
         if r2.get("success"):
@@ -129,26 +152,34 @@ async def main():
 
         # 4. Restart add-on to apply new options
         await ws.send(
-            json.dumps({
-                "id": 3,
-                "type": "supervisor/api",
-                "endpoint": f"/addons/{ADDON_SLUG}/info",
-                "method": "get",
-            })
+            json.dumps(
+                {
+                    "id": 3,
+                    "type": "supervisor/api",
+                    "endpoint": f"/addons/{ADDON_SLUG}/info",
+                    "method": "get",
+                }
+            )
         )
         r3 = json.loads(await ws.recv())
         _res3 = r3.get("result") or {}
-        _data3 = _res3.get("data") if isinstance(_res3.get("data"), dict) else _res3
+        _data3 = (
+            _res3.get("data")
+            if isinstance(_res3.get("data"), dict)
+            else _res3
+        )
         state = _data3.get("state", "")
 
         if state in ("started", "started, watchdog"):
             await ws.send(
-                json.dumps({
-                    "id": 4,
-                    "type": "supervisor/api",
-                    "endpoint": f"/addons/{ADDON_SLUG}/restart",
-                    "method": "post",
-                })
+                json.dumps(
+                    {
+                        "id": 4,
+                        "type": "supervisor/api",
+                        "endpoint": f"/addons/{ADDON_SLUG}/restart",
+                        "method": "post",
+                    }
+                )
             )
             r4 = json.loads(await ws.recv())
             if r4.get("success"):
@@ -157,12 +188,14 @@ async def main():
                 print("Restart failed:", r4.get("error", r4))
         elif state in ("stopped", "error", "unknown"):
             await ws.send(
-                json.dumps({
-                    "id": 4,
-                    "type": "supervisor/api",
-                    "endpoint": f"/addons/{ADDON_SLUG}/start",
-                    "method": "post",
-                })
+                json.dumps(
+                    {
+                        "id": 4,
+                        "type": "supervisor/api",
+                        "endpoint": f"/addons/{ADDON_SLUG}/start",
+                        "method": "post",
+                    }
+                )
             )
             r4 = json.loads(await ws.recv())
             if r4.get("success"):

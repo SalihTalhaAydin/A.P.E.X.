@@ -1,10 +1,10 @@
 """
 Tests for the ConversationStore — conversation history management.
 """
+
 from __future__ import annotations
 
 import pytest
-
 from memory.conversation_store import ConversationStore
 
 
@@ -55,7 +55,9 @@ async def test_save_turn_early_return_for_empty_content(store):
 
 
 @pytest.mark.asyncio
-async def test_conversation_store_uninitialized_raises_runtime_error(tmp_path):
+async def test_conversation_store_uninitialized_raises_runtime_error(
+    tmp_path,
+):
     """Regression for Bug 17: methods raise RuntimeError when initialize() not called."""
     db_path = str(tmp_path / "test.db")
     store = ConversationStore(db_path)
@@ -134,7 +136,9 @@ async def test_search_escapes_user_input(store):
     # Query with \\ - should match "path\to\file" literally
     results = await store.search("path\\to", limit=10)
     assert len(results) == 1
-    assert "path" in results[0]["content"] and "file" in results[0]["content"]
+    assert (
+        "path" in results[0]["content"] and "file" in results[0]["content"]
+    )
 
 
 @pytest.mark.asyncio

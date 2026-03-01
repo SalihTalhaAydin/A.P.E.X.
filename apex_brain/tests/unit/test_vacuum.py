@@ -57,18 +57,22 @@ async def test_verify_vacuum_battery_from_attrs():
             "fan_speed": "balanced",
         },
     }
-    with patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=mock_state,
-    ), patch(
-        "tools.vacuum.get_battery_level",
-        new_callable=AsyncMock,
-        return_value=75,
-    ), patch(
-        "tools.vacuum.ha_request",
-        new_callable=AsyncMock,
-        return_value=[],
+    with (
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=mock_state,
+        ),
+        patch(
+            "tools.vacuum.get_battery_level",
+            new_callable=AsyncMock,
+            return_value=75,
+        ),
+        patch(
+            "tools.vacuum.ha_request",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
     ):
         result = await _verify_vacuum("vacuum.dusty")
     assert "battery 75%" in result
@@ -88,18 +92,22 @@ async def test_verify_vacuum_battery_fallback_sensor():
             "fan_speed": "balanced",
         },
     }
-    with patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=mock_state,
-    ), patch(
-        "tools.vacuum.get_battery_level",
-        new_callable=AsyncMock,
-        return_value=75,
-    ), patch(
-        "tools.vacuum.ha_request",
-        new_callable=AsyncMock,
-        return_value=[],
+    with (
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=mock_state,
+        ),
+        patch(
+            "tools.vacuum.get_battery_level",
+            new_callable=AsyncMock,
+            return_value=75,
+        ),
+        patch(
+            "tools.vacuum.ha_request",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
     ):
         result = await _verify_vacuum("vacuum.dusty")
     assert "battery 75%" in result
@@ -114,18 +122,22 @@ async def test_verify_vacuum_no_battery_anywhere():
         "state": "cleaning",
         "attributes": {"friendly_name": "Dusty"},
     }
-    with patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=mock_state,
-    ), patch(
-        "tools.vacuum.get_battery_level",
-        new_callable=AsyncMock,
-        return_value=None,
-    ), patch(
-        "tools.vacuum.ha_request",
-        new_callable=AsyncMock,
-        return_value=[],
+    with (
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=mock_state,
+        ),
+        patch(
+            "tools.vacuum.get_battery_level",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "tools.vacuum.ha_request",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
     ):
         result = await _verify_vacuum("vacuum.dusty")
     assert "battery" not in result.lower()
@@ -149,18 +161,22 @@ async def test_verify_vacuum_water_box_mode():
             "water_box_mode": "medium",
         },
     }
-    with patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=mock_state,
-    ), patch(
-        "tools.vacuum.get_battery_level",
-        new_callable=AsyncMock,
-        return_value=None,
-    ), patch(
-        "tools.vacuum.ha_request",
-        new_callable=AsyncMock,
-        return_value=[],
+    with (
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=mock_state,
+        ),
+        patch(
+            "tools.vacuum.get_battery_level",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "tools.vacuum.ha_request",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
     ):
         result = await _verify_vacuum("vacuum.dusty")
     assert "water box mode" in result.lower()
@@ -179,18 +195,22 @@ async def test_verify_vacuum_water_level_attr():
             "water_level": 60,
         },
     }
-    with patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=mock_state,
-    ), patch(
-        "tools.vacuum.get_battery_level",
-        new_callable=AsyncMock,
-        return_value=None,
-    ), patch(
-        "tools.vacuum.ha_request",
-        new_callable=AsyncMock,
-        return_value=[],
+    with (
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=mock_state,
+        ),
+        patch(
+            "tools.vacuum.get_battery_level",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "tools.vacuum.ha_request",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
     ):
         result = await _verify_vacuum("vacuum.dusty")
     assert "water level" in result.lower()
@@ -206,18 +226,22 @@ async def test_verify_vacuum_no_water_attrs():
         "state": "docked",
         "attributes": {"friendly_name": "Dusty"},
     }
-    with patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=mock_state,
-    ), patch(
-        "tools.vacuum.get_battery_level",
-        new_callable=AsyncMock,
-        return_value=None,
-    ), patch(
-        "tools.vacuum.ha_request",
-        new_callable=AsyncMock,
-        return_value=[],
+    with (
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=mock_state,
+        ),
+        patch(
+            "tools.vacuum.get_battery_level",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "tools.vacuum.ha_request",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
     ):
         result = await _verify_vacuum("vacuum.dusty")
     assert "water" not in result.lower()
@@ -323,22 +347,34 @@ async def test_verify_vacuum_dock_water_empty():
     }
     # Simulate HA returning sensor states for dynamic discovery
     ha_states = [
-        {"entity_id": "sensor.dusty_dock_dock_error", "state": "water_empty", "attributes": {}},
-        {"entity_id": "sensor.dusty_status", "state": "charging", "attributes": {}},
+        {
+            "entity_id": "sensor.dusty_dock_dock_error",
+            "state": "water_empty",
+            "attributes": {},
+        },
+        {
+            "entity_id": "sensor.dusty_status",
+            "state": "charging",
+            "attributes": {},
+        },
     ]
 
-    with patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=vac_state,
-    ), patch(
-        "tools.vacuum.get_battery_level",
-        new_callable=AsyncMock,
-        return_value=None,
-    ), patch(
-        "tools.vacuum.ha_request",
-        new_callable=AsyncMock,
-        return_value=ha_states,
+    with (
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=vac_state,
+        ),
+        patch(
+            "tools.vacuum.get_battery_level",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "tools.vacuum.ha_request",
+            new_callable=AsyncMock,
+            return_value=ha_states,
+        ),
     ):
         result = await _verify_vacuum("vacuum.dusty")
     assert "water" in result.lower()
@@ -355,21 +391,29 @@ async def test_verify_vacuum_dock_status_ok_no_warning():
         "attributes": {"friendly_name": "Dusty"},
     }
     ha_states = [
-        {"entity_id": "sensor.dusty_dock_dock_error", "state": "ok", "attributes": {}},
+        {
+            "entity_id": "sensor.dusty_dock_dock_error",
+            "state": "ok",
+            "attributes": {},
+        },
     ]
 
-    with patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=vac_state,
-    ), patch(
-        "tools.vacuum.get_battery_level",
-        new_callable=AsyncMock,
-        return_value=None,
-    ), patch(
-        "tools.vacuum.ha_request",
-        new_callable=AsyncMock,
-        return_value=ha_states,
+    with (
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=vac_state,
+        ),
+        patch(
+            "tools.vacuum.get_battery_level",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "tools.vacuum.ha_request",
+            new_callable=AsyncMock,
+            return_value=ha_states,
+        ),
     ):
         result = await _verify_vacuum("vacuum.dusty")
     assert "empty" not in result.lower()
@@ -387,18 +431,22 @@ async def test_verify_vacuum_dock_sensor_unavailable_no_crash():
         "attributes": {"friendly_name": "Dusty"},
     }
 
-    with patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=vac_state,
-    ), patch(
-        "tools.vacuum.get_battery_level",
-        new_callable=AsyncMock,
-        return_value=None,
-    ), patch(
-        "tools.vacuum.ha_request",
-        new_callable=AsyncMock,
-        side_effect=Exception("HA unreachable"),
+    with (
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=vac_state,
+        ),
+        patch(
+            "tools.vacuum.get_battery_level",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "tools.vacuum.ha_request",
+            new_callable=AsyncMock,
+            side_effect=Exception("HA unreachable"),
+        ),
     ):
         result = await _verify_vacuum("vacuum.dusty")
     assert "Dusty" in result
@@ -416,25 +464,49 @@ async def test_verify_vacuum_maintenance_overdue():
     }
     # Simulate HA returning maintenance sensors with overdue values
     ha_states = [
-        {"entity_id": "sensor.dusty_dock_dock_error", "state": "ok", "attributes": {}},
-        {"entity_id": "sensor.dusty_filter_time_left", "state": "-200", "attributes": {}},
-        {"entity_id": "sensor.dusty_main_brush_time_left", "state": "-50", "attributes": {}},
-        {"entity_id": "sensor.dusty_side_brush_time_left", "state": "100", "attributes": {}},
-        {"entity_id": "sensor.dusty_sensor_time_left", "state": "unavailable", "attributes": {}},
+        {
+            "entity_id": "sensor.dusty_dock_dock_error",
+            "state": "ok",
+            "attributes": {},
+        },
+        {
+            "entity_id": "sensor.dusty_filter_time_left",
+            "state": "-200",
+            "attributes": {},
+        },
+        {
+            "entity_id": "sensor.dusty_main_brush_time_left",
+            "state": "-50",
+            "attributes": {},
+        },
+        {
+            "entity_id": "sensor.dusty_side_brush_time_left",
+            "state": "100",
+            "attributes": {},
+        },
+        {
+            "entity_id": "sensor.dusty_sensor_time_left",
+            "state": "unavailable",
+            "attributes": {},
+        },
     ]
 
-    with patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=vac_state,
-    ), patch(
-        "tools.vacuum.get_battery_level",
-        new_callable=AsyncMock,
-        return_value=None,
-    ), patch(
-        "tools.vacuum.ha_request",
-        new_callable=AsyncMock,
-        return_value=ha_states,
+    with (
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=vac_state,
+        ),
+        patch(
+            "tools.vacuum.get_battery_level",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "tools.vacuum.ha_request",
+            new_callable=AsyncMock,
+            return_value=ha_states,
+        ),
     ):
         result = await _verify_vacuum("vacuum.dusty")
     assert "maintenance overdue" in result.lower()
@@ -471,11 +543,31 @@ async def test_get_dock_status_discovers_sensors_dynamically():
 
     # Vacuum entity is "vacuum.roborock_s7" but sensors exist
     ha_states = [
-        {"entity_id": "sensor.roborock_s7_dock_dock_error", "state": "water_empty", "attributes": {}},
-        {"entity_id": "sensor.roborock_s7_status", "state": "charging", "attributes": {}},
-        {"entity_id": "sensor.roborock_s7_filter_time_left", "state": "-100", "attributes": {}},
-        {"entity_id": "sensor.roborock_s7_main_brush_time_left", "state": "200", "attributes": {}},
-        {"entity_id": "sensor.unrelated_device_status", "state": "on", "attributes": {}},
+        {
+            "entity_id": "sensor.roborock_s7_dock_dock_error",
+            "state": "water_empty",
+            "attributes": {},
+        },
+        {
+            "entity_id": "sensor.roborock_s7_status",
+            "state": "charging",
+            "attributes": {},
+        },
+        {
+            "entity_id": "sensor.roborock_s7_filter_time_left",
+            "state": "-100",
+            "attributes": {},
+        },
+        {
+            "entity_id": "sensor.roborock_s7_main_brush_time_left",
+            "state": "200",
+            "attributes": {},
+        },
+        {
+            "entity_id": "sensor.unrelated_device_status",
+            "state": "on",
+            "attributes": {},
+        },
     ]
 
     with patch(
@@ -502,8 +594,16 @@ async def test_get_dock_status_no_matching_sensors():
     from tools.vacuum import _get_dock_status
 
     ha_states = [
-        {"entity_id": "sensor.temperature_living_room", "state": "72", "attributes": {}},
-        {"entity_id": "sensor.humidity_bedroom", "state": "45", "attributes": {}},
+        {
+            "entity_id": "sensor.temperature_living_room",
+            "state": "72",
+            "attributes": {},
+        },
+        {
+            "entity_id": "sensor.humidity_bedroom",
+            "state": "45",
+            "attributes": {},
+        },
     ]
 
     with patch(
@@ -557,23 +657,39 @@ async def test_verify_vacuum_renamed_entity_finds_sensors():
     }
     # Sensors match the NEW name "robo_vac", not a hardcoded old name
     ha_states = [
-        {"entity_id": "sensor.robo_vac_dock_dock_error", "state": "water_empty", "attributes": {}},
-        {"entity_id": "sensor.robo_vac_status", "state": "charging", "attributes": {}},
-        {"entity_id": "sensor.robo_vac_filter_time_left", "state": "-50", "attributes": {}},
+        {
+            "entity_id": "sensor.robo_vac_dock_dock_error",
+            "state": "water_empty",
+            "attributes": {},
+        },
+        {
+            "entity_id": "sensor.robo_vac_status",
+            "state": "charging",
+            "attributes": {},
+        },
+        {
+            "entity_id": "sensor.robo_vac_filter_time_left",
+            "state": "-50",
+            "attributes": {},
+        },
     ]
 
-    with patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=vac_state,
-    ), patch(
-        "tools.vacuum.get_battery_level",
-        new_callable=AsyncMock,
-        return_value=80,
-    ), patch(
-        "tools.vacuum.ha_request",
-        new_callable=AsyncMock,
-        return_value=ha_states,
+    with (
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=vac_state,
+        ),
+        patch(
+            "tools.vacuum.get_battery_level",
+            new_callable=AsyncMock,
+            return_value=80,
+        ),
+        patch(
+            "tools.vacuum.ha_request",
+            new_callable=AsyncMock,
+            return_value=ha_states,
+        ),
     ):
         result = await _verify_vacuum("vacuum.robo_vac")
 
@@ -613,19 +729,26 @@ async def test_clean_rooms_segment_lookup_from_room_list():
         "state": "docked",
         "attributes": {
             "friendly_name": "Dusty",
-            "room_list": {"16": "Kitchen", "17": "Living Room", "18": "Bedroom"},
+            "room_list": {
+                "16": "Kitchen",
+                "17": "Living Room",
+                "18": "Bedroom",
+            },
         },
     }
 
-    with patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=mock_state,
-    ), patch(
-        "tools.vacuum.ha_request",
-        new_callable=AsyncMock,
-        return_value={},
-    ) as mock_ha:
+    with (
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=mock_state,
+        ),
+        patch(
+            "tools.vacuum.ha_request",
+            new_callable=AsyncMock,
+            return_value={},
+        ) as mock_ha,
+    ):
         result = await clean_rooms(
             rooms=["kitchen"], entity_id="vacuum.dusty"
         )
@@ -652,15 +775,18 @@ async def test_clean_rooms_partial_name_match():
         },
     }
 
-    with patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=mock_state,
-    ), patch(
-        "tools.vacuum.ha_request",
-        new_callable=AsyncMock,
-        return_value={},
-    ) as mock_ha:
+    with (
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=mock_state,
+        ),
+        patch(
+            "tools.vacuum.ha_request",
+            new_callable=AsyncMock,
+            return_value={},
+        ) as mock_ha,
+    ):
         result = await clean_rooms(
             rooms=["kitchen"], entity_id="vacuum.dusty"
         )
@@ -686,14 +812,17 @@ async def test_clean_rooms_no_match_returns_available_list():
         },
     }
 
-    with patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=mock_state,
-    ), patch(
-        "tools.vacuum.ha_request",
-        new_callable=AsyncMock,
-        return_value={},
+    with (
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=mock_state,
+        ),
+        patch(
+            "tools.vacuum.ha_request",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
     ):
         result = await clean_rooms(
             rooms=["garage"], entity_id="vacuum.dusty"
@@ -733,13 +862,16 @@ async def test_clean_rooms_discovers_entity_when_not_provided():
         # Roborock service call
         return {}
 
-    with patch(
-        "tools.vacuum.ha_request",
-        side_effect=_mock_ha,
-    ), patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=mock_vac_state,
+    with (
+        patch(
+            "tools.vacuum.ha_request",
+            side_effect=_mock_ha,
+        ),
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=mock_vac_state,
+        ),
     ):
         result = await clean_rooms(rooms=["office"])
 
@@ -765,7 +897,10 @@ async def test_clean_rooms_fallback_when_roborock_unavailable():
 
     # HA services list with vacuum.start available
     services_list = [
-        {"domain": "vacuum", "services": {"start": {}, "stop": {}, "pause": {}}},
+        {
+            "domain": "vacuum",
+            "services": {"start": {}, "stop": {}, "pause": {}},
+        },
     ]
 
     call_count = {"read_state": 0}
@@ -785,25 +920,34 @@ async def test_clean_rooms_fallback_when_roborock_unavailable():
             return services_list
         return {}
 
-    with patch(
-        "tools.vacuum.read_state",
-        side_effect=_mock_read_state,
-    ), patch(
-        "tools.vacuum.ha_request",
-        side_effect=_mock_ha,
-    ), patch(
-        "tools.vacuum.get_battery_level",
-        new_callable=AsyncMock,
-        return_value=None,
-    ), patch(
-        "tools.vacuum.call_ha_service",
-        new_callable=AsyncMock,
+    with (
+        patch(
+            "tools.vacuum.read_state",
+            side_effect=_mock_read_state,
+        ),
+        patch(
+            "tools.vacuum.ha_request",
+            side_effect=_mock_ha,
+        ),
+        patch(
+            "tools.vacuum.get_battery_level",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "tools.vacuum.call_ha_service",
+            new_callable=AsyncMock,
+        ),
     ):
         result = await clean_rooms(
             rooms=["kitchen"], entity_id="vacuum.dusty"
         )
 
-    assert "unavailable" in result.lower() or "fallback" in result.lower() or "full clean" in result.lower()
+    assert (
+        "unavailable" in result.lower()
+        or "fallback" in result.lower()
+        or "full clean" in result.lower()
+    )
 
 
 # ---------------------------------------------------
@@ -817,7 +961,16 @@ async def test_resolve_action_uses_ha_vacuum_service():
     from tools.vacuum import control_vacuum
 
     services_list = [
-        {"domain": "vacuum", "services": {"start": {}, "stop": {}, "pause": {}, "return_to_base": {}, "locate": {}}},
+        {
+            "domain": "vacuum",
+            "services": {
+                "start": {},
+                "stop": {},
+                "pause": {},
+                "return_to_base": {},
+                "locate": {},
+            },
+        },
     ]
     vac_state = {
         "state": "cleaning",
@@ -831,28 +984,31 @@ async def test_resolve_action_uses_ha_vacuum_service():
             return []
         return {}
 
-    with patch(
-        "tools.vacuum.ha_request",
-        side_effect=_mock_ha,
-    ), patch(
-        "tools.vacuum.call_ha_service",
-        new_callable=AsyncMock,
-    ) as mock_svc, patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=vac_state,
-    ), patch(
-        "tools.vacuum.get_battery_level",
-        new_callable=AsyncMock,
-        return_value=80,
+    with (
+        patch(
+            "tools.vacuum.ha_request",
+            side_effect=_mock_ha,
+        ),
+        patch(
+            "tools.vacuum.call_ha_service",
+            new_callable=AsyncMock,
+        ) as mock_svc,
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=vac_state,
+        ),
+        patch(
+            "tools.vacuum.get_battery_level",
+            new_callable=AsyncMock,
+            return_value=80,
+        ),
     ):
         result = await control_vacuum(
             entity_id="vacuum.dusty", action="start"
         )
 
-    mock_svc.assert_called_once_with(
-        "vacuum", "start", "vacuum.dusty"
-    )
+    mock_svc.assert_called_once_with("vacuum", "start", "vacuum.dusty")
     assert "done" in result.lower()
     assert "dusty" in result.lower()
 
@@ -863,29 +1019,42 @@ async def test_resolve_action_empty_dustbin_via_button():
     from tools.vacuum import control_vacuum
 
     ha_states = [
-        {"entity_id": "button.dusty_empty_waste_bin", "state": "unknown", "attributes": {}},
-        {"entity_id": "sensor.dusty_status", "state": "charging", "attributes": {}},
+        {
+            "entity_id": "button.dusty_empty_waste_bin",
+            "state": "unknown",
+            "attributes": {},
+        },
+        {
+            "entity_id": "sensor.dusty_status",
+            "state": "charging",
+            "attributes": {},
+        },
     ]
     vac_state = {
         "state": "docked",
         "attributes": {"friendly_name": "Dusty"},
     }
 
-    with patch(
-        "tools.vacuum.ha_request",
-        new_callable=AsyncMock,
-        return_value=ha_states,
-    ), patch(
-        "tools.vacuum.call_ha_service",
-        new_callable=AsyncMock,
-    ) as mock_svc, patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=vac_state,
-    ), patch(
-        "tools.vacuum.get_battery_level",
-        new_callable=AsyncMock,
-        return_value=100,
+    with (
+        patch(
+            "tools.vacuum.ha_request",
+            new_callable=AsyncMock,
+            return_value=ha_states,
+        ),
+        patch(
+            "tools.vacuum.call_ha_service",
+            new_callable=AsyncMock,
+        ) as mock_svc,
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=vac_state,
+        ),
+        patch(
+            "tools.vacuum.get_battery_level",
+            new_callable=AsyncMock,
+            return_value=100,
+        ),
     ):
         result = await control_vacuum(
             entity_id="vacuum.dusty", action="empty_dustbin"
@@ -905,7 +1074,11 @@ async def test_resolve_action_empty_dustbin_fallback_send_command():
 
     # No matching button entities
     ha_states = [
-        {"entity_id": "sensor.dusty_status", "state": "charging", "attributes": {}},
+        {
+            "entity_id": "sensor.dusty_status",
+            "state": "charging",
+            "attributes": {},
+        },
     ]
     vac_state = {
         "state": "docked",
@@ -918,17 +1091,21 @@ async def test_resolve_action_empty_dustbin_fallback_send_command():
         # send_command call succeeds
         return {}
 
-    with patch(
-        "tools.vacuum.ha_request",
-        side_effect=_mock_ha,
-    ), patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=vac_state,
-    ), patch(
-        "tools.vacuum.get_battery_level",
-        new_callable=AsyncMock,
-        return_value=100,
+    with (
+        patch(
+            "tools.vacuum.ha_request",
+            side_effect=_mock_ha,
+        ),
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=vac_state,
+        ),
+        patch(
+            "tools.vacuum.get_battery_level",
+            new_callable=AsyncMock,
+            return_value=100,
+        ),
     ):
         result = await control_vacuum(
             entity_id="vacuum.dusty", action="empty_dustbin"
@@ -944,7 +1121,11 @@ async def test_resolve_action_empty_dustbin_all_fail():
     from tools.vacuum import control_vacuum
 
     ha_states = [
-        {"entity_id": "sensor.dusty_status", "state": "charging", "attributes": {}},
+        {
+            "entity_id": "sensor.dusty_status",
+            "state": "charging",
+            "attributes": {},
+        },
     ]
     vac_state = {
         "state": "docked",
@@ -956,17 +1137,21 @@ async def test_resolve_action_empty_dustbin_all_fail():
             return ha_states
         raise Exception("service not available")
 
-    with patch(
-        "tools.vacuum.ha_request",
-        side_effect=_mock_ha,
-    ), patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=vac_state,
-    ), patch(
-        "tools.vacuum.get_battery_level",
-        new_callable=AsyncMock,
-        return_value=100,
+    with (
+        patch(
+            "tools.vacuum.ha_request",
+            side_effect=_mock_ha,
+        ),
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=vac_state,
+        ),
+        patch(
+            "tools.vacuum.get_battery_level",
+            new_callable=AsyncMock,
+            return_value=100,
+        ),
     ):
         result = await control_vacuum(
             entity_id="vacuum.dusty", action="empty_dustbin"
@@ -981,17 +1166,24 @@ async def test_resolve_action_dust_collection_button_suffix():
     from tools.vacuum import _try_button
 
     ha_states = [
-        {"entity_id": "button.robo_vac_dust_collection", "state": "unknown", "attributes": {}},
+        {
+            "entity_id": "button.robo_vac_dust_collection",
+            "state": "unknown",
+            "attributes": {},
+        },
     ]
 
-    with patch(
-        "tools.vacuum.ha_request",
-        new_callable=AsyncMock,
-        return_value=ha_states,
-    ), patch(
-        "tools.vacuum.call_ha_service",
-        new_callable=AsyncMock,
-    ) as mock_svc:
+    with (
+        patch(
+            "tools.vacuum.ha_request",
+            new_callable=AsyncMock,
+            return_value=ha_states,
+        ),
+        patch(
+            "tools.vacuum.call_ha_service",
+            new_callable=AsyncMock,
+        ) as mock_svc,
+    ):
         result = await _try_button(
             "vacuum.robo_vac", "empty_dustbin", ha_states
         )
@@ -1014,7 +1206,11 @@ async def test_resolve_action_unknown_action_returns_error():
     ]
     # No matching button entities
     ha_states = [
-        {"entity_id": "sensor.dusty_status", "state": "ok", "attributes": {}},
+        {
+            "entity_id": "sensor.dusty_status",
+            "state": "ok",
+            "attributes": {},
+        },
     ]
 
     async def _mock_ha(method, path, json_data=None):
@@ -1044,10 +1240,13 @@ async def test_resolve_action_novel_vacuum_service():
 
     # HA reports a custom service we've never heard of
     services_list = [
-        {"domain": "vacuum", "services": {
-            "start": {},
-            "turbo_clean": {},  # novel service
-        }},
+        {
+            "domain": "vacuum",
+            "services": {
+                "start": {},
+                "turbo_clean": {},  # novel service
+            },
+        },
     ]
     vac_state = {
         "state": "cleaning",
@@ -1061,20 +1260,25 @@ async def test_resolve_action_novel_vacuum_service():
             return []
         return {}
 
-    with patch(
-        "tools.vacuum.ha_request",
-        side_effect=_mock_ha,
-    ), patch(
-        "tools.vacuum.call_ha_service",
-        new_callable=AsyncMock,
-    ) as mock_svc, patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=vac_state,
-    ), patch(
-        "tools.vacuum.get_battery_level",
-        new_callable=AsyncMock,
-        return_value=90,
+    with (
+        patch(
+            "tools.vacuum.ha_request",
+            side_effect=_mock_ha,
+        ),
+        patch(
+            "tools.vacuum.call_ha_service",
+            new_callable=AsyncMock,
+        ) as mock_svc,
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=vac_state,
+        ),
+        patch(
+            "tools.vacuum.get_battery_level",
+            new_callable=AsyncMock,
+            return_value=90,
+        ),
     ):
         result = await control_vacuum(
             entity_id="vacuum.dusty", action="turbo_clean"
@@ -1095,7 +1299,11 @@ async def test_resolve_action_novel_button_entity():
 
     # HA has a novel button entity for this vacuum
     ha_states = [
-        {"entity_id": "button.dusty_self_clean", "state": "unknown", "attributes": {}},
+        {
+            "entity_id": "button.dusty_self_clean",
+            "state": "unknown",
+            "attributes": {},
+        },
     ]
     # No matching vacuum service
     services_list = [
@@ -1113,20 +1321,25 @@ async def test_resolve_action_novel_button_entity():
             return ha_states
         return {}
 
-    with patch(
-        "tools.vacuum.ha_request",
-        side_effect=_mock_ha,
-    ), patch(
-        "tools.vacuum.call_ha_service",
-        new_callable=AsyncMock,
-    ) as mock_svc, patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=vac_state,
-    ), patch(
-        "tools.vacuum.get_battery_level",
-        new_callable=AsyncMock,
-        return_value=100,
+    with (
+        patch(
+            "tools.vacuum.ha_request",
+            side_effect=_mock_ha,
+        ),
+        patch(
+            "tools.vacuum.call_ha_service",
+            new_callable=AsyncMock,
+        ) as mock_svc,
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=vac_state,
+        ),
+        patch(
+            "tools.vacuum.get_battery_level",
+            new_callable=AsyncMock,
+            return_value=100,
+        ),
     ):
         result = await control_vacuum(
             entity_id="vacuum.dusty", action="self_clean"
@@ -1144,7 +1357,10 @@ async def test_fan_speed_set_alongside_action():
     from tools.vacuum import control_vacuum
 
     services_list = [
-        {"domain": "vacuum", "services": {"start": {}, "set_fan_speed": {}}},
+        {
+            "domain": "vacuum",
+            "services": {"start": {}, "set_fan_speed": {}},
+        },
     ]
     vac_state = {
         "state": "cleaning",
@@ -1158,20 +1374,25 @@ async def test_fan_speed_set_alongside_action():
             return []
         return {}
 
-    with patch(
-        "tools.vacuum.ha_request",
-        side_effect=_mock_ha,
-    ), patch(
-        "tools.vacuum.call_ha_service",
-        new_callable=AsyncMock,
-    ) as mock_svc, patch(
-        "tools.vacuum.read_state",
-        new_callable=AsyncMock,
-        return_value=vac_state,
-    ), patch(
-        "tools.vacuum.get_battery_level",
-        new_callable=AsyncMock,
-        return_value=80,
+    with (
+        patch(
+            "tools.vacuum.ha_request",
+            side_effect=_mock_ha,
+        ),
+        patch(
+            "tools.vacuum.call_ha_service",
+            new_callable=AsyncMock,
+        ) as mock_svc,
+        patch(
+            "tools.vacuum.read_state",
+            new_callable=AsyncMock,
+            return_value=vac_state,
+        ),
+        patch(
+            "tools.vacuum.get_battery_level",
+            new_callable=AsyncMock,
+            return_value=80,
+        ),
     ):
         result = await control_vacuum(
             entity_id="vacuum.dusty",
@@ -1181,9 +1402,7 @@ async def test_fan_speed_set_alongside_action():
 
     # Should have two calls: start + set_fan_speed
     assert mock_svc.call_count == 2
-    mock_svc.assert_any_call(
-        "vacuum", "start", "vacuum.dusty"
-    )
+    mock_svc.assert_any_call("vacuum", "start", "vacuum.dusty")
     mock_svc.assert_any_call(
         "vacuum",
         "set_fan_speed",

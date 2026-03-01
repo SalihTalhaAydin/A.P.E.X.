@@ -1,8 +1,8 @@
 """Tests for routines tool."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from tools.base import TOOL_REGISTRY
 from tools.routines import define_routine, run_routine, set_routine_store
 
@@ -10,6 +10,7 @@ from tools.routines import define_routine, run_routine, set_routine_store
 @pytest.fixture(scope="module")
 def _tools_loaded():
     from tools import discover_tools
+
     discover_tools()
 
 
@@ -78,7 +79,9 @@ async def test_define_routine_parses_steps_by_period_space_not_period():
     mock_store.save_routine.assert_called_once()
     step_list = mock_store.save_routine.call_args[0][1]
     assert len(step_list) == 2
-    assert "3.14" in step_list[0], "Decimal 3.14 must not be split by '.' alone"
+    assert "3.14" in step_list[0], (
+        "Decimal 3.14 must not be split by '.' alone"
+    )
     assert step_list[0] == "Set temperature to 3.14 degrees"
     assert step_list[1] == "Next step here"
     assert "2 steps" in result

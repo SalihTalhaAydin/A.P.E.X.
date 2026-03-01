@@ -7,8 +7,8 @@ NOTE: BUG_FIX_PROMPT_*.md files were removed; docs/bugs.csv is now the source of
 
 import csv
 import re
-from pathlib import Path
 from dataclasses import dataclass, field
+from pathlib import Path
 
 # Priority order for merging (higher = more severe)
 PRIORITY_ORDER = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1}
@@ -53,11 +53,17 @@ def normalize_file(s: str) -> str:
 
 def extract_file(block: str) -> str:
     # **File:** `path` or **File:** path
-    m = re.search(r"\*\*File:\*\*\s*[`]?([^\s`\n]+(?::\d+(?:-\d+)?)?)[`]?", block, re.IGNORECASE)
+    m = re.search(
+        r"\*\*File:\*\*\s*[`]?([^\s`\n]+(?::\d+(?:-\d+)?)?)[`]?",
+        block,
+        re.IGNORECASE,
+    )
     if m:
         return normalize_file(m.group(1))
     # Table format: | File | `path` |
-    m = re.search(r"\|\s*File\s*\|\s*[`]?([^`|\n]+)[`]?\s*\|", block, re.IGNORECASE)
+    m = re.search(
+        r"\|\s*File\s*\|\s*[`]?([^`|\n]+)[`]?\s*\|", block, re.IGNORECASE
+    )
     if m:
         return normalize_file(m.group(1).strip())
     # Inline in header: ### BUG-92: `generic.py:637` —
@@ -71,14 +77,20 @@ def extract_file(block: str) -> str:
 
 
 def extract_problem(block: str) -> str:
-    m = re.search(r"\*\*Problem:\*\*\s*(.+?)(?=\n\*\*|\n```|\n##|\n###|\n---|\Z)", block, re.DOTALL)
+    m = re.search(
+        r"\*\*Problem:\*\*\s*(.+?)(?=\n\*\*|\n```|\n##|\n###|\n---|\Z)",
+        block,
+        re.DOTALL,
+    )
     if m:
         desc = m.group(1).strip()
         desc = re.sub(r"\n+", " ", desc)
         desc = re.sub(r"\s+", " ", desc)
         return desc[:500]
     # Fallback: title from header
-    m = re.search(r"###\s*(?:BUG|GAP|TEST)[^\—\-]+[—\-]\s*(.+?)(?:\n|$)", block)
+    m = re.search(
+        r"###\s*(?:BUG|GAP|TEST)[^\—\-]+[—\-]\s*(.+?)(?:\n|$)", block
+    )
     if m:
         return m.group(1).strip()[:500]
     return block[:200].replace("\n", " ").strip()
@@ -93,9 +105,13 @@ def parse_prompt_file(prefix: str, filepath: Path) -> list[Bug]:
     lines = content.split("\n")
     for i, line in enumerate(lines):
         if re.match(r"^## (CRITICAL|HIGH|MEDIUM|LOW)", line):
-            section_priority = re.match(r"^## (CRITICAL|HIGH|MEDIUM|LOW)", line).group(1)
+            section_priority = re.match(
+                r"^## (CRITICAL|HIGH|MEDIUM|LOW)", line
+            ).group(1)
 
-        m = re.match(r"^### (BUG-\d+|GAP-\d+|TEST-\d+|TEST-GAP-\d+):?\s*(.+)$", line)
+        m = re.match(
+            r"^### (BUG-\d+|GAP-\d+|TEST-\d+|TEST-GAP-\d+):?\s*(.+)$", line
+        )
         if m:
             orig_id = m.group(1)
             if "GAP" in orig_id:
@@ -108,7 +124,9 @@ def parse_prompt_file(prefix: str, filepath: Path) -> list[Bug]:
             # Collect block until next ### or ---
             block_lines = [line]
             for j in range(i + 1, len(lines)):
-                if lines[j].startswith("### ") or (lines[j].strip() == "---" and j > i + 2):
+                if lines[j].startswith("### ") or (
+                    lines[j].strip() == "---" and j > i + 2
+                ):
                     break
                 block_lines.append(lines[j])
             block = "\n".join(block_lines)
@@ -116,7 +134,10 @@ def parse_prompt_file(prefix: str, filepath: Path) -> list[Bug]:
             file_path = extract_file(block)
             if not file_path and m.group(2):
                 # Try to get file from header: `file.py:123` or `file.py`
-                fm = re.search(r"`([a-zA-Z0-9_/.-]+\.py(?::\d+(?:-\d+)?)?)`", m.group(2))
+                fm = re.search(
+                    r"`([a-zA-Z0-9_/.-]+\.py(?::\d+(?:-\d+)?)?)`",
+                    m.group(2),
+                )
                 if fm:
                     fp = fm.group(1)
                     if not fp.startswith("apex_brain/"):
@@ -125,7 +146,9 @@ def parse_prompt_file(prefix: str, filepath: Path) -> list[Bug]:
 
             problem = extract_problem(block)
             if not problem and m.group(2):
-                problem = m.group(2).split("—")[-1].split("→")[0].strip()[:500]
+                problem = (
+                    m.group(2).split("—")[-1].split("→")[0].strip()[:500]
+                )
 
             bugs.append(
                 Bug(
@@ -141,9 +164,14 @@ def parse_prompt_file(prefix: str, filepath: Path) -> list[Bug]:
             )
 
     # Parse GAP table format: | GAP-1 | description | HIGH |
-    for m in re.finditer(r"\|\s*(GAP-\d+)\s*\|\s*(.+?)\s*\|\s*(HIGH|MEDIUM|LOW)\s*\|", content):
+    for m in re.finditer(
+        r"\|\s*(GAP-\d+)\s*\|\s*(.+?)\s*\|\s*(HIGH|MEDIUM|LOW)\s*\|",
+        content,
+    ):
         orig_id, cell, prio = m.group(1), m.group(2).strip(), m.group(3)
-        desc = re.sub(r"`([^`]+)`", r"\1", cell).strip()  # unquote backticks
+        desc = re.sub(
+            r"`([^`]+)`", r"\1", cell
+        ).strip()  # unquote backticks
         file_path = ""
         if "conftest" in cell.lower():
             file_path = "apex_brain/tests/conftest.py"
@@ -175,15 +203,27 @@ def deduplicate(bugs: list[Bug]) -> list[Bug]:
     # First pass: exact match on (file, desc_word_set)
     by_key: dict[tuple[str, frozenset], Bug] = {}
     for b in bugs:
-        fkey = normalize_file(b.file_path) if b.file_path else f"no_file_{b.orig_id}"
-        wset = frozenset(desc_word_set(b.description)) if b.description else frozenset()
+        fkey = (
+            normalize_file(b.file_path)
+            if b.file_path
+            else f"no_file_{b.orig_id}"
+        )
+        wset = (
+            frozenset(desc_word_set(b.description))
+            if b.description
+            else frozenset()
+        )
         key = (fkey, wset)
         if key in by_key:
             existing = by_key[key]
-            if PRIORITY_ORDER.get(b.priority, 0) > PRIORITY_ORDER.get(existing.priority, 0):
+            if PRIORITY_ORDER.get(b.priority, 0) > PRIORITY_ORDER.get(
+                existing.priority, 0
+            ):
                 existing.priority = b.priority
             existing.merged_from.extend(b.merged_from)
-            existing.sources = list(dict.fromkeys(existing.sources + b.sources))
+            existing.sources = list(
+                dict.fromkeys(existing.sources + b.sources)
+            )
         else:
             by_key[key] = b
 
@@ -196,13 +236,21 @@ def deduplicate(bugs: list[Bug]) -> list[Bug]:
         ("P3-BUG-102", "P6-BUG-93"),  # correct_fact race/transaction
     ]
     for a_id, b_id in MANUAL_MERGES:
-        a_bug = next((b for b in result if f"{b.source}-{b.orig_id}" == a_id), None)
-        b_bug = next((b for b in result if f"{b.source}-{b.orig_id}" == b_id), None)
+        a_bug = next(
+            (b for b in result if f"{b.source}-{b.orig_id}" == a_id), None
+        )
+        b_bug = next(
+            (b for b in result if f"{b.source}-{b.orig_id}" == b_id), None
+        )
         if a_bug and b_bug:
-            if PRIORITY_ORDER.get(b_bug.priority, 0) > PRIORITY_ORDER.get(a_bug.priority, 0):
+            if PRIORITY_ORDER.get(b_bug.priority, 0) > PRIORITY_ORDER.get(
+                a_bug.priority, 0
+            ):
                 a_bug.priority = b_bug.priority
             a_bug.merged_from.extend(b_bug.merged_from)
-            a_bug.sources = list(dict.fromkeys(a_bug.sources + b_bug.sources))
+            a_bug.sources = list(
+                dict.fromkeys(a_bug.sources + b_bug.sources)
+            )
             if len(b_bug.description) > len(a_bug.description):
                 a_bug.description = b_bug.description
             result.remove(b_bug)
@@ -220,7 +268,9 @@ def deduplicate(bugs: list[Bug]) -> list[Bug]:
                 fb = normalize_file(b.file_path)
                 wb = desc_word_set(b.description)
                 if fa == fb and jaccard(wa, wb) >= 0.40:
-                    if PRIORITY_ORDER.get(b.priority, 0) > PRIORITY_ORDER.get(a.priority, 0):
+                    if PRIORITY_ORDER.get(
+                        b.priority, 0
+                    ) > PRIORITY_ORDER.get(a.priority, 0):
                         a.priority = b.priority
                     a.merged_from.extend(b.merged_from)
                     a.sources = list(dict.fromkeys(a.sources + b.sources))
@@ -246,35 +296,61 @@ def main():
         print(f"Parsed {len(parsed)} from {rel_path}")
 
     if not all_bugs:
-        print("No BUG_FIX_PROMPT_*.md files found. docs/bugs.csv is the source of truth.")
+        print(
+            "No BUG_FIX_PROMPT_*.md files found. docs/bugs.csv is the source of truth."
+        )
         return
 
     merged = deduplicate(all_bugs)
     print(f"After dedup: {len(merged)} unique bugs")
 
     def sort_key(b: Bug):
-        return (-PRIORITY_ORDER.get(b.priority, 0), b.file_path, b.description[:50])
+        return (
+            -PRIORITY_ORDER.get(b.priority, 0),
+            b.file_path,
+            b.description[:50],
+        )
 
     merged.sort(key=sort_key)
 
     out_path = root / "docs" / "bugs.csv"
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
-        w.writerow(["id", "description", "status", "priority", "file", "type", "sources", "merged_from", "reopened_count"])
+        w.writerow(
+            [
+                "id",
+                "description",
+                "status",
+                "priority",
+                "file",
+                "type",
+                "sources",
+                "merged_from",
+                "reopened_count",
+            ]
+        )
         for i, b in enumerate(merged, 1):
-            merged_str = ",".join(sorted(set(b.merged_from))) if b.merged_from else ""
-            sources_str = ",".join(sorted(set(b.sources))) if b.sources else ""
-            w.writerow([
-                i,
-                b.description,
-                "to-do",
-                b.priority,
-                b.file_path,
-                b.btype,
-                sources_str,
-                merged_str,
-                0,
-            ])
+            merged_str = (
+                ",".join(sorted(set(b.merged_from)))
+                if b.merged_from
+                else ""
+            )
+            sources_str = (
+                ",".join(sorted(set(b.sources))) if b.sources else ""
+            )
+            w.writerow(
+                [
+                    i,
+                    b.description,
+                    "to-do",
+                    b.priority,
+                    b.file_path,
+                    b.btype,
+                    sources_str,
+                    merged_str,
+                    0,
+                ]
+            )
 
     print(f"Wrote {out_path} with {len(merged)} rows")
 

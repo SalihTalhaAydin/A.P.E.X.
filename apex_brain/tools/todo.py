@@ -28,10 +28,7 @@ async def _get_items(entity_id: str) -> list[dict]:
     )
     # Response: {entity_id: {"items": [...]}}
     if isinstance(resp, dict):
-        return (
-            resp.get(entity_id, {})
-            .get("items", [])
-        )
+        return resp.get(entity_id, {}).get("items", [])
     return []
 
 
@@ -77,8 +74,7 @@ def _format_items(items: list[dict]) -> str:
             "entity_id": {
                 "type": "string",
                 "description": (
-                    "Todo list entity ID (use "
-                    "list_entities to discover)."
+                    "Todo list entity ID (use list_entities to discover)."
                 ),
             },
             "action": {
@@ -113,28 +109,26 @@ async def manage_todo(
 ) -> str:
     """Manage a todo or shopping list."""
     try:
-        list_name = (
-            entity_id.split(".")[-1]
-            .replace("_", " ")
-            .title()
-        )
+        list_name = entity_id.split(".")[-1].replace("_", " ").title()
 
         if action == "view":
             items = await _get_items(entity_id)
-            return (
-                f"{list_name}:\n"
-                f"{_format_items(items)}"
-            )
+            return f"{list_name}:\n{_format_items(items)}"
 
         if action in ("add", "complete", "remove"):
             if not item:
-                return (
-                    f"Please provide an item to "
-                    f"{action}."
-                )
+                return f"Please provide an item to {action}."
 
-        items_list = await _get_items(entity_id) if action in ("complete", "remove") else []
-        item_id = _resolve_item_identifier(entity_id, item, items_list) if action in ("complete", "remove") else item
+        items_list = (
+            await _get_items(entity_id)
+            if action in ("complete", "remove")
+            else []
+        )
+        item_id = (
+            _resolve_item_identifier(entity_id, item, items_list)
+            if action in ("complete", "remove")
+            else item
+        )
 
         if action == "add":
             await ha_request(
@@ -184,11 +178,7 @@ async def manage_todo(
             "clear_completed": "Cleared completed",
         }.get(action, "Done")
         suffix = f" '{item}'" if item else ""
-        return (
-            f"{verb}{suffix}.\n"
-            f"{list_name}:\n"
-            f"{_format_items(items)}"
-        )
+        return f"{verb}{suffix}.\n{list_name}:\n{_format_items(items)}"
 
     except httpx.HTTPStatusError as e:
         return format_ha_error(entity_id, "todo", e)

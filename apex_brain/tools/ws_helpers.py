@@ -4,6 +4,7 @@ Transient connection pattern: open, authenticate, send command,
 receive result, close. Used by configure() for entity/device/area
 registry operations not available via REST.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -44,9 +45,7 @@ def _get_ws_url() -> str:
 
 def _get_token() -> str | None:
     """Get the auth token for WebSocket connections."""
-    token = os.environ.get(
-        "SUPERVISOR_TOKEN", ""
-    ) or settings.ha_token
+    token = os.environ.get("SUPERVISOR_TOKEN", "") or settings.ha_token
     return token if token else None
 
 
@@ -80,9 +79,7 @@ async def ws_command(command: dict) -> dict:
 
     timeout = aiohttp.ClientTimeout(total=_WS_TIMEOUT)
     try:
-        async with aiohttp.ClientSession(
-            timeout=timeout
-        ) as session:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.ws_connect(ws_url) as ws:
                 # 1. Receive auth_required
                 msg = await asyncio.wait_for(
@@ -91,14 +88,11 @@ async def ws_command(command: dict) -> dict:
                 )
                 if msg.get("type") != "auth_required":
                     raise ConnectionError(
-                        f"Expected auth_required, got: "
-                        f"{msg.get('type')}"
+                        f"Expected auth_required, got: {msg.get('type')}"
                     )
 
                 # 2. Send auth
-                await ws.send_json(
-                    {"type": "auth", "access_token": token}
-                )
+                await ws.send_json({"type": "auth", "access_token": token})
                 auth_result = await asyncio.wait_for(
                     ws.receive_json(),
                     timeout=_WS_TIMEOUT,
@@ -123,7 +117,10 @@ async def ws_command(command: dict) -> dict:
                     if result.get("id") == 1:
                         break
                     # Skip unsolicited messages (events, etc.) that don't match our cmd id
-                    logger.debug("Skipping unsolicited WS message id=%s", result.get("id"))
+                    logger.debug(
+                        "Skipping unsolicited WS message id=%s",
+                        result.get("id"),
+                    )
 
                 if not result.get("success", False):
                     error = result.get("error", {})
@@ -135,9 +132,7 @@ async def ws_command(command: dict) -> dict:
                 return result.get("result", {})
 
     except aiohttp.WSServerHandshakeError as e:
-        raise ConnectionError(
-            f"WebSocket handshake failed: {e}"
-        ) from e
+        raise ConnectionError(f"WebSocket handshake failed: {e}") from e
     except aiohttp.ClientConnectorError as e:
         raise ConnectionError(
             f"Cannot connect to HA WebSocket at {ws_url}: {e}"
@@ -147,15 +142,10 @@ async def ws_command(command: dict) -> dict:
             f"WebSocket connection lost (broken pipe/reset): {e}"
         ) from e
     except aiohttp.ClientError as e:
-        raise ConnectionError(
-            f"WebSocket client error: {e}"
-        ) from e
+        raise ConnectionError(f"WebSocket client error: {e}") from e
     except (OSError, ConnectionResetError) as e:
-        raise ConnectionError(
-            f"WebSocket socket error: {e}"
-        ) from e
-    except asyncio.TimeoutError as e:
+        raise ConnectionError(f"WebSocket socket error: {e}") from e
+    except TimeoutError as e:
         raise TimeoutError(
-            "WebSocket operation timed out "
-            f"after {_WS_TIMEOUT}s"
+            f"WebSocket operation timed out after {_WS_TIMEOUT}s"
         ) from e

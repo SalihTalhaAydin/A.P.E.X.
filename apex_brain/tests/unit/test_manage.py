@@ -2,24 +2,24 @@
 Tests for the manage() system management tool.
 All Supervisor API calls are mocked — no real API calls.
 """
+
 from __future__ import annotations
 
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from tools.manage import (
-    manage,
-    _get_tier,
     _confirmation_prompt,
+    _get_tier,
     _handle_backup,
-    _handle_update,
-    _handle_restart,
-    _handle_install,
     _handle_health,
+    _handle_install,
     _handle_logs,
+    _handle_restart,
+    _handle_update,
+    manage,
     set_audit_store,
 )
-
 
 # ── Tier classification ──────────────────────────────
 
@@ -67,17 +67,13 @@ class TestTierClassification:
 
 class TestConfirmationPrompt:
     def test_tier_1_prompt_contains_disruptive(self):
-        result = _confirmation_prompt(
-            "restart", "core", 1, "detail"
-        )
+        result = _confirmation_prompt("restart", "core", 1, "detail")
         assert "DISRUPTIVE" in result
         assert "restart" in result
         assert "confirmed" in result
 
     def test_tier_2_prompt_contains_destructive(self):
-        result = _confirmation_prompt(
-            "backup", "restore", 2, "detail"
-        )
+        result = _confirmation_prompt("backup", "restore", 2, "detail")
         assert "DESTRUCTIVE" in result
         assert "confirmed" in result
 
@@ -94,21 +90,15 @@ class TestManageIntegration:
         with patch(
             "tools.manage._supervisor_request",
             new_callable=AsyncMock,
-            return_value={
-                "data": {"backups": []}
-            },
+            return_value={"data": {"backups": []}},
         ):
-            result = await manage(
-                action="backup", target="list"
-            )
+            result = await manage(action="backup", target="list")
             assert "No backups found" in result
 
     @pytest.mark.asyncio
     async def test_destructive_op_returns_confirmation(self):
         """Tier 1+ ops without confirmed=True return prompt."""
-        result = await manage(
-            action="restart", target="core"
-        )
+        result = await manage(action="restart", target="core")
         assert "DISRUPTIVE" in result
         assert "confirmed" in result
 
@@ -131,7 +121,8 @@ class TestManageIntegration:
     async def test_tier_2_returns_confirmation(self):
         """Tier 2 ops return destructive warning."""
         result = await manage(
-            action="backup", target="restore",
+            action="backup",
+            target="restore",
             config={"backup_id": "abc123"},
         )
         assert "DESTRUCTIVE" in result
@@ -182,9 +173,7 @@ class TestManageIntegration:
         with patch(
             "tools.manage._supervisor_request",
             new_callable=AsyncMock,
-            return_value={
-                "data": {"backups": []}
-            },
+            return_value={"data": {"backups": []}},
         ):
             result = await manage(
                 action="backup",
@@ -197,7 +186,8 @@ class TestManageIntegration:
     async def test_unknown_action_returns_error(self):
         """Unknown actions return helpful error."""
         result = await manage(
-            action="explode", target="everything",
+            action="explode",
+            target="everything",
             config={"confirmed": True},
         )
         assert "Unknown action" in result
@@ -213,9 +203,7 @@ class TestBackupHandlers:
         with patch(
             "tools.manage._supervisor_request",
             new_callable=AsyncMock,
-            return_value={
-                "data": {"slug": "abc123"}
-            },
+            return_value={"data": {"slug": "abc123"}},
         ):
             result = await _handle_backup("create", {})
             assert "created" in result
@@ -223,19 +211,14 @@ class TestBackupHandlers:
 
     @pytest.mark.asyncio
     async def test_backup_create_with_name(self):
-        mock = AsyncMock(
-            return_value={"data": {"slug": "abc"}}
-        )
-        with patch(
-            "tools.manage._supervisor_request", mock
-        ):
-            result = await _handle_backup(
-                "create", {"name": "my backup"}
-            )
+        mock = AsyncMock(return_value={"data": {"slug": "abc"}})
+        with patch("tools.manage._supervisor_request", mock):
+            result = await _handle_backup("create", {"name": "my backup"})
             assert "created" in result
             # Verify name was passed
             mock.assert_called_once_with(
-                "POST", "/backups/new/full",
+                "POST",
+                "/backups/new/full",
                 {"name": "my backup"},
             )
 
@@ -283,9 +266,7 @@ class TestBackupHandlers:
             new_callable=AsyncMock,
             return_value={"data": {}},
         ):
-            result = await _handle_backup(
-                "restore", {"backup_id": "abc"}
-            )
+            result = await _handle_backup("restore", {"backup_id": "abc"})
             assert "restore initiated" in result
 
     @pytest.mark.asyncio
@@ -300,9 +281,7 @@ class TestBackupHandlers:
             new_callable=AsyncMock,
             return_value={"data": {}},
         ):
-            result = await _handle_backup(
-                "delete", {"backup_id": "abc"}
-            )
+            result = await _handle_backup("delete", {"backup_id": "abc"})
             assert "deleted" in result
 
     @pytest.mark.asyncio
@@ -342,9 +321,7 @@ class TestUpdateHandlers:
             new_callable=AsyncMock,
             return_value={"data": {}},
         ):
-            result = await _handle_update(
-                "addon:my_addon", {}
-            )
+            result = await _handle_update("addon:my_addon", {})
             assert "my_addon" in result
             assert "update initiated" in result
 
@@ -375,9 +352,7 @@ class TestRestartHandlers:
             new_callable=AsyncMock,
             return_value={"data": {}},
         ):
-            result = await _handle_restart(
-                "supervisor", {}
-            )
+            result = await _handle_restart("supervisor", {})
             assert "Supervisor restart initiated" in result
 
     @pytest.mark.asyncio
@@ -387,9 +362,7 @@ class TestRestartHandlers:
             new_callable=AsyncMock,
             return_value={"data": {}},
         ):
-            result = await _handle_restart(
-                "addon:test_addon", {}
-            )
+            result = await _handle_restart("addon:test_addon", {})
             assert "test_addon" in result
             assert "restart initiated" in result
 
@@ -410,9 +383,7 @@ class TestInstallHandler:
             new_callable=AsyncMock,
             return_value={"data": {}},
         ):
-            result = await _handle_install(
-                "addon:new_addon", {}
-            )
+            result = await _handle_install("addon:new_addon", {})
             assert "new_addon" in result
             assert "installation initiated" in result
 
@@ -479,20 +450,14 @@ class TestLogsHandler:
     @pytest.mark.asyncio
     async def test_logs_default_target(self):
         mock = AsyncMock(return_value="log output")
-        with patch(
-            "tools.manage._supervisor_request", mock
-        ):
+        with patch("tools.manage._supervisor_request", mock):
             await _handle_logs("", {})
-            mock.assert_called_once_with(
-                "GET", "/core/logs", as_text=True
-            )
+            mock.assert_called_once_with("GET", "/core/logs", as_text=True)
 
     @pytest.mark.asyncio
     async def test_logs_supervisor(self):
         mock = AsyncMock(return_value="sup logs")
-        with patch(
-            "tools.manage._supervisor_request", mock
-        ):
+        with patch("tools.manage._supervisor_request", mock):
             await _handle_logs("supervisor", {})
             mock.assert_called_once_with(
                 "GET", "/supervisor/logs", as_text=True
@@ -501,9 +466,7 @@ class TestLogsHandler:
     @pytest.mark.asyncio
     async def test_logs_addon(self):
         mock = AsyncMock(return_value="addon logs")
-        with patch(
-            "tools.manage._supervisor_request", mock
-        ):
+        with patch("tools.manage._supervisor_request", mock):
             await _handle_logs("addon:my_addon", {})
             mock.assert_called_once_with(
                 "GET", "/addons/my_addon/logs", as_text=True
@@ -516,9 +479,7 @@ class TestLogsHandler:
 
     @pytest.mark.asyncio
     async def test_logs_truncated_to_50_lines(self):
-        long_log = "\n".join(
-            f"line {i}" for i in range(100)
-        )
+        long_log = "\n".join(f"line {i}" for i in range(100))
         with patch(
             "tools.manage._supervisor_request",
             new_callable=AsyncMock,
@@ -539,9 +500,7 @@ class TestSupervisorUnavailable:
             "tools.manage._get_supervisor_token",
             return_value=None,
         ):
-            result = await manage(
-                action="backup", target="list"
-            )
+            result = await manage(action="backup", target="list")
             assert "SUPERVISOR_TOKEN" in result
             assert "unavailable" in result
 
@@ -559,13 +518,9 @@ class TestManageAuditLogging:
             with patch(
                 "tools.manage._supervisor_request",
                 new_callable=AsyncMock,
-                return_value={
-                    "data": {"backups": []}
-                },
+                return_value={"data": {"backups": []}},
             ):
-                await manage(
-                    action="backup", target="list"
-                )
+                await manage(action="backup", target="list")
             mock_store.log.assert_called_once()
             call_kw = mock_store.log.call_args.kwargs
             assert call_kw["tool"] == "manage"
@@ -580,9 +535,7 @@ class TestManageAuditLogging:
         mock_store.log = AsyncMock(return_value=1)
         set_audit_store(mock_store)
         try:
-            await manage(
-                action="restart", target="core"
-            )
+            await manage(action="restart", target="core")
             mock_store.log.assert_called_once()
             call_kw = mock_store.log.call_args.kwargs
             assert call_kw["result"] == "confirmation_prompted"

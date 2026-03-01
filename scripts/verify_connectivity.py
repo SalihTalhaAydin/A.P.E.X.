@@ -2,13 +2,14 @@
 """
 Verify connectivity to Home Assistant using project config and helpers.
 """
-import sys
-import os
+
 import asyncio
 import logging
+import os
+import sys
 
 # Configure logging to stdout
-logging.basicConfig(level=logging.INFO, format='%(message)s')
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
 
 # Add the project root to sys.path so we can import modules
@@ -59,7 +60,7 @@ async def main():
     except Exception as e:
         print(f"FAILURE: Could not connect to Home Assistant. Reason: {e}")
         # Print more details if available
-        if hasattr(e, 'response'):
+        if hasattr(e, "response"):
             print(f"Status Code: {e.response.status_code}")
             print(f"Response Body: {e.response.text}")
 

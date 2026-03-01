@@ -66,30 +66,36 @@ def test_season_fall():
 
 
 def test_proactive_hints_morning():
-    """Morning hints mention weather/schedule."""
+    """Morning hints mention briefing."""
     ctx = {"period": "morning", "season": "winter"}
     hints = _build_proactive_hints(time_ctx=ctx)
-    assert "weather" in hints.lower() or "schedule" in hints.lower()
+    assert "morning" in hints.lower()
+    assert "briefing" in hints.lower()
 
 
-def test_proactive_hints_evening():
-    """Evening hints mention winding down."""
-    ctx = {"period": "evening", "season": "summer"}
+def test_proactive_hints_late_night():
+    """Late night hints mention being brief."""
+    ctx = {"period": "night", "hour": 23}
     hints = _build_proactive_hints(time_ctx=ctx)
-    assert "evening" in hints.lower() or "winding" in hints.lower()
+    assert "late" in hints.lower() or "brief" in hints.lower()
 
 
 def test_proactive_hints_calendar():
     """Calendar triggers a calendar hint."""
-    hints = _build_proactive_hints(
-        calendar="Meeting at 3pm"
-    )
+    hints = _build_proactive_hints(calendar="Meeting at 3pm")
     assert "calendar" in hints.lower()
 
 
 def test_proactive_hints_empty():
     """No hints when no context is provided."""
     hints = _build_proactive_hints()
+    assert hints == ""
+
+
+def test_proactive_hints_evening_no_hint():
+    """Regular evening (not late night) generates no hint."""
+    ctx = {"period": "evening", "hour": 19}
+    hints = _build_proactive_hints(time_ctx=ctx)
     assert hints == ""
 
 
@@ -103,62 +109,63 @@ def test_build_prompt_includes_presence():
 
 
 def test_build_prompt_includes_time_context():
-    """Time context replaces raw datetime."""
+    """Time context appears in prompt."""
     ctx = {
         "period": "morning",
         "season": "winter",
         "formatted": "Monday, February 17, 2026 at 08:30 AM",
     }
     prompt = build_system_prompt(time_context=ctx)
-    assert "TIME & CONTEXT" in prompt
+    assert "TIME:" in prompt
     assert "Morning" in prompt
     assert "winter" in prompt
 
 
 def test_build_prompt_includes_calendar():
     """Calendar summary appears in prompt."""
-    prompt = build_system_prompt(
-        calendar_summary="9:00 AM: Team standup"
-    )
+    prompt = build_system_prompt(calendar_summary="9:00 AM: Team standup")
     assert "TODAY'S SCHEDULE" in prompt
     assert "Team standup" in prompt
 
 
-def test_build_prompt_includes_routines_section():
-    """Routines section is in the template."""
+def test_build_prompt_includes_tools():
+    """Tool listing is in the template."""
     prompt = build_system_prompt()
-    assert "ROUTINES" in prompt
+    assert "TOOLS:" in prompt
+    assert "do(" in prompt
+    assert "query(" in prompt
+    assert "discover(" in prompt
+    assert "shell(" in prompt
+    assert "see(" in prompt
+    assert "remember(" in prompt
     assert "define_routine" in prompt
+    assert "create_automation" in prompt
 
 
-def test_build_prompt_includes_automation_section():
-    """Automation tools are in the template."""
+def test_build_prompt_includes_rules():
+    """Core rules are in the template."""
     prompt = build_system_prompt()
-    assert "list_automations" in prompt
-    assert "activate_scene" in prompt
-
-
-def test_build_prompt_includes_area_control_rules():
-    """Area-based control instructions are in the template."""
-    prompt = build_system_prompt()
-    assert "AREA-BASED CONTROL" in prompt
+    assert "RULES:" in prompt
     assert "area_id" in prompt
-    assert "ENTIRE AREA" in prompt
+    assert "Never claim success" in prompt
 
 
-def test_build_prompt_includes_floor_instructions():
-    """Floor-based control instructions are in the template."""
-    prompt = build_system_prompt()
-    assert "floor_id" in prompt
-    assert "discover(what=\"floors\")" in prompt
+def test_build_prompt_includes_device_summary():
+    """Device summary appears when provided."""
+    prompt = build_system_prompt(
+        device_summary="light.kitchen: on, switch.garage: off"
+    )
+    assert "AVAILABLE DEVICES" in prompt
+    assert "light.kitchen" in prompt
 
 
-def test_build_prompt_includes_scope_constraint():
-    """Scope constraint prevents over-broad actions."""
-    prompt = build_system_prompt()
-    assert "SCOPE CONSTRAINT" in prompt
-    assert "ONLY perform the EXACT action" in prompt
-    assert "NEVER take additional" in prompt
+def test_build_prompt_includes_service_schemas():
+    """Service schemas appear when provided."""
+    prompt = build_system_prompt(
+        service_schemas="## light\n- light.turn_on: entity_id(entity)"
+    )
+    assert "SERVICE SCHEMAS" in prompt
+    assert "light.turn_on" in prompt
 
 
 def test_build_prompt_no_legacy_tool_instructions():

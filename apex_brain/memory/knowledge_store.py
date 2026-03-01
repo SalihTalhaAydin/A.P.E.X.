@@ -88,7 +88,9 @@ class KnowledgeStore:
         async with self._shared.lock:
             db = self._shared.connection
             try:
-                db._conn.isolation_level = None  # manual transactions for correct_fact
+                db._conn.isolation_level = (
+                    None  # manual transactions for correct_fact
+                )
             except (sqlite3.ProgrammingError, OSError):
                 # SQLite thread affinity: connection created in executor thread
                 pass
@@ -136,9 +138,13 @@ class KnowledgeStore:
 
     def _ensure_db(self):
         if not self._shared.is_initialized:
-            raise RuntimeError("Store not initialized. Call initialize() first.")
+            raise RuntimeError(
+                "Store not initialized. Call initialize() first."
+            )
 
-    def _extract_embedding_from_response(self, response) -> list[float] | None:
+    def _extract_embedding_from_response(
+        self, response
+    ) -> list[float] | None:
         """Extract embedding list from embed function response.
 
         Handles: (1) dict with 'embedding' key, (2) object with .embedding
@@ -158,7 +164,9 @@ class KnowledgeStore:
         if isinstance(response, dict):
             emb = response.get("embedding")
             if emb is not None and isinstance(emb, (list, tuple)):
-                if len(emb) > 0 and all(isinstance(x, (int, float)) for x in emb):
+                if len(emb) > 0 and all(
+                    isinstance(x, (int, float)) for x in emb
+                ):
                     return list(emb)
             # LiteLLM-style: response["data"][0]["embedding"] or [0].embedding
             data = response.get("data")
@@ -169,14 +177,18 @@ class KnowledgeStore:
                 else:
                     emb = getattr(item, "embedding", None)
                 if emb is not None and isinstance(emb, (list, tuple)):
-                    if len(emb) > 0 and all(isinstance(x, (int, float)) for x in emb):
+                    if len(emb) > 0 and all(
+                        isinstance(x, (int, float)) for x in emb
+                    ):
                         return list(emb)
             return None
 
         # (2) Object with .embedding attribute
         emb = getattr(response, "embedding", None)
         if emb is not None and isinstance(emb, (list, tuple)):
-            if len(emb) > 0 and all(isinstance(x, (int, float)) for x in emb):
+            if len(emb) > 0 and all(
+                isinstance(x, (int, float)) for x in emb
+            ):
                 return list(emb)
 
         # Object with .data (LiteLLM-style)
@@ -188,7 +200,9 @@ class KnowledgeStore:
             else:
                 emb = getattr(item, "embedding", None)
             if emb is not None and isinstance(emb, (list, tuple)):
-                if len(emb) > 0 and all(isinstance(x, (int, float)) for x in emb):
+                if len(emb) > 0 and all(
+                    isinstance(x, (int, float)) for x in emb
+                ):
                     return list(emb)
 
         return None
@@ -222,13 +236,18 @@ class KnowledgeStore:
             # Bug 77 (P5-BUG-85): When extraction failed, do not blindly pass response
             # to np.array(). Only use it if it's already a list/array of numbers.
             if emb_list is None and response is not None:
-                if isinstance(response, (list, tuple)) and len(response) > 0:
+                if (
+                    isinstance(response, (list, tuple))
+                    and len(response) > 0
+                ):
                     if all(isinstance(x, (int, float)) for x in response):
                         return np.array(response, dtype=np.float32)
-                elif isinstance(response, np.ndarray) and response.size > 0:
-                    if np.issubdtype(response.dtype, np.floating) or np.issubdtype(
-                        response.dtype, np.integer
-                    ):
+                elif (
+                    isinstance(response, np.ndarray) and response.size > 0
+                ):
+                    if np.issubdtype(
+                        response.dtype, np.floating
+                    ) or np.issubdtype(response.dtype, np.integer):
                         return np.asarray(response, dtype=np.float32)
                 logger.warning(
                     "[KnowledgeStore] Embed function returned non-extractable structure "
@@ -573,7 +592,9 @@ class KnowledgeStore:
                         tzinfo=timezone.utc
                     )
                 else:
-                    last_mentioned = last_mentioned.astimezone(timezone.utc)
+                    last_mentioned = last_mentioned.astimezone(
+                        timezone.utc
+                    )
 
                 age_secs = (now - last_mentioned).total_seconds()
 
@@ -612,7 +633,10 @@ class KnowledgeStore:
             return cursor.rowcount
 
     async def search_semantic(
-        self, query: str, limit: int = 10, update_last_mentioned: bool = False
+        self,
+        query: str,
+        limit: int = 10,
+        update_last_mentioned: bool = False,
     ) -> list[dict]:
         """Search by semantic similarity.
 
@@ -700,16 +724,11 @@ class KnowledgeStore:
                 to_touch = [
                     r["id"]
                     for r in results
-                    if r.get("similarity", 0)
-                    >= _MIN_TOUCH_SIMILARITY
+                    if r.get("similarity", 0) >= _MIN_TOUCH_SIMILARITY
                 ]
                 if to_touch:
-                    placeholders = ",".join(
-                        "?" * len(to_touch)
-                    )
-                    touch_now = (
-                        datetime.now(timezone.utc).isoformat()
-                    )
+                    placeholders = ",".join("?" * len(to_touch))
+                    touch_now = datetime.now(timezone.utc).isoformat()
                     async with self._shared.lock:
                         db = self._shared.connection
                         await db.execute(
@@ -732,7 +751,10 @@ class KnowledgeStore:
             )
 
     async def search_keyword(
-        self, query: str, limit: int = 10, update_last_mentioned: bool = False
+        self,
+        query: str,
+        limit: int = 10,
+        update_last_mentioned: bool = False,
     ) -> list[dict]:
         """Fallback keyword search using LIKE.
 
@@ -827,7 +849,13 @@ class KnowledgeStore:
         due: list[dict] = []
         for r in rows:
             try:
-                expires = datetime.fromisoformat(r[7])
+                raw_expires = r[7]
+                # Python < 3.11 fromisoformat() doesn't accept 'Z' suffix
+                if isinstance(raw_expires, str) and raw_expires.endswith(
+                    "Z"
+                ):
+                    raw_expires = raw_expires[:-1] + "+00:00"
+                expires = datetime.fromisoformat(raw_expires)
                 # Treat naive timestamps as UTC
                 if expires.tzinfo is None:
                     expires = expires.replace(tzinfo=timezone.utc)
@@ -848,8 +876,7 @@ class KnowledgeStore:
                         break
             except (ValueError, TypeError):
                 logger.warning(
-                    "Skipping reminder id=%s with invalid "
-                    "expires_at: %s",
+                    "Skipping reminder id=%s with invalid expires_at: %s",
                     r[0],
                     r[7],
                 )
@@ -899,9 +926,7 @@ class KnowledgeStore:
             for r in rows
         ]
 
-    async def delete_fact(
-        self, key: str, category: str = ""
-    ) -> bool:
+    async def delete_fact(self, key: str, category: str = "") -> bool:
         """Delete a fact by key (exact match only).
 
         If category is provided, only delete the fact

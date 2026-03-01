@@ -8,15 +8,12 @@ Every test is self-contained with its own mocks. The LLM and HA API
 are always mocked; the orchestrator and tool registry are real.
 """
 
-import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-from brain.conversation import Conversation, _looks_like_device_action_claim
-
+from brain.conversation import Conversation
 
 # ---------------------------------------------------------------------------
 # Helpers: build realistic LiteLLM-style mock responses
@@ -174,13 +171,22 @@ class TestFullPipelineDoLight:
             content="Done — kitchen light is on at full brightness."
         )
 
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions") as mock_tool_defs, \
-             patch("tools.generic.ha_request", new_callable=AsyncMock) as mock_ha, \
-             patch("tools.generic.verify_generic", new_callable=AsyncMock) as mock_verify, \
-             patch("tools.generic.asyncio.sleep", new_callable=AsyncMock):
-
-            mock_tool_defs.return_value = [{"type": "function", "function": {"name": "do"}}]
+        with (
+            patch("brain.conversation.litellm") as mock_litellm,
+            patch(
+                "brain.conversation.get_openai_tool_definitions"
+            ) as mock_tool_defs,
+            patch(
+                "tools.generic.ha_request", new_callable=AsyncMock
+            ) as mock_ha,
+            patch(
+                "tools.generic.verify_generic", new_callable=AsyncMock
+            ) as mock_verify,
+            patch("tools.generic.asyncio.sleep", new_callable=AsyncMock),
+        ):
+            mock_tool_defs.return_value = [
+                {"type": "function", "function": {"name": "do"}}
+            ]
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[tool_response, final_response]
             )
@@ -189,7 +195,9 @@ class TestFullPipelineDoLight:
             # verify_generic reads back entity state
             mock_verify.return_value = "Kitchen Light: on"
 
-            result = await conv.handle("turn on the kitchen light", session_id="s1")
+            result = await conv.handle(
+                "turn on the kitchen light", session_id="s1"
+            )
 
         # Assert the final response text
         assert "kitchen light" in result.lower()
@@ -199,7 +207,10 @@ class TestFullPipelineDoLight:
         mock_ha.assert_awaited_once_with(
             "POST",
             "/services/light/turn_on",
-            json_data={"entity_id": "light.kitchen", "brightness_pct": 100},
+            json_data={
+                "entity_id": "light.kitchen",
+                "brightness_pct": 100,
+            },
         )
 
         # Assert verify was called to read back state
@@ -215,19 +226,29 @@ class TestFullPipelineDoLight:
             call_id="call_do_2",
         )
         tool_resp = _make_llm_response(content=None, tool_calls=[tc])
-        final_resp = _make_llm_response(content="Morning routine activated.")
+        final_resp = _make_llm_response(
+            content="Morning routine activated."
+        )
 
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions", return_value=[{"type": "function"}]), \
-             patch("tools.generic.ha_request", new_callable=AsyncMock) as mock_ha, \
-             patch("tools.generic.asyncio.sleep", new_callable=AsyncMock):
-
+        with (
+            patch("brain.conversation.litellm") as mock_litellm,
+            patch(
+                "brain.conversation.get_openai_tool_definitions",
+                return_value=[{"type": "function"}],
+            ),
+            patch(
+                "tools.generic.ha_request", new_callable=AsyncMock
+            ) as mock_ha,
+            patch("tools.generic.asyncio.sleep", new_callable=AsyncMock),
+        ):
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[tool_resp, final_resp]
             )
             mock_ha.return_value = []
 
-            result = await conv.handle("run the good morning script", session_id="s2")
+            result = await conv.handle(
+                "run the good morning script", session_id="s2"
+            )
 
         assert result == "Morning routine activated."
         mock_ha.assert_awaited_once_with(
@@ -259,10 +280,16 @@ class TestFullPipelineQueryEntity:
             content="The living room is currently 72 degrees."
         )
 
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions", return_value=[{"type": "function"}]), \
-             patch("tools.generic.read_state", new_callable=AsyncMock) as mock_read:
-
+        with (
+            patch("brain.conversation.litellm") as mock_litellm,
+            patch(
+                "brain.conversation.get_openai_tool_definitions",
+                return_value=[{"type": "function"}],
+            ),
+            patch(
+                "tools.generic.read_state", new_callable=AsyncMock
+            ) as mock_read,
+        ):
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[tool_resp, final_resp]
             )
@@ -271,15 +298,19 @@ class TestFullPipelineQueryEntity:
                 "state": "72",
                 "attributes": {
                     "friendly_name": "Living Room Temperature",
-                    "unit_of_measurement": "°F",
+                    "unit_of_measurement": "\u00b0F",
                     "device_class": "temperature",
                 },
             }
 
-            result = await conv.handle("what's the temperature?", session_id="s3")
+            result = await conv.handle(
+                "what's the temperature?", session_id="s3"
+            )
 
         assert "72" in result
-        mock_read.assert_awaited_once_with("sensor.living_room_temperature")
+        mock_read.assert_awaited_once_with(
+            "sensor.living_room_temperature"
+        )
 
     @pytest.mark.asyncio
     async def test_query_template(self, conv):
@@ -293,16 +324,24 @@ class TestFullPipelineQueryEntity:
         tool_resp = _make_llm_response(content=None, tool_calls=[tc])
         final_resp = _make_llm_response(content="It's 55 degrees outside.")
 
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions", return_value=[{"type": "function"}]), \
-             patch("tools.generic.ha_request", new_callable=AsyncMock) as mock_ha:
-
+        with (
+            patch("brain.conversation.litellm") as mock_litellm,
+            patch(
+                "brain.conversation.get_openai_tool_definitions",
+                return_value=[{"type": "function"}],
+            ),
+            patch(
+                "tools.generic.ha_request", new_callable=AsyncMock
+            ) as mock_ha,
+        ):
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[tool_resp, final_resp]
             )
             mock_ha.return_value = "55"
 
-            result = await conv.handle("what's the outdoor temperature?", session_id="s4")
+            result = await conv.handle(
+                "what's the outdoor temperature?", session_id="s4"
+            )
 
         assert "55" in result
         # Template query uses ha_request POST /template
@@ -327,7 +366,7 @@ class TestFullPipelineDiscoverEntities:
 
         tc = _make_tool_call(
             "discover",
-            {"what": "entities", "filter": "light"},
+            {"what": "entities", "filter_str": "light"},
             call_id="call_discover_1",
         )
         tool_resp = _make_llm_response(content=None, tool_calls=[tc])
@@ -335,10 +374,16 @@ class TestFullPipelineDiscoverEntities:
             content="You have 3 lights: kitchen, living room, and bedroom."
         )
 
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions", return_value=[{"type": "function"}]), \
-             patch("tools.generic.ha_request", new_callable=AsyncMock) as mock_ha:
-
+        with (
+            patch("brain.conversation.litellm") as mock_litellm,
+            patch(
+                "brain.conversation.get_openai_tool_definitions",
+                return_value=[{"type": "function"}],
+            ),
+            patch(
+                "tools.generic.ha_request", new_callable=AsyncMock
+            ) as mock_ha,
+        ):
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[tool_resp, final_resp]
             )
@@ -361,7 +406,9 @@ class TestFullPipelineDiscoverEntities:
                 },
             ]
 
-            result = await conv.handle("what lights do I have?", session_id="s5")
+            result = await conv.handle(
+                "what lights do I have?", session_id="s5"
+            )
 
         assert "3 lights" in result.lower() or "kitchen" in result.lower()
         mock_ha.assert_awaited_once_with("GET", "/states")
@@ -372,7 +419,7 @@ class TestFullPipelineDiscoverEntities:
 
         tc = _make_tool_call(
             "discover",
-            {"what": "services", "filter": "light"},
+            {"what": "services", "filter_str": "light"},
             call_id="call_disc_svc",
         )
         tool_resp = _make_llm_response(content=None, tool_calls=[tc])
@@ -380,10 +427,16 @@ class TestFullPipelineDiscoverEntities:
             content="Light services include turn_on, turn_off, and toggle."
         )
 
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions", return_value=[{"type": "function"}]), \
-             patch("tools.generic.ha_request", new_callable=AsyncMock) as mock_ha:
-
+        with (
+            patch("brain.conversation.litellm") as mock_litellm,
+            patch(
+                "brain.conversation.get_openai_tool_definitions",
+                return_value=[{"type": "function"}],
+            ),
+            patch(
+                "tools.generic.ha_request", new_callable=AsyncMock
+            ) as mock_ha,
+        ):
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[tool_resp, final_resp]
             )
@@ -397,11 +450,15 @@ class TestFullPipelineDiscoverEntities:
                                 "entity_id": {
                                     "description": "Light entity",
                                     "required": True,
-                                    "selector": {"entity": {"domain": "light"}},
+                                    "selector": {
+                                        "entity": {"domain": "light"}
+                                    },
                                 },
                                 "brightness_pct": {
                                     "description": "Brightness percentage",
-                                    "selector": {"number": {"min": 0, "max": 100}},
+                                    "selector": {
+                                        "number": {"min": 0, "max": 100}
+                                    },
                                 },
                             },
                         },
@@ -411,7 +468,9 @@ class TestFullPipelineDiscoverEntities:
                                 "entity_id": {
                                     "description": "Light entity",
                                     "required": True,
-                                    "selector": {"entity": {"domain": "light"}},
+                                    "selector": {
+                                        "entity": {"domain": "light"}
+                                    },
                                 },
                             },
                         },
@@ -419,7 +478,9 @@ class TestFullPipelineDiscoverEntities:
                 },
             ]
 
-            result = await conv.handle("what light services are available?", session_id="s6")
+            result = await conv.handle(
+                "what light services are available?", session_id="s6"
+            )
 
         assert "turn_on" in result.lower() or "turn_off" in result.lower()
 
@@ -433,18 +494,28 @@ class TestFullPipelineWithSchemaInContext:
     """Verify that service schemas appear in the system prompt when available."""
 
     @pytest.mark.asyncio
-    async def test_schemas_in_system_prompt(self, conv_with_schema_context):
+    async def test_schemas_in_system_prompt(
+        self, conv_with_schema_context
+    ):
         """Service schemas from context builder appear in the LLM's system prompt."""
         conv = conv_with_schema_context
 
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions", return_value=[]):
-
+        with (
+            patch("brain.conversation.litellm") as mock_litellm,
+            patch(
+                "brain.conversation.get_openai_tool_definitions",
+                return_value=[],
+            ),
+        ):
             mock_litellm.acompletion = AsyncMock(
-                return_value=_make_llm_response("Here's what I can do with lights.")
+                return_value=_make_llm_response(
+                    "Here's what I can do with lights."
+                )
             )
 
-            await conv.handle("what can you do with lights?", session_id="s7")
+            await conv.handle(
+                "what can you do with lights?", session_id="s7"
+            )
 
         # Check the system prompt passed to litellm
         call_args = mock_litellm.acompletion.call_args
@@ -458,13 +529,19 @@ class TestFullPipelineWithSchemaInContext:
         assert "climate.set_temperature" in system_content
 
     @pytest.mark.asyncio
-    async def test_schema_block_includes_domain_info(self, conv_with_schema_context):
+    async def test_schema_block_includes_domain_info(
+        self, conv_with_schema_context
+    ):
         """Schema block includes both light and climate domain schemas."""
         conv = conv_with_schema_context
 
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions", return_value=[]):
-
+        with (
+            patch("brain.conversation.litellm") as mock_litellm,
+            patch(
+                "brain.conversation.get_openai_tool_definitions",
+                return_value=[],
+            ),
+        ):
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response("Got it.")
             )
@@ -482,99 +559,7 @@ class TestFullPipelineWithSchemaInContext:
 
 
 # ===================================================================
-# Test 5: Deprecated tool calls delegate to generic tools
-# ===================================================================
-
-
-class TestDeprecatedToolCallsGeneric:
-    """Legacy tools (e.g., control_light) still work through the registry."""
-
-    @pytest.mark.asyncio
-    async def test_control_light_still_registered(self):
-        """control_light is still in the TOOL_REGISTRY and callable."""
-        from tools.base import TOOL_REGISTRY
-
-        # Ensure tools are discovered
-        from tools import discover_tools
-        discover_tools()
-
-        assert "control_light" in TOOL_REGISTRY
-        assert "do" in TOOL_REGISTRY
-
-    @pytest.mark.asyncio
-    async def test_control_light_calls_ha_service(self, conv):
-        """When LLM calls control_light, it delegates to do() which calls ha_request."""
-
-        tc = _make_tool_call(
-            "control_light",
-            {"entity_id": "light.kitchen", "action": "on", "brightness_pct": 75},
-            call_id="call_cl_1",
-        )
-        tool_resp = _make_llm_response(content=None, tool_calls=[tc])
-        final_resp = _make_llm_response(content="Kitchen light set to 75%.")
-
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions", return_value=[{"type": "function"}]), \
-             patch("tools.generic.ha_request", new_callable=AsyncMock) as mock_ha, \
-             patch("tools.generic.verify_generic", new_callable=AsyncMock) as mock_verify, \
-             patch("tools.generic.asyncio.sleep", new_callable=AsyncMock):
-
-            mock_litellm.acompletion = AsyncMock(
-                side_effect=[tool_resp, final_resp]
-            )
-            mock_ha.return_value = []
-            mock_verify.return_value = "Kitchen Light: on, brightness 75%"
-
-            result = await conv.handle("set kitchen light to 75%", session_id="s9")
-
-        assert "75%" in result
-        mock_ha.assert_awaited_once()
-        # Verify ha_request was called with the correct service path
-        call_args = mock_ha.call_args
-        assert "light" in call_args[0][1]
-        assert "turn_on" in call_args[0][1]
-
-    @pytest.mark.asyncio
-    async def test_do_and_control_light_both_work(self, conv):
-        """Both do() and control_light() produce valid results for the same operation."""
-        from tools.base import TOOL_REGISTRY, execute_tool
-        from tools import discover_tools
-        discover_tools()
-
-        # Test do() path
-        with patch("tools.generic.ha_request", new_callable=AsyncMock) as mock_ha, \
-             patch("tools.generic.verify_generic", new_callable=AsyncMock) as mock_verify, \
-             patch("tools.generic.asyncio.sleep", new_callable=AsyncMock):
-            mock_ha.return_value = []
-            mock_verify.return_value = "Kitchen Light: on"
-
-            do_result = await execute_tool("do", {
-                "domain": "light",
-                "service": "turn_on",
-                "targets": {"entity_id": "light.kitchen"},
-            })
-
-        assert "Done" in do_result
-        assert "Kitchen Light" in do_result
-
-        # Test control_light() path — delegates to do() internally
-        with patch("tools.generic.ha_request", new_callable=AsyncMock) as mock_ha2, \
-             patch("tools.generic.verify_generic", new_callable=AsyncMock) as mock_verify2, \
-             patch("tools.generic.asyncio.sleep", new_callable=AsyncMock):
-            mock_ha2.return_value = []
-            mock_verify2.return_value = "Kitchen Light: on"
-
-            cl_result = await execute_tool("control_light", {
-                "entity_id": "light.kitchen",
-                "action": "on",
-            })
-
-        assert "Done" in cl_result
-        assert "Kitchen Light" in cl_result
-
-
-# ===================================================================
-# Test 6: Multi-tool loop (discover -> do)
+# Test 5: Multi-tool loop (discover -> do)
 # ===================================================================
 
 
@@ -588,7 +573,7 @@ class TestMultiToolLoop:
         # Round 1: LLM calls discover()
         tc_discover = _make_tool_call(
             "discover",
-            {"what": "entities", "filter": "light"},
+            {"what": "entities", "filter_str": "light"},
             call_id="call_disc",
         )
         resp_1 = _make_llm_response(content=None, tool_calls=[tc_discover])
@@ -610,12 +595,20 @@ class TestMultiToolLoop:
             content="I found your kitchen light and turned it on."
         )
 
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions", return_value=[{"type": "function"}]), \
-             patch("tools.generic.ha_request", new_callable=AsyncMock) as mock_ha, \
-             patch("tools.generic.verify_generic", new_callable=AsyncMock) as mock_verify, \
-             patch("tools.generic.asyncio.sleep", new_callable=AsyncMock):
-
+        with (
+            patch("brain.conversation.litellm") as mock_litellm,
+            patch(
+                "brain.conversation.get_openai_tool_definitions",
+                return_value=[{"type": "function"}],
+            ),
+            patch(
+                "tools.generic.ha_request", new_callable=AsyncMock
+            ) as mock_ha,
+            patch(
+                "tools.generic.verify_generic", new_callable=AsyncMock
+            ) as mock_verify,
+            patch("tools.generic.asyncio.sleep", new_callable=AsyncMock),
+        ):
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[resp_1, resp_2, resp_3]
             )
@@ -662,7 +655,7 @@ class TestMultiToolLoop:
 
         tc_discover = _make_tool_call(
             "discover",
-            {"what": "entities", "filter": "light"},
+            {"what": "entities", "filter_str": "light"},
             call_id="call_disc_2",
         )
         tc_do = _make_tool_call(
@@ -681,12 +674,20 @@ class TestMultiToolLoop:
             content="Kitchen light is now off. You have 2 lights total."
         )
 
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions", return_value=[{"type": "function"}]), \
-             patch("tools.generic.ha_request", new_callable=AsyncMock) as mock_ha, \
-             patch("tools.generic.verify_generic", new_callable=AsyncMock) as mock_verify, \
-             patch("tools.generic.asyncio.sleep", new_callable=AsyncMock):
-
+        with (
+            patch("brain.conversation.litellm") as mock_litellm,
+            patch(
+                "brain.conversation.get_openai_tool_definitions",
+                return_value=[{"type": "function"}],
+            ),
+            patch(
+                "tools.generic.ha_request", new_callable=AsyncMock
+            ) as mock_ha,
+            patch(
+                "tools.generic.verify_generic", new_callable=AsyncMock
+            ) as mock_verify,
+            patch("tools.generic.asyncio.sleep", new_callable=AsyncMock),
+        ):
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[resp_1, resp_2]
             )
@@ -719,7 +720,7 @@ class TestMultiToolLoop:
 
 
 # ===================================================================
-# Test 7: Confabulation guard works with generic tools
+# Test 6: Confabulation guard works with generic tools
 # ===================================================================
 
 
@@ -747,16 +748,22 @@ class TestConfabulationGuardWithGenericTools:
         )
         tool_resp = _make_llm_response(content=None, tool_calls=[tc])
         # Final response after tool
-        final_resp = _make_llm_response(
-            "Kitchen light is now on."
-        )
+        final_resp = _make_llm_response("Kitchen light is now on.")
 
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions", return_value=[{"type": "function"}]), \
-             patch("tools.generic.ha_request", new_callable=AsyncMock) as mock_ha, \
-             patch("tools.generic.verify_generic", new_callable=AsyncMock) as mock_verify, \
-             patch("tools.generic.asyncio.sleep", new_callable=AsyncMock):
-
+        with (
+            patch("brain.conversation.litellm") as mock_litellm,
+            patch(
+                "brain.conversation.get_openai_tool_definitions",
+                return_value=[{"type": "function"}],
+            ),
+            patch(
+                "tools.generic.ha_request", new_callable=AsyncMock
+            ) as mock_ha,
+            patch(
+                "tools.generic.verify_generic", new_callable=AsyncMock
+            ) as mock_verify,
+            patch("tools.generic.asyncio.sleep", new_callable=AsyncMock),
+        ):
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[confab_resp, tool_resp, final_resp]
             )
@@ -803,7 +810,7 @@ class TestConfabulationGuardWithGenericTools:
 
 
 # ===================================================================
-# Test 8: do() protected domain requires confirmation
+# Test 7: do() protected domain requires confirmation
 # ===================================================================
 
 
@@ -829,14 +836,20 @@ class TestProtectedDomains:
             content="I need to confirm before locking the front door. Shall I proceed?"
         )
 
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions", return_value=[{"type": "function"}]):
-
+        with (
+            patch("brain.conversation.litellm") as mock_litellm,
+            patch(
+                "brain.conversation.get_openai_tool_definitions",
+                return_value=[{"type": "function"}],
+            ),
+        ):
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[tool_resp, final_resp]
             )
 
-            result = await conv.handle("lock the front door", session_id="s12")
+            result = await conv.handle(
+                "lock the front door", session_id="s12"
+            )
 
         assert "confirm" in result.lower()
 
@@ -868,12 +881,20 @@ class TestProtectedDomains:
         tool_resp = _make_llm_response(content=None, tool_calls=[tc])
         final_resp = _make_llm_response(content="Front door is locked.")
 
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions", return_value=[{"type": "function"}]), \
-             patch("tools.generic.ha_request", new_callable=AsyncMock) as mock_ha, \
-             patch("tools.generic.verify_generic", new_callable=AsyncMock) as mock_verify, \
-             patch("tools.generic.asyncio.sleep", new_callable=AsyncMock):
-
+        with (
+            patch("brain.conversation.litellm") as mock_litellm,
+            patch(
+                "brain.conversation.get_openai_tool_definitions",
+                return_value=[{"type": "function"}],
+            ),
+            patch(
+                "tools.generic.ha_request", new_callable=AsyncMock
+            ) as mock_ha,
+            patch(
+                "tools.generic.verify_generic", new_callable=AsyncMock
+            ) as mock_verify,
+            patch("tools.generic.asyncio.sleep", new_callable=AsyncMock),
+        ):
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[tool_resp, final_resp]
             )
@@ -891,7 +912,7 @@ class TestProtectedDomains:
 
 
 # ===================================================================
-# Test 9: Error handling in tool execution
+# Test 8: Error handling in tool execution
 # ===================================================================
 
 
@@ -917,17 +938,25 @@ class TestToolErrorHandling:
             content="I couldn't find that light. Check the entity ID."
         )
 
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions", return_value=[{"type": "function"}]), \
-             patch("tools.generic.ha_request", new_callable=AsyncMock) as mock_ha, \
-             patch("tools.generic.asyncio.sleep", new_callable=AsyncMock):
-
+        with (
+            patch("brain.conversation.litellm") as mock_litellm,
+            patch(
+                "brain.conversation.get_openai_tool_definitions",
+                return_value=[{"type": "function"}],
+            ),
+            patch(
+                "tools.generic.ha_request", new_callable=AsyncMock
+            ) as mock_ha,
+            patch("tools.generic.asyncio.sleep", new_callable=AsyncMock),
+        ):
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[tool_resp, final_resp]
             )
             mock_ha.side_effect = Exception("Entity not found")
 
-            result = await conv.handle("turn on the ghost light", session_id="s14")
+            result = await conv.handle(
+                "turn on the ghost light", session_id="s14"
+            )
 
         assert "couldn't" in result.lower() or "error" in result.lower()
 
@@ -945,107 +974,27 @@ class TestToolErrorHandling:
             content="I don't have that capability."
         )
 
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions", return_value=[{"type": "function"}]):
-
+        with (
+            patch("brain.conversation.litellm") as mock_litellm,
+            patch(
+                "brain.conversation.get_openai_tool_definitions",
+                return_value=[{"type": "function"}],
+            ),
+        ):
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[tool_resp, final_resp]
             )
 
-            result = await conv.handle("use the flux capacitor", session_id="s15")
+            result = await conv.handle(
+                "use the flux capacitor", session_id="s15"
+            )
 
         # The execute_tool function returns "Unknown tool: ..." which the LLM sees
         assert result == "I don't have that capability."
 
 
 # ===================================================================
-# Test 10: Action trace tracks generic tool calls
-# ===================================================================
-
-
-class TestActionTraceWithGenericTools:
-    """Action trace records generic tool names (do, query, discover)."""
-
-    @pytest.mark.asyncio
-    async def test_action_trace_records_do(self, conv):
-        """do() tool call appears in the action trace."""
-
-        tc = _make_tool_call(
-            "do",
-            {
-                "domain": "light",
-                "service": "turn_on",
-                "targets": {"entity_id": "light.kitchen"},
-            },
-            call_id="call_trace_1",
-        )
-        tool_resp = _make_llm_response(content=None, tool_calls=[tc])
-        final_resp = _make_llm_response(content="Light is on.")
-
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions", return_value=[{"type": "function"}]), \
-             patch("brain.conversation.execute_tool", new_callable=AsyncMock) as mock_exec:
-
-            mock_litellm.acompletion = AsyncMock(
-                side_effect=[tool_resp, final_resp]
-            )
-            mock_exec.return_value = "Done. Kitchen Light: on"
-
-            await conv.handle("turn on kitchen light", session_id="trace1")
-            await asyncio.sleep(0.05)
-
-        assert "do" in conv._action_traces.get("trace1", "")
-
-    @pytest.mark.asyncio
-    async def test_action_trace_in_second_call(self, conv):
-        """Action trace from first call appears in system prompt of second call."""
-
-        # First call: uses do()
-        tc = _make_tool_call(
-            "do",
-            {
-                "domain": "light",
-                "service": "turn_on",
-                "targets": {"entity_id": "light.kitchen"},
-            },
-            call_id="call_trace_2",
-        )
-        tool_resp = _make_llm_response(content=None, tool_calls=[tc])
-        text_resp = _make_llm_response(content="Light on.")
-
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions", return_value=[{"type": "function"}]), \
-             patch("brain.conversation.execute_tool", new_callable=AsyncMock) as mock_exec:
-
-            mock_litellm.acompletion = AsyncMock(
-                side_effect=[tool_resp, text_resp]
-            )
-            mock_exec.return_value = "Done. Kitchen Light: on"
-
-            await conv.handle("turn on the kitchen light", session_id="trace2")
-            await asyncio.sleep(0.05)
-
-        # Verify trace was stored
-        assert "do" in conv._action_traces["trace2"]
-
-        # Second call: check system prompt includes trace
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions", return_value=[]):
-
-            normal_resp = _make_llm_response("I used the do() tool to turn it on.")
-            mock_litellm.acompletion = AsyncMock(return_value=normal_resp)
-
-            await conv.handle("why did you do that?", session_id="trace2")
-
-        call_args = mock_litellm.acompletion.call_args
-        messages_sent = call_args.kwargs["messages"]
-        system_content = messages_sent[0]["content"]
-        assert "LAST ACTION TRACE" in system_content
-        assert "do" in system_content
-
-
-# ===================================================================
-# Test 11: history() tool pipeline
+# Test 9: history() tool pipeline
 # ===================================================================
 
 
@@ -1066,15 +1015,19 @@ class TestHistoryToolPipeline:
             content="The kitchen light was turned on at 8am and off at 10pm."
         )
 
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions", return_value=[{"type": "function"}]), \
-             patch("tools.generic.ha_request", new_callable=AsyncMock) as mock_ha:
-
+        with (
+            patch("brain.conversation.litellm") as mock_litellm,
+            patch(
+                "brain.conversation.get_openai_tool_definitions",
+                return_value=[{"type": "function"}],
+            ),
+            patch(
+                "tools.generic.ha_request", new_callable=AsyncMock
+            ) as mock_ha,
+        ):
             # The user query "when was the kitchen light on today?"
-            # falsely triggers the action-request regex ("light on").
-            # After history() runs (a non-action tool), the confab guard
-            # may nudge up to _MAX_CONFAB_NUDGES times. Provide enough
-            # side_effect entries to avoid StopAsyncIteration (BUG-132).
+            # may trigger tool_choice="required" due to "light on".
+            # Provide enough side_effect entries to avoid StopAsyncIteration.
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[tool_resp, final_resp] + [final_resp] * 6
             )
@@ -1103,7 +1056,7 @@ class TestHistoryToolPipeline:
 
 
 # ===================================================================
-# Test 12: Context builder is called with the user message
+# Test 10: Context builder is called with the user message
 # ===================================================================
 
 
@@ -1114,16 +1067,21 @@ class TestContextBuilderIntegration:
     async def test_context_builder_receives_user_message(self, conv):
         """context_builder.build() is called with the user message."""
 
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions", return_value=[]):
-
+        with (
+            patch("brain.conversation.litellm") as mock_litellm,
+            patch(
+                "brain.conversation.get_openai_tool_definitions",
+                return_value=[],
+            ),
+        ):
             mock_litellm.acompletion = AsyncMock(
                 return_value=_make_llm_response("Sure thing.")
             )
             await conv.handle("turn on the porch light", session_id="s17")
 
         conv.context_builder.build.assert_awaited_once_with(
-            "turn on the porch light", session_id="s17"
+            "turn on the porch light", session_id="s17",
+            voice_mode=False,
         )
 
     @pytest.mark.asyncio
@@ -1142,16 +1100,24 @@ class TestContextBuilderIntegration:
         tool_resp = _make_llm_response(content=None, tool_calls=[tc])
         final_resp = _make_llm_response(content="Porch light is on.")
 
-        with patch("brain.conversation.litellm") as mock_litellm, \
-             patch("brain.conversation.get_openai_tool_definitions", return_value=[{"type": "function"}]), \
-             patch("brain.conversation.execute_tool", new_callable=AsyncMock) as mock_exec:
-
+        with (
+            patch("brain.conversation.litellm") as mock_litellm,
+            patch(
+                "brain.conversation.get_openai_tool_definitions",
+                return_value=[{"type": "function"}],
+            ),
+            patch(
+                "brain.conversation.execute_tool", new_callable=AsyncMock
+            ) as mock_exec,
+        ):
             mock_litellm.acompletion = AsyncMock(
                 side_effect=[tool_resp, final_resp]
             )
             mock_exec.return_value = "Done."
 
-            result = await conv.handle("turn on the porch light", session_id="s18")
+            result = await conv.handle(
+                "turn on the porch light", session_id="s18"
+            )
 
         # User turn saved
         calls = conv.conversation_store.save_turn.call_args_list

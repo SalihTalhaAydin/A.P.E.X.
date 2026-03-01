@@ -1,13 +1,13 @@
 """
 Tests for CooldownTracker — per-key cooldown with periodic cleanup (Bug 13 / P3-GAP-4).
 """
+
 from __future__ import annotations
 
 import time
 from unittest.mock import patch
 
 import pytest
-
 from brain.cooldown import CooldownTracker
 
 
@@ -82,11 +82,13 @@ class TestCheckAndSet:
 
     def test_after_cooldown_returns_true_again(self):
         """After cooldown elapses, check_and_set returns True again."""
-        with patch("time.time", side_effect=[100.0, 100.0, 100.0, 101.5, 101.5]):
+        with patch(
+            "time.time", side_effect=[100.0, 100.0, 100.0, 101.5, 101.5]
+        ):
             t = CooldownTracker(cooldown_seconds=1)
-            assert t.check_and_set("x") is True   # sets at t=100
+            assert t.check_and_set("x") is True  # sets at t=100
             assert t.check_and_set("x") is False  # still at t=100
-            assert t.check_and_set("x") is True   # 1.5s later
+            assert t.check_and_set("x") is True  # 1.5s later
 
 
 class TestCleanup:
@@ -96,8 +98,12 @@ class TestCleanup:
         """set() cleans up entries older than 2x cooldown."""
         with patch("time.time", return_value=100.0):
             t = CooldownTracker(cooldown_seconds=10)
-            t._cooldowns["old"] = 74.0   # 26 seconds ago (100 - 74 = 26 > 20)
-            t._cooldowns["recent"] = 96.0  # 4 seconds ago (100 - 96 = 4 < 20)
+            t._cooldowns["old"] = (
+                74.0  # 26 seconds ago (100 - 74 = 26 > 20)
+            )
+            t._cooldowns["recent"] = (
+                96.0  # 4 seconds ago (100 - 96 = 4 < 20)
+            )
         with patch("time.time", return_value=100.0):
             t.set("new")  # Triggers cleanup; max_age = 20
         assert "old" not in t._cooldowns

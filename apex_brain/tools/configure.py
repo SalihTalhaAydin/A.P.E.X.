@@ -20,12 +20,14 @@ from tools.ws_helpers import ws_command
 logger = logging.getLogger(__name__)
 
 
-def _check_ws_result(result, fallback_msg: str = "Operation failed.") -> str | None:
+def _check_ws_result(
+    result, fallback_msg: str = "Operation failed."
+) -> str | None:
     """Check ws_command result; return error message if invalid, None if OK."""
     if result is None:
         return "Error: No response from Home Assistant."
     if not isinstance(result, dict):
-        return f"Error: Unexpected response type from Home Assistant."
+        return "Error: Unexpected response type from Home Assistant."
     if result.get("success") is False or "error" in result:
         err = result.get("error", {})
         if isinstance(err, dict):
@@ -273,7 +275,11 @@ async def _handle_list_stale(target: str, data: dict) -> str:
     except Exception as e:
         return f"Error: {e}"
     # result is a list of entity entries; ws_command can return None or non-list
-    entities = result if isinstance(result, list) else ([] if result is None else [])
+    entities = (
+        result
+        if isinstance(result, list)
+        else ([] if result is None else [])
+    )
 
     # Build set of non-disabled entity IDs
     active_ids: set[str] = set()

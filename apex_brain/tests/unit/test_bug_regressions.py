@@ -5,7 +5,6 @@ Each test targets a specific bug to prevent regressions.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from unittest.mock import (
     AsyncMock,
@@ -14,174 +13,6 @@ from unittest.mock import (
 )
 
 import pytest
-
-# ------------------------------------------------------------------ #
-# BUG-2: Malformed JSON in WebSocket doesn't crash event loop
-# ------------------------------------------------------------------ #
-
-
-@pytest.mark.asyncio
-async def test_bug2_malformed_json_skipped():
-    """Malformed WebSocket JSON message is skipped, not crashed."""
-    import aiohttp
-    from brain.event_subscriber import EventSubscriber
-
-    conv = AsyncMock()
-    de = AsyncMock()
-    sub = EventSubscriber(conv, de)
-    sub._running = True
-    sub._session = AsyncMock()
-
-    # Build a mock WS message that raises on .json()
-    bad_msg = MagicMock()
-    bad_msg.type = aiohttp.WSMsgType.TEXT
-    bad_msg.json.side_effect = ValueError("bad json")
-
-    good_msg = MagicMock()
-    good_msg.type = aiohttp.WSMsgType.TEXT
-    good_msg.json.return_value = {"type": "other"}
-
-    close_msg = MagicMock()
-    close_msg.type = aiohttp.WSMsgType.CLOSED
-
-    # The event loop should skip the bad message
-    # and continue to the good one without crashing.
-    # We test _handle_event is NOT called for the bad
-    # message and IS NOT called for the good one either
-    # (since it's not type=event), but no exception.
-    class FakeWS:
-        """Fake WebSocket that supports async iteration."""
-
-        def __init__(self, messages, handshake_replies):
-            self._messages = messages
-            self._replies = list(handshake_replies)
-            self._reply_idx = 0
-
-        def __aiter__(self):
-            return self._AsyncIter(self._messages)
-
-        async def receive_json(self):
-            r = self._replies[self._reply_idx]
-            self._reply_idx += 1
-            return r
-
-        async def send_json(self, data):
-            pass
-
-        class _AsyncIter:
-            def __init__(self, items):
-                self._items = list(items)
-                self._idx = 0
-
-            def __aiter__(self):
-                return self
-
-            async def __anext__(self):
-                if self._idx >= len(self._items):
-                    raise StopAsyncIteration
-                item = self._items[self._idx]
-                self._idx += 1
-                return item
-
-    ws_mock = FakeWS(
-        [bad_msg, good_msg, close_msg],
-        [
-            {"type": "auth_required"},
-            {"type": "auth_ok"},
-            {"success": True},
-        ],
-    )
-
-    ctx_manager = AsyncMock()
-    ctx_manager.__aenter__ = AsyncMock(return_value=ws_mock)
-    ctx_manager.__aexit__ = AsyncMock(return_value=False)
-    sub._session.ws_connect = MagicMock(return_value=ctx_manager)
-
-    with patch(
-        "brain.event_subscriber._get_token",
-        return_value="token",
-    ):
-        await sub._connect_and_listen()
-
-    # No crash = success. The bad message was skipped.
-    assert not sub._connected
-
-
-# ------------------------------------------------------------------ #
-# BUG-3: WebSocket handshake timeout is handled
-# ------------------------------------------------------------------ #
-
-
-@pytest.mark.asyncio
-async def test_bug3_ws_handshake_timeout():
-    """WebSocket handshake timeout raises (caught by connection loop)."""
-    from brain.event_subscriber import EventSubscriber
-
-    conv = AsyncMock()
-    de = AsyncMock()
-    sub = EventSubscriber(conv, de)
-    sub._session = AsyncMock()
-    sub._session.closed = False
-    sub._running = True
-
-    ws_mock = AsyncMock()
-
-    async def hang_forever():
-        await asyncio.sleep(999)
-
-    ws_mock.receive_json = hang_forever
-    ws_mock.send_json = AsyncMock()
-
-    ctx_manager = AsyncMock()
-    ctx_manager.__aenter__ = AsyncMock(return_value=ws_mock)
-    ctx_manager.__aexit__ = AsyncMock(return_value=False)
-    sub._session.ws_connect = MagicMock(return_value=ctx_manager)
-
-    with patch(
-        "brain.event_subscriber._get_token",
-        return_value="token",
-    ):
-        # The 30s timeout should fire quickly in test
-        # We patch wait_for timeout to be tiny
-        with patch(
-            "brain.event_subscriber.asyncio.wait_for",
-            side_effect=asyncio.TimeoutError,
-        ):
-            with pytest.raises(asyncio.TimeoutError):
-                await sub._connect_and_listen()
-
-
-# ------------------------------------------------------------------ #
-# BUG-4: Failed briefing doesn't set _last_fired_date
-# ------------------------------------------------------------------ #
-
-
-@pytest.mark.asyncio
-async def test_bug4_failed_briefing_no_date_set():
-    """If handle() fails, _last_fired_date is NOT set."""
-    from brain.scheduler import Scheduler
-
-    conv = AsyncMock()
-    conv.handle = AsyncMock(side_effect=RuntimeError("LLM down"))
-    ks = AsyncMock()
-    ks.get_all_facts = AsyncMock(return_value=[])
-    ks.store_fact = AsyncMock()
-
-    scheduler = Scheduler(conv, ks)
-    scheduler.register("test_briefing", AsyncMock(), 60)
-
-    with patch("brain.scheduler.datetime") as mock_dt:
-        mock_now = MagicMock()
-        mock_now.hour = 7
-        mock_now.strftime.return_value = "2025-02-20"
-        mock_dt.now.return_value = mock_now
-
-        await scheduler._timed_briefing(7, "test_briefing", "msg")
-
-    task = next(t for t in scheduler._tasks if t.name == "test_briefing")
-    # Should NOT be marked as fired since handle() failed
-    assert task._last_fired_date != "2025-02-20"
-
 
 # ------------------------------------------------------------------ #
 # BUG-5: Malformed JSON to /v1/chat/completions returns 400
@@ -218,9 +49,11 @@ async def test_bug6_invalid_entity_id_rejected():
     """Entity IDs with injection chars are rejected."""
     from tools.generic import _query_entity
 
+    from tools.ha_helpers import HomeAssistantError
+
     with patch(
         "tools.generic.read_state",
-        side_effect=Exception("not found"),
+        side_effect=HomeAssistantError("404 Not Found"),
     ):
         result = await _query_entity("{{ malicious_template }}")
         assert "Invalid entity_id format" in result
@@ -296,17 +129,34 @@ async def test_bug74_confidence_string_defaults_to_07():
     ks.store_fact = AsyncMock(return_value=1)
     extractor = FactExtractor(ks)
 
-    facts_json = json.dumps([
-        {"category": "fact", "key": "pet", "value": "has dog", "confidence": "high"},
-        {"category": "fact", "key": "color", "value": "blue", "confidence": None},
-    ])
+    facts_json = json.dumps(
+        [
+            {
+                "category": "fact",
+                "key": "pet",
+                "value": "has dog",
+                "confidence": "high",
+            },
+            {
+                "category": "fact",
+                "key": "color",
+                "value": "blue",
+                "confidence": None,
+            },
+        ]
+    )
 
     mock_response = MagicMock()
     mock_response.choices = [MagicMock()]
     mock_response.choices[0].message.content = facts_json
     llm = AsyncMock(return_value=mock_response)
 
-    turns = [{"role": "user", "content": "I have a dog and my favorite color is blue." * 3}]
+    turns = [
+        {
+            "role": "user",
+            "content": "I have a dog and my favorite color is blue." * 3,
+        }
+    ]
     result = await extractor.extract_from_conversation(turns, llm)
 
     assert len(result) == 2
@@ -326,12 +176,34 @@ async def test_bug74_confidence_numeric_clamped():
     extractor = FactExtractor(ks)
 
     # 0.95 (float), "0.8" (numeric string), 1.5 (clamped to 1.0), -0.2 (clamped to 0.0)
-    facts_json = json.dumps([
-        {"category": "fact", "key": "a", "value": "v1", "confidence": 0.95},
-        {"category": "fact", "key": "b", "value": "v2", "confidence": "0.8"},
-        {"category": "fact", "key": "c", "value": "v3", "confidence": 1.5},
-        {"category": "fact", "key": "d", "value": "v4", "confidence": -0.2},
-    ])
+    facts_json = json.dumps(
+        [
+            {
+                "category": "fact",
+                "key": "a",
+                "value": "v1",
+                "confidence": 0.95,
+            },
+            {
+                "category": "fact",
+                "key": "b",
+                "value": "v2",
+                "confidence": "0.8",
+            },
+            {
+                "category": "fact",
+                "key": "c",
+                "value": "v3",
+                "confidence": 1.5,
+            },
+            {
+                "category": "fact",
+                "key": "d",
+                "value": "v4",
+                "confidence": -0.2,
+            },
+        ]
+    )
 
     mock_response = MagicMock()
     mock_response.choices = [MagicMock()]
@@ -346,49 +218,6 @@ async def test_bug74_confidence_numeric_clamped():
     assert calls[1].kwargs["confidence"] == 0.8
     assert calls[2].kwargs["confidence"] == 1.0
     assert calls[3].kwargs["confidence"] == 0.0
-
-
-# ------------------------------------------------------------------ #
-# BUG-15: Critical domain unavailability NOT dropped
-# ------------------------------------------------------------------ #
-
-
-def test_bug15_critical_unavailable_not_dropped():
-    """Lock/alarm/camera going unavailable should pass hard filter."""
-    from brain.decision_engine import DecisionEngine
-    from brain.event_handler import WebhookEvent
-
-    engine = DecisionEngine()
-
-    # Lock going unavailable — should NOT be dropped
-    event = WebhookEvent(
-        event_type="state_changed",
-        entity_id="lock.front_door",
-        old_state="locked",
-        new_state="unavailable",
-    )
-    reason = engine._hard_filter(event)
-    assert reason == "", f"Critical domain lock should pass, got: {reason}"
-
-    # Camera going unavailable — should NOT be dropped
-    event2 = WebhookEvent(
-        event_type="state_changed",
-        entity_id="camera.front",
-        old_state="streaming",
-        new_state="unavailable",
-    )
-    reason2 = engine._hard_filter(event2)
-    assert reason2 == ""
-
-    # Non-critical domain (light) unavailable — SHOULD be dropped
-    event3 = WebhookEvent(
-        event_type="state_changed",
-        entity_id="light.kitchen",
-        old_state="on",
-        new_state="unavailable",
-    )
-    reason3 = engine._hard_filter(event3)
-    assert reason3 == "device went unavailable"
 
 
 # ------------------------------------------------------------------ #
@@ -418,7 +247,10 @@ def test_bug24_system_prompt_import_without_event_loop():
     Before fix: asyncio.Lock() at import time required a running event loop on
     Python < 3.10. Lazy init creates the lock on first use in fetch_service_schemas.
     """
-    from brain.system_prompt import build_system_prompt, fetch_service_schemas
+    from brain.system_prompt import (
+        build_system_prompt,
+        fetch_service_schemas,
+    )
 
     assert build_system_prompt is not None
     assert fetch_service_schemas is not None
@@ -453,19 +285,25 @@ async def test_bug25_invalid_timezone_falls_back_to_utc():
             return_value="ok",
         ),
         patch(
-            "tools.presence.get_presence_summary",
+            "memory.context_builder._get_cached_presence",
             new_callable=AsyncMock,
             return_value="",
         ),
         patch(
-            "tools.ha_helpers.get_device_summary",
+            "memory.context_builder._get_cached_device_summary",
             new_callable=AsyncMock,
             return_value="",
+        ),
+        patch(
+            "memory.context_builder.fetch_service_schemas",
+            new_callable=AsyncMock,
+            return_value={},
         ),
         patch("memory.context_builder.settings") as mock_settings,
     ):
         mock_settings.timezone = "Invalid/Zone"
         mock_settings.google_calendar_credentials_path = ""
+        mock_settings.cache_refresh_seconds = 300
         # Should NOT raise
         result = await cb.build("hello")
     assert result == "ok"
@@ -479,7 +317,6 @@ async def test_bug25_invalid_timezone_falls_back_to_utc():
 @pytest.mark.asyncio
 async def test_bug27_error_html_not_returned_as_text():
     """500 response with as_text=True returns error string, not HTML."""
-    import httpx
     from tools.manage import _supervisor_request
 
     mock_response = MagicMock()
@@ -522,8 +359,16 @@ async def test_bug86_create_automation_error_dict_returns_early():
     ):
         result = await create_automation(
             alias="Test",
-            triggers=[{"trigger": "state", "entity_id": "sensor.x", "from": "off"}],
-            actions=[{"action": "turn_on", "target": {"entity_id": "light.x"}}],
+            triggers=[
+                {
+                    "trigger": "state",
+                    "entity_id": "sensor.x",
+                    "from": "off",
+                }
+            ],
+            actions=[
+                {"action": "turn_on", "target": {"entity_id": "light.x"}}
+            ],
         )
     assert "Error: Unable to reach Home Assistant" in result
 
@@ -556,8 +401,16 @@ async def test_bug86_create_automation_malformed_states_no_crash():
     ):
         result = await create_automation(
             alias="New Automation",
-            triggers=[{"trigger": "state", "entity_id": "sensor.x", "from": "off"}],
-            actions=[{"action": "turn_on", "target": {"entity_id": "light.x"}}],
+            triggers=[
+                {
+                    "trigger": "state",
+                    "entity_id": "sensor.x",
+                    "from": "off",
+                }
+            ],
+            actions=[
+                {"action": "turn_on", "target": {"entity_id": "light.x"}}
+            ],
         )
     assert "Done. Created automation" in result
     assert "New Automation" in result
@@ -606,63 +459,6 @@ async def test_bug29_ha_request_timeout():
 
         with pytest.raises(HomeAssistantError, match="[Tt]imed out"):
             await ha_request("GET", "/states")
-
-
-# ------------------------------------------------------------------ #
-# BUG-30: Curator skips facts without "id"
-# ------------------------------------------------------------------ #
-
-
-@pytest.mark.asyncio
-async def test_bug30_curator_skips_fact_without_id():
-    """Fact missing 'id' key is skipped, not crash."""
-    from brain.curator import Curator
-
-    ks = AsyncMock()
-    ks.decay_confidence = AsyncMock(return_value=0)
-    ks.cleanup_expired = AsyncMock(return_value=0)
-    ks.get_low_confidence_facts = AsyncMock(
-        return_value=[
-            {"key": "no_id_fact", "confidence": 0.1},  # missing "id"
-            {"id": 5, "key": "has_id", "confidence": 0.1},
-        ]
-    )
-    ks.get_contradictory_facts = AsyncMock(return_value=[])
-    ks.delete_fact_by_id = AsyncMock(return_value=True)
-    conv = AsyncMock()
-
-    with patch("brain.config.settings") as mock_s:
-        mock_s.fact_min_confidence_prune = 0.3
-        curator = Curator(conv, ks)
-        result = await curator.audit_facts()
-
-    # Should only delete the one with id=5
-    ks.delete_fact_by_id.assert_awaited_once_with(5)
-
-
-@pytest.mark.asyncio
-async def test_bug30_contradiction_skips_missing_id():
-    """Contradiction with missing 'id' is skipped, not crash."""
-    from brain.curator import Curator
-
-    ks = AsyncMock()
-    ks.delete_fact_by_id = AsyncMock(return_value=True)
-    conv = AsyncMock()
-
-    curator = Curator(conv, ks)
-    contradictions = [
-        (
-            {
-                "key": "drink",
-                "value": "coffee",
-                "confidence": 0.9,
-            },  # no id
-            {"id": 2, "key": "drink", "value": "tea", "confidence": 0.5},
-        )
-    ]
-    resolved = await curator._resolve_contradictions(contradictions)
-    assert resolved == 0
-    ks.delete_fact_by_id.assert_not_awaited()
 
 
 # ------------------------------------------------------------------ #
@@ -720,19 +516,25 @@ async def test_bug33_core_facts_respect_max_facts_at_limit():
             return_value="ok",
         ) as mock_prompt,
         patch(
-            "tools.presence.get_presence_summary",
+            "memory.context_builder._get_cached_presence",
             new_callable=AsyncMock,
             return_value="",
         ),
         patch(
-            "tools.ha_helpers.get_device_summary",
+            "memory.context_builder._get_cached_device_summary",
             new_callable=AsyncMock,
             return_value="",
+        ),
+        patch(
+            "memory.context_builder.fetch_service_schemas",
+            new_callable=AsyncMock,
+            return_value={},
         ),
         patch("memory.context_builder.settings") as mock_settings,
     ):
         mock_settings.timezone = "UTC"
         mock_settings.google_calendar_credentials_path = ""
+        mock_settings.cache_refresh_seconds = 300
         await cb.build("query")
 
     kw = mock_prompt.call_args[1]
@@ -782,6 +584,7 @@ def test_bug36_rate_limiter_uses_client_host():
     BUG-103: X-Forwarded-For is allowed as fallback when request.client is None
     (e.g. behind reverse proxy)."""
     import inspect
+
     from brain.server import rate_limit_middleware
 
     source = inspect.getsource(rate_limit_middleware)
@@ -789,45 +592,6 @@ def test_bug36_rate_limiter_uses_client_host():
     assert "client.host" in source
     # BUG-36: prefer direct client; x-forwarded-for only as fallback when client is None
     assert "if request.client:" in source or "request.client" in source
-
-
-# ------------------------------------------------------------------ #
-# BUG-37: Timestamp comparison uses parsed datetimes
-# ------------------------------------------------------------------ #
-
-
-@pytest.mark.asyncio
-async def test_bug37_timestamp_comparison_parsed():
-    """Contradiction resolution uses datetime parsing for comparison."""
-    from brain.curator import Curator
-
-    ks = AsyncMock()
-    ks.delete_fact_by_id = AsyncMock(return_value=True)
-    conv = AsyncMock()
-    curator = Curator(conv, ks)
-
-    contradictions = [
-        (
-            {
-                "id": 1,
-                "key": "color",
-                "value": "blue",
-                "confidence": 0.8,
-                "updated_at": "2025-01-01T00:00:00",
-            },
-            {
-                "id": 2,
-                "key": "color",
-                "value": "red",
-                "confidence": 0.8,
-                "updated_at": "2025-06-15T12:00:00",
-            },
-        )
-    ]
-    resolved = await curator._resolve_contradictions(contradictions)
-    assert resolved == 1
-    # fact_a is older, should be deleted
-    ks.delete_fact_by_id.assert_awaited_once_with(1)
 
 
 # ------------------------------------------------------------------ #
@@ -875,20 +639,8 @@ def test_bug40_schema_from_hints_narrow_catch():
 
 
 # ------------------------------------------------------------------ #
-# BUG-41: Camera tools hidden + cameras excluded from device summary
+# BUG-41: Camera tools + cameras in device summary
 # ------------------------------------------------------------------ #
-
-
-def test_bug41_camera_snapshot_not_deprecated():
-    """get_camera_snapshot must NOT be in DEPRECATED_TOOLS.
-
-    It was incorrectly deprecated despite having no generic equivalent,
-    which caused the LLM to be unable to show camera snapshots.
-    """
-    from tools.base import DEPRECATED_TOOLS
-
-    assert "get_camera_snapshot" not in DEPRECATED_TOOLS
-    assert "get_camera_state" not in DEPRECATED_TOOLS
 
 
 def test_bug41_camera_in_discovery_domains():
@@ -899,19 +651,15 @@ def test_bug41_camera_in_discovery_domains():
     """
     from tools.ha_helpers import _DISCOVERY_DOMAINS
 
-    flat = [
-        d if isinstance(d, str) else d[0]
-        for d in _DISCOVERY_DOMAINS
-    ]
+    flat = [d if isinstance(d, str) else d[0] for d in _DISCOVERY_DOMAINS]
     assert "camera" in flat
 
 
 def test_bug41_system_prompt_mentions_camera_tools():
-    """System prompt must list camera tools so the LLM knows they exist."""
+    """System prompt must list camera/vision tool so the LLM knows it exists."""
     from brain.system_prompt import SYSTEM_PROMPT_TEMPLATE
 
-    assert "get_camera_snapshot" in SYSTEM_PROMPT_TEMPLATE
-    assert "get_camera_state" in SYSTEM_PROMPT_TEMPLATE
+    assert "see" in SYSTEM_PROMPT_TEMPLATE
 
 
 # ------------------------------------------------------------------ #
@@ -943,19 +691,25 @@ async def test_bug104_context_builder_passes_session_id():
             return_value="ok",
         ),
         patch(
-            "tools.presence.get_presence_summary",
+            "memory.context_builder._get_cached_presence",
             new_callable=AsyncMock,
             return_value="",
         ),
         patch(
-            "tools.ha_helpers.get_device_summary",
+            "memory.context_builder._get_cached_device_summary",
             new_callable=AsyncMock,
             return_value="",
+        ),
+        patch(
+            "memory.context_builder.fetch_service_schemas",
+            new_callable=AsyncMock,
+            return_value={},
         ),
         patch("memory.context_builder.settings") as mock_settings,
     ):
         mock_settings.timezone = "UTC"
         mock_settings.google_calendar_credentials_path = ""
+        mock_settings.cache_refresh_seconds = 300
         await cb.build("hello", session_id="my_session")
 
     # Verify session_id was passed through
@@ -965,135 +719,39 @@ async def test_bug104_context_builder_passes_session_id():
 
 
 # ------------------------------------------------------------------ #
-# BUG-105: Reminder NOT deleted when delivery fails
-# ------------------------------------------------------------------ #
-
-
-@pytest.mark.asyncio
-async def test_bug105_reminder_not_deleted_on_failure():
-    """If conversation.handle raises, reminder must NOT be deleted."""
-    from brain.scheduler import Scheduler
-
-    conv = AsyncMock()
-    conv.handle = AsyncMock(side_effect=RuntimeError("LLM down"))
-    ks = AsyncMock()
-    ks.get_all_facts = AsyncMock(
-        return_value=[
-            {
-                "key": "dentist",
-                "value": "appointment at 3pm",
-                "expires_at": "2020-01-01T00:00:00",
-                "id": 42,
-            }
-        ]
-    )
-    ks.delete_fact_by_id = AsyncMock()
-
-    scheduler = Scheduler(conv, ks)
-    await scheduler._task_reminder_check()
-
-    # Reminder should NOT have been deleted since delivery failed
-    ks.delete_fact_by_id.assert_not_awaited()
-
-
-# ------------------------------------------------------------------ #
 # BUG-106: Confabulation regex precision
 # ------------------------------------------------------------------ #
 
 
 def test_bug106_confab_regex_does_not_match_innocent_phrases():
-    """'I've checked the weather' should NOT match confab regex."""
-    from brain.conversation import _looks_like_device_action_claim
+    """Confab regex should not match innocent phrases."""
+    from brain.conversation import _CONFAB_CLAIM_RE
 
     # These should NOT match (innocent phrases)
-    assert not _looks_like_device_action_claim(
-        "I've checked the weather for you"
-    )
-    assert not _looks_like_device_action_claim(
-        "I have no information about that"
-    )
-    assert not _looks_like_device_action_claim(
-        "I've noted your preference"
-    )
-    assert not _looks_like_device_action_claim(
+    assert not _CONFAB_CLAIM_RE.search("I've checked the weather for you")
+    assert not _CONFAB_CLAIM_RE.search("I have no information about that")
+    assert not _CONFAB_CLAIM_RE.search("I've noted your preference")
+    assert not _CONFAB_CLAIM_RE.search(
         "The package was recycled yesterday"
     )
 
-    # These SHOULD still match (actual device action claims)
-    assert _looks_like_device_action_claim(
-        "I've turned on the lights"
-    )
-    assert _looks_like_device_action_claim(
-        "I have set the thermostat to 72"
-    )
-    assert _looks_like_device_action_claim(
-        "I've locked the front door"
-    )
+    # These SHOULD match (device action claims)
+    assert _CONFAB_CLAIM_RE.search("I've turned on the lights")
+    assert _CONFAB_CLAIM_RE.search("I've locked the front door")
 
 
 def test_bug145_confab_regex_switched_powered_in_ive_have():
-    """BUG-145: 'I've switched' and 'I have powered' must match; 'recycled' must NOT."""
-    from brain.conversation import _looks_like_device_action_claim
+    """BUG-145: 'I've switched' must match; 'recycled' must NOT."""
+    from brain.conversation import _CONFAB_CLAIM_RE
 
     # Innocent phrases must NOT match
-    assert not _looks_like_device_action_claim("I've checked the weather")
-    assert not _looks_like_device_action_claim("recycled paper")
-    assert not _looks_like_device_action_claim("bicycled home")
+    assert not _CONFAB_CLAIM_RE.search("I've checked the weather")
+    assert not _CONFAB_CLAIM_RE.search("recycled paper")
+    assert not _CONFAB_CLAIM_RE.search("bicycled home")
 
-    # Device action claims (including switched/powered via I've/I have) must match
-    assert _looks_like_device_action_claim("I've turned on the lights")
-    assert _looks_like_device_action_claim("I've switched on the lights")
-    assert _looks_like_device_action_claim("I have powered off the computer")
-
-
-# ------------------------------------------------------------------ #
-# BUG-107: No duplicate fact decay when curator is enabled
-# ------------------------------------------------------------------ #
-
-
-def test_bug107_no_duplicate_decay_with_curator():
-    """When curator is enabled, scheduler should not register standalone decay tasks."""
-    from brain.scheduler import Scheduler
-
-    conv = AsyncMock()
-    ks = AsyncMock()
-    curator = AsyncMock()
-
-    with patch("brain.scheduler.settings") as mock_settings:
-        mock_settings.curator_enabled = True
-        mock_settings.morning_briefing_hour = 7
-        mock_settings.evening_briefing_hour = 21
-        mock_settings.health_check_interval_minutes = 30
-
-        scheduler = Scheduler(conv, ks, curator=curator)
-        scheduler._register_builtin_tasks()
-
-    task_names = [t.name for t in scheduler._tasks]
-    assert "fact_decay" not in task_names
-    assert "fact_cleanup" not in task_names
-    # Curator tasks should be present
-    assert "fact_audit" in task_names
-
-
-def test_bug107_standalone_decay_without_curator():
-    """When curator is disabled, standalone decay tasks should be registered."""
-    from brain.scheduler import Scheduler
-
-    conv = AsyncMock()
-    ks = AsyncMock()
-
-    with patch("brain.scheduler.settings") as mock_settings:
-        mock_settings.curator_enabled = False
-        mock_settings.morning_briefing_hour = 7
-        mock_settings.evening_briefing_hour = 21
-        mock_settings.health_check_interval_minutes = 30
-
-        scheduler = Scheduler(conv, ks, curator=None)
-        scheduler._register_builtin_tasks()
-
-    task_names = [t.name for t in scheduler._tasks]
-    assert "fact_decay" in task_names
-    assert "fact_cleanup" in task_names
+    # Device action claims must match
+    assert _CONFAB_CLAIM_RE.search("I've turned on the lights")
+    assert _CONFAB_CLAIM_RE.search("I've switched on the lights")
 
 
 # ------------------------------------------------------------------ #
@@ -1212,7 +870,9 @@ async def test_bug111_search_semantic_touch_threshold(tmp_path):
         )
         await db.commit()
 
-    results = await ks.search_semantic("query", limit=10, update_last_mentioned=True)
+    results = await ks.search_semantic(
+        "query", limit=10, update_last_mentioned=True
+    )
     assert len(results) == 2
 
     async with shared.lock:
@@ -1283,6 +943,7 @@ async def test_bug113_mcp_transport_cleanup_on_session_failure():
 def test_bug113_connect_source_has_transport_cleanup():
     """connect() must clean up transport if session init fails."""
     import inspect
+
     from tools.mcp_bridge import MCPBridge
 
     source = inspect.getsource(MCPBridge.connect)

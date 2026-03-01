@@ -63,13 +63,18 @@ def _text_to_embedding_vector(text: str) -> list[float]:
     vec = [0.0] * dim
     words = [
         w.lower()
-        for w in text.replace(":", " ").replace(".", " ").split()
+        for w in text.replace(":", " ")
+        .replace(".", " ")
+        .replace("_", " ")
+        .split()
         if len(w) > 0 and w.isalnum()
     ]
     if not words:
         return [0.1, 0.2, 0.3, 0.4]
 
-    cluster_weight = 10.0  # Cluster words dominate so similar topics ≈ high sim
+    cluster_weight = (
+        10.0  # Cluster words dominate so similar topics ≈ high sim
+    )
     for w in words:
         if w in CLUSTERS:
             for i in range(dim):

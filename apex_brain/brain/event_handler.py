@@ -32,7 +32,9 @@ def _effective_event_type(event_type: str, entity_id: str) -> str:
     return event_type
 
 
-def _is_high_priority(event_type: str, hour: int, entity_id: str = "") -> bool:
+def _is_high_priority(
+    event_type: str, hour: int, entity_id: str = ""
+) -> bool:
     """Return True if this event warrants a voice announcement."""
     effective = _effective_event_type(event_type, entity_id)
     if effective in ("door", "alarm"):
@@ -44,7 +46,7 @@ def _is_high_priority(event_type: str, hour: int, entity_id: str = "") -> bool:
     return False
 
 
-def _build_announcement_message(event: "WebhookEvent") -> str:
+def _build_announcement_message(event: WebhookEvent) -> str:
     """Build a short, TTS-friendly message for voice announcement."""
     name = (
         event.attributes.get("friendly_name")
@@ -157,9 +159,8 @@ class EventHandler:
         # Unavailable bounces — device connectivity noise
         if new == "unavailable":
             return "device went unavailable"
-        # Recovery from unavailable: do NOT drop (users need to know when
-        # devices come back online; BUG-88)
-        # Removed: if old == "unavailable" and new: return "recovery..."
+        if old == "unavailable":
+            return "recovery from unavailable"
 
         return ""
 
@@ -234,8 +235,12 @@ class EventHandler:
                     )
 
         try:
-            session_id = f"apex_events:{event.entity_id}:{uuid.uuid4().hex[:12]}"
-            response = await self.conversation.handle(msg, session_id=session_id)
+            session_id = (
+                f"apex_events:{event.entity_id}:{uuid.uuid4().hex[:12]}"
+            )
+            response = await self.conversation.handle(
+                msg, session_id=session_id
+            )
             return WebhookResponse(
                 status="processed",
                 message=response,

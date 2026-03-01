@@ -1,7 +1,6 @@
 """Tests for automation & scene tools."""
 
 import pytest
-
 from tools import discover_tools
 from tools.base import TOOL_REGISTRY
 

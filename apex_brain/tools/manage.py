@@ -11,12 +11,12 @@ Implements tiered confirmation system:
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
 
 import httpx
+
 from tools.base import tool
 
 logger = logging.getLogger(__name__)
@@ -34,6 +34,7 @@ _supervisor_client = httpx.AsyncClient(
 async def close_supervisor_client() -> None:
     """Close the shared Supervisor API client on shutdown. Idempotent."""
     await _supervisor_client.aclose()
+
 
 # Supervisor base URL (only available inside HAOS add-on)
 _SUPERVISOR_URL = "http://supervisor"

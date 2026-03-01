@@ -9,7 +9,9 @@ the rest of the house.
 Requires: HA_TOKEN in .env (Profile -> Security -> Long-Lived Access Tokens)
 Usage: python scripts/basement_mode.py
 """
+
 import sys
+
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
@@ -32,7 +34,9 @@ if os.path.exists(_env_path):
                 v = v.strip().strip('"').strip("'")
                 os.environ.setdefault(k, v)
 
-HA_URL = (os.environ.get("HA_URL") or "http://homeassistant.local:8123").rstrip("/")
+HA_URL = (
+    os.environ.get("HA_URL") or "http://homeassistant.local:8123"
+).rstrip("/")
 HA_TOKEN = (os.environ.get("HA_TOKEN") or "").strip()
 API = f"{HA_URL}/api"
 HEADERS = {
@@ -77,8 +81,7 @@ async def template_eval(template: str) -> str:
     """HA template API returns plain text, not JSON."""
     async with httpx.AsyncClient(timeout=15.0) as client:
         r = await client.post(
-            f"{API}/template", headers=HEADERS,
-            json={"template": template}
+            f"{API}/template", headers=HEADERS, json={"template": template}
         )
         r.raise_for_status()
         return r.text or ""
@@ -90,7 +93,9 @@ async def main():
             "⚠️  No HA_TOKEN in .env — set a long-lived token from HA Profile → Security → Create Token.",
             file=sys.stderr,
         )
-        print("   Then add HA_TOKEN=... to your .env file.", file=sys.stderr)
+        print(
+            "   Then add HA_TOKEN=... to your .env file.", file=sys.stderr
+        )
         sys.exit(1)
 
     print("--- Apex Brain: Home Assistant Audit & Basement Mode ---\n")
@@ -129,7 +134,9 @@ async def main():
 
         if not basement_id:
             print("\n⚠️  No 'basement' area found. Known areas above.")
-            print("   Assign basement devices to an area named 'Basement' in HA Settings → Areas.")
+            print(
+                "   Assign basement devices to an area named 'Basement' in HA Settings → Areas."
+            )
             return
 
         print(f"\n✓ Basement area(s): {', '.join(basement_ids)}\n")
@@ -160,17 +167,29 @@ async def main():
             print("Basement entities:")
             for dom in sorted(by_domain.keys()):
                 items = by_domain[dom]
-                print(f"  {dom}: {len(items)} — {', '.join(items[:5])}{'…' if len(items) > 5 else ''}")
+                print(
+                    f"  {dom}: {len(items)} — {', '.join(items[:5])}{'…' if len(items) > 5 else ''}"
+                )
         else:
-            print("Basement entities: (will use area_id for service calls)")
+            print(
+                "Basement entities: (will use area_id for service calls)"
+            )
 
         # 5. Jarvis-style audit: automations, scenes
         states = await ha_get("/states")
         states_list = states if isinstance(states, list) else []
-        automation_list = [s for s in states_list if s.get("entity_id", "").startswith("automation.")]
-        scene_list = [s for s in states_list if s.get("entity_id", "").startswith("scene.")]
+        automation_list = [
+            s
+            for s in states_list
+            if s.get("entity_id", "").startswith("automation.")
+        ]
+        scene_list = [
+            s
+            for s in states_list
+            if s.get("entity_id", "").startswith("scene.")
+        ]
 
-        print(f"\n--- Smart Home Audit ---")
+        print("\n--- Smart Home Audit ---")
         print(f"  Automations: {len(automation_list)}")
         print(f"  Scenes: {len(scene_list)}")
 
@@ -211,24 +230,32 @@ async def main():
                     {"entity_id": eid},
                 )
                 await asyncio.sleep(0.3)
-                actions.append(f"Media player on")
+                actions.append("Media player on")
                 break  # One is enough for "play everything"
             except Exception:
                 pass
 
-        print(f"\n--- Basement activated (family sleeping upstairs) ---")
+        print("\n--- Basement activated (family sleeping upstairs) ---")
         for a in actions:
             print(f"  ✓ {a}")
         if not actions:
-            print("  (No controllable entities in basement — lights, switches, fans, media)")
+            print(
+                "  (No controllable entities in basement — lights, switches, fans, media)"
+            )
 
         print("\n✓ Done. Basement is ready. Rest of the house untouched.")
 
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 401:
-            print("✗ Auth failed — token invalid or expired.", file=sys.stderr)
+            print(
+                "✗ Auth failed — token invalid or expired.",
+                file=sys.stderr,
+            )
         else:
-            print(f"✗ HA API error {e.response.status_code}: {e.response.text[:200]}", file=sys.stderr)
+            print(
+                f"✗ HA API error {e.response.status_code}: {e.response.text[:200]}",
+                file=sys.stderr,
+            )
         sys.exit(1)
     except Exception as e:
         print(f"✗ Error: {e}", file=sys.stderr)

@@ -58,7 +58,9 @@ class RoutineStore:
 
     def _ensure_db(self):
         if not self._shared.is_initialized:
-            raise RuntimeError("Store not initialized. Call initialize() first.")
+            raise RuntimeError(
+                "Store not initialized. Call initialize() first."
+            )
 
     async def save_routine(
         self,
@@ -106,7 +108,9 @@ class RoutineStore:
                     try:
                         await db.rollback()
                     except Exception as rb_err:
-                        logger.error("save_routine ROLLBACK failed: %s", rb_err)
+                        logger.error(
+                            "save_routine ROLLBACK failed: %s", rb_err
+                        )
                         raise
                     await db.execute("BEGIN IMMEDIATE")
                     cursor = await db.execute(
@@ -118,7 +122,13 @@ class RoutineStore:
                         await db.execute(
                             "UPDATE routines SET steps = ?, trigger_hint = ?, "
                             "updated_at = ?, source = ? WHERE id = ?",
-                            (steps_json, trigger, now, source, existing[0]),
+                            (
+                                steps_json,
+                                trigger,
+                                now,
+                                source,
+                                existing[0],
+                            ),
                         )
                         await db.commit()
                         return existing[0]
@@ -127,7 +137,9 @@ class RoutineStore:
                 try:
                     await db.rollback()
                 except Exception as rb_err:
-                    logger.error("save_routine ROLLBACK failed: %s", rb_err)
+                    logger.error(
+                        "save_routine ROLLBACK failed: %s", rb_err
+                    )
                 raise
 
     async def get_routine(self, name: str) -> dict | None:

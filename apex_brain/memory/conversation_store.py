@@ -2,6 +2,7 @@
 Conversation Store - Saves every conversation turn permanently.
 Never lose context. Every Apex interaction is searchable.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -99,7 +100,9 @@ class ConversationStore:
 
     @staticmethod
     def _escape_like(s: str) -> str:
-        return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return (
+            s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        )
 
     async def search(self, query: str, limit: int = 20) -> list[dict]:
         """Search conversation history by keyword."""

@@ -437,7 +437,9 @@ async def _build_device_summary() -> str:
             domain, cap = entry, None
 
         entities = [
-            s for s in states if s.get("entity_id", "").startswith(f"{domain}.")
+            s
+            for s in states
+            if s.get("entity_id", "").startswith(f"{domain}.")
         ]
         if not entities:
             continue

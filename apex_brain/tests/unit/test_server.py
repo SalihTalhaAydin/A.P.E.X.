@@ -3,10 +3,14 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from brain.config import settings
 from brain.event_handler import WebhookResponse
-from brain.server import ChatRequest, _close_stores_if_present, _embed_text, app
+from brain.server import (
+    ChatRequest,
+    _close_stores_if_present,
+    _embed_text,
+    app,
+)
 from fastapi.testclient import TestClient
 
 
@@ -55,38 +59,47 @@ def test_debug_ha_returns_ha_reachable(client):
 @pytest.mark.asyncio
 async def test_shutdown_with_none_stores_does_not_crash():
     """BUG-5: Shutdown must not crash when stores are None (startup failed partway)."""
-    await _close_stores_if_present(None, None, None)  # no AttributeError
+    await _close_stores_if_present(
+        None, None, None, None
+    )  # no AttributeError
 
 
 @pytest.mark.asyncio
 async def test_shutdown_with_partial_none_stores():
     """BUG-5: Shutdown works when only some stores are None (partial startup failure)."""
     mock_store = AsyncMock()
+    # Only shared_db initialized, others are None
+    await _close_stores_if_present(mock_store, None, None, None)
+    mock_store.close.assert_awaited_once()
+
+    mock_store.reset_mock()
     # Only routine_store initialized, others are None
-    await _close_stores_if_present(mock_store, None, None)
+    await _close_stores_if_present(None, mock_store, None, None)
     mock_store.close.assert_awaited_once()
 
     mock_store.reset_mock()
     # Only convo_store initialized, others are None
-    await _close_stores_if_present(None, mock_store, None)
+    await _close_stores_if_present(None, None, mock_store, None)
     mock_store.close.assert_awaited_once()
 
     mock_store.reset_mock()
     # Only knowledge_store initialized, others are None
-    await _close_stores_if_present(None, None, mock_store)
+    await _close_stores_if_present(None, None, None, mock_store)
     mock_store.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_shutdown_with_all_stores_present():
     """BUG-5: Shutdown closes all stores when all are present."""
+    shared_db = AsyncMock()
     routine = AsyncMock()
     convo = AsyncMock()
     knowledge = AsyncMock()
-    await _close_stores_if_present(routine, convo, knowledge)
+    await _close_stores_if_present(shared_db, routine, convo, knowledge)
     routine.close.assert_awaited_once()
     convo.close.assert_awaited_once()
     knowledge.close.assert_awaited_once()
+    shared_db.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -96,7 +109,9 @@ async def test_embed_text_empty_data_returns_none_no_crash():
     mock_response = MagicMock()
     mock_response.data = []
 
-    with patch("brain.server.litellm.aembedding", new_callable=AsyncMock) as mock_aembed:
+    with patch(
+        "brain.server.litellm.aembedding", new_callable=AsyncMock
+    ) as mock_aembed:
         mock_aembed.return_value = mock_response
         result = await _embed_text("sample text for embedding")
         assert result is None
@@ -126,11 +141,15 @@ def test_post_v1_chat_completions_accepts_minimal_returns_json(client):
             },
         )
     assert response.status_code == 200
-    assert response.headers.get("content-type", "").startswith("application/json")
+    assert response.headers.get("content-type", "").startswith(
+        "application/json"
+    )
     data = response.json()
     assert "choices" in data
     assert data["choices"][0]["message"]["content"] == "Hi"
-    mock_conv.handle.assert_called_once_with("Hello", "default")
+    mock_conv.handle.assert_called_once_with(
+        "Hello", "default", voice_mode=True,
+    )
 
 
 def test_post_api_chat_accepts_chat_request_returns_response(client):
@@ -342,7 +361,9 @@ def test_v1_chat_completions_400_no_user_message(client):
             "/v1/chat/completions",
             json={
                 "model": "gpt-4",
-                "messages": [{"role": "system", "content": "You are a bot"}],
+                "messages": [
+                    {"role": "system", "content": "You are a bot"}
+                ],
             },
         )
     assert response.status_code == 400
@@ -354,7 +375,9 @@ def test_api_chat_504_on_timeout(client):
     mock_conv = MagicMock()
     mock_conv.handle = AsyncMock(side_effect=TimeoutError())
     with patch("brain.server.conversation", mock_conv):
-        with patch("brain.server.asyncio.wait_for", new_callable=AsyncMock) as m:
+        with patch(
+            "brain.server.asyncio.wait_for", new_callable=AsyncMock
+        ) as m:
             m.side_effect = TimeoutError()
             response = client.post(
                 "/api/chat",
@@ -389,7 +412,9 @@ def test_api_webhook_403_invalid_secret(client):
     )
     with patch("brain.server.event_handler", mock_handler):
         with patch.object(settings, "webhook_enabled", True):
-            with patch.object(settings, "webhook_secret", "correct_secret"):
+            with patch.object(
+                settings, "webhook_secret", "correct_secret"
+            ):
                 response = client.post(
                     "/api/webhook",
                     json={
@@ -432,7 +457,9 @@ def test_v1_chat_completions_504_on_timeout(client):
     mock_conv = MagicMock()
     mock_conv.handle = AsyncMock(side_effect=TimeoutError())
     with patch("brain.server.conversation", mock_conv):
-        with patch("brain.server.asyncio.wait_for", new_callable=AsyncMock) as m:
+        with patch(
+            "brain.server.asyncio.wait_for", new_callable=AsyncMock
+        ) as m:
             m.side_effect = TimeoutError()
             response = client.post(
                 "/v1/chat/completions",
@@ -458,16 +485,27 @@ def test_v1_chat_completions_multimodal_content(client):
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": "What's in this image?"},
-                            {"type": "image_url", "url": "https://example.com/img.png"},
+                            {
+                                "type": "text",
+                                "text": "What's in this image?",
+                            },
+                            {
+                                "type": "image_url",
+                                "url": "https://example.com/img.png",
+                            },
                         ],
                     }
                 ],
             },
         )
     assert response.status_code == 200
-    assert response.json()["choices"][0]["message"]["content"] == "Reply to image"
-    mock_conv.handle.assert_called_once_with("What's in this image?", "default")
+    assert (
+        response.json()["choices"][0]["message"]["content"]
+        == "Reply to image"
+    )
+    mock_conv.handle.assert_called_once_with(
+        "What's in this image?", "default", voice_mode=True,
+    )
 
 
 def test_v1_chat_completions_session_id_from_header(client):
@@ -484,7 +522,9 @@ def test_v1_chat_completions_session_id_from_header(client):
             headers={"x-session-id": "custom-session-123"},
         )
     assert response.status_code == 200
-    mock_conv.handle.assert_called_once_with("Hi", "custom-session-123")
+    mock_conv.handle.assert_called_once_with(
+        "Hi", "custom-session-123", voice_mode=True,
+    )
 
 
 def test_v1_chat_completions_session_id_sanitized(client):
@@ -613,7 +653,9 @@ def test_rate_limit_api_chat_returns_429(client):
                     "/api/chat",
                     json={"message": "hi", "session_id": "s"},
                 )
-                assert r.status_code == 200, f"Request {i+1} should succeed"
+                assert r.status_code == 200, (
+                    f"Request {i + 1} should succeed"
+                )
             r = client.post(
                 "/api/chat",
                 json={"message": "hi", "session_id": "s"},
@@ -645,7 +687,9 @@ def test_rate_limit_api_webhook_returns_429(client):
                                 "new_state": "on",
                             },
                         )
-                        assert r.status_code == 200, f"Request {i+1} should succeed"
+                        assert r.status_code == 200, (
+                            f"Request {i + 1} should succeed"
+                        )
                     r = client.post(
                         "/api/webhook",
                         json={

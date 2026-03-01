@@ -2,26 +2,26 @@
 Tests for the configure() registry management tool.
 All WebSocket API calls are mocked — no real connections.
 """
+
 from __future__ import annotations
 
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from tools.configure import (
-    configure,
-    _get_tier,
     _confirmation_prompt,
-    _handle_rename,
+    _get_tier,
     _handle_assign_area,
-    _handle_disable,
-    _handle_enable,
     _handle_create_area,
     _handle_delete_area,
-    _handle_remove,
+    _handle_disable,
+    _handle_enable,
     _handle_list_stale,
+    _handle_remove,
+    _handle_rename,
+    configure,
     set_audit_store,
 )
-
 
 # ── Tier classification ──────────────────────────────
 
@@ -64,9 +64,7 @@ class TestConfirmationPrompt:
         assert "confirmed" in result
 
     def test_tier_2_prompt_contains_destructive(self):
-        result = _confirmation_prompt(
-            "remove", "device_abc", 2, "detail"
-        )
+        result = _confirmation_prompt("remove", "device_abc", 2, "detail")
         assert "DESTRUCTIVE" in result
         assert "confirmed" in result
 
@@ -246,24 +244,18 @@ class TestRenameHandler:
             assert "New Name" in result
             mock_ws.assert_called_once()
             cmd = mock_ws.call_args[0][0]
-            assert cmd["type"] == (
-                "config/entity_registry/update"
-            )
+            assert cmd["type"] == ("config/entity_registry/update")
             assert cmd["entity_id"] == "light.kitchen"
             assert cmd["name"] == "New Name"
 
     @pytest.mark.asyncio
     async def test_rename_requires_name(self):
-        result = await _handle_rename(
-            "light.kitchen", {}
-        )
+        result = await _handle_rename("light.kitchen", {})
         assert "name is required" in result
 
     @pytest.mark.asyncio
     async def test_rename_requires_target(self):
-        result = await _handle_rename(
-            "", {"name": "Test"}
-        )
+        result = await _handle_rename("", {"name": "Test"})
         assert "target" in result.lower()
 
 
@@ -284,9 +276,7 @@ class TestAssignAreaHandler:
             )
             assert "Assigned entity" in result
             cmd = mock_ws.call_args[0][0]
-            assert cmd["type"] == (
-                "config/entity_registry/update"
-            )
+            assert cmd["type"] == ("config/entity_registry/update")
 
     @pytest.mark.asyncio
     async def test_assign_device_to_area(self):
@@ -301,22 +291,16 @@ class TestAssignAreaHandler:
             )
             assert "Assigned device" in result
             cmd = mock_ws.call_args[0][0]
-            assert cmd["type"] == (
-                "config/device_registry/update"
-            )
+            assert cmd["type"] == ("config/device_registry/update")
 
     @pytest.mark.asyncio
     async def test_assign_requires_area_id(self):
-        result = await _handle_assign_area(
-            "light.kitchen", {}
-        )
+        result = await _handle_assign_area("light.kitchen", {})
         assert "area_id is required" in result
 
     @pytest.mark.asyncio
     async def test_assign_requires_target(self):
-        result = await _handle_assign_area(
-            "", {"area_id": "kitchen"}
-        )
+        result = await _handle_assign_area("", {"area_id": "kitchen"})
         assert "target is required" in result
 
 
@@ -331,9 +315,7 @@ class TestDisableEnableHandlers:
             new_callable=AsyncMock,
             return_value={},
         ) as mock_ws:
-            result = await _handle_disable(
-                "sensor.test", {}
-            )
+            result = await _handle_disable("sensor.test", {})
             assert "Disabled" in result
             cmd = mock_ws.call_args[0][0]
             assert cmd["disabled_by"] == "user"
@@ -350,9 +332,7 @@ class TestDisableEnableHandlers:
             new_callable=AsyncMock,
             return_value={},
         ) as mock_ws:
-            result = await _handle_enable(
-                "sensor.test", {}
-            )
+            result = await _handle_enable("sensor.test", {})
             assert "Enabled" in result
             cmd = mock_ws.call_args[0][0]
             assert cmd["disabled_by"] in (None, "")
@@ -374,15 +354,11 @@ class TestAreaHandlers:
             new_callable=AsyncMock,
             return_value={"area_id": "new_room"},
         ) as mock_ws:
-            result = await _handle_create_area(
-                "", {"name": "New Room"}
-            )
+            result = await _handle_create_area("", {"name": "New Room"})
             assert "created" in result
             assert "new_room" in result
             cmd = mock_ws.call_args[0][0]
-            assert cmd["type"] == (
-                "config/area_registry/create"
-            )
+            assert cmd["type"] == ("config/area_registry/create")
 
     @pytest.mark.asyncio
     async def test_create_area_from_target(self):
@@ -391,9 +367,7 @@ class TestAreaHandlers:
             new_callable=AsyncMock,
             return_value={"area_id": "garage"},
         ):
-            result = await _handle_create_area(
-                "Garage", {}
-            )
+            result = await _handle_create_area("Garage", {})
             assert "Garage" in result
             assert "created" in result
 
@@ -409,14 +383,10 @@ class TestAreaHandlers:
             new_callable=AsyncMock,
             return_value={},
         ) as mock_ws:
-            result = await _handle_delete_area(
-                "old_room", {}
-            )
+            result = await _handle_delete_area("old_room", {})
             assert "deleted" in result
             cmd = mock_ws.call_args[0][0]
-            assert cmd["type"] == (
-                "config/area_registry/delete"
-            )
+            assert cmd["type"] == ("config/area_registry/delete")
             assert cmd["area_id"] == "old_room"
 
     @pytest.mark.asyncio
@@ -436,14 +406,10 @@ class TestRemoveHandler:
             new_callable=AsyncMock,
             return_value={},
         ) as mock_ws:
-            result = await _handle_remove(
-                "device_abc", {}
-            )
+            result = await _handle_remove("device_abc", {})
             assert "removed" in result
             cmd = mock_ws.call_args[0][0]
-            assert cmd["type"] == (
-                "config/device_registry/remove"
-            )
+            assert cmd["type"] == ("config/device_registry/remove")
 
     @pytest.mark.asyncio
     async def test_remove_requires_target(self):
@@ -474,14 +440,17 @@ class TestListStaleHandler:
             {"entity_id": "sensor.test", "state": "unavailable"},
             {"entity_id": "light.old", "state": "on"},
         ]
-        with patch(
-            "tools.configure.ws_command",
-            new_callable=AsyncMock,
-            return_value=entities,
-        ), patch(
-            "tools.ha_helpers.ha_request",
-            new_callable=AsyncMock,
-            return_value=states,
+        with (
+            patch(
+                "tools.configure.ws_command",
+                new_callable=AsyncMock,
+                return_value=entities,
+            ),
+            patch(
+                "tools.ha_helpers.ha_request",
+                new_callable=AsyncMock,
+                return_value=states,
+            ),
         ):
             result = await _handle_list_stale("", {})
             assert "1 stale" in result
@@ -561,9 +530,7 @@ class TestWsResultHandling:
             new_callable=AsyncMock,
             return_value=None,
         ):
-            result = await _handle_create_area(
-                "", {"name": "New Room"}
-            )
+            result = await _handle_create_area("", {"name": "New Room"})
             assert "Error" in result
 
     @pytest.mark.asyncio
@@ -626,14 +593,17 @@ class TestWsResultHandling:
     @pytest.mark.asyncio
     async def test_list_stale_handles_none_result(self):
         """_handle_list_stale does not crash when ws_command returns None."""
-        with patch(
-            "tools.configure.ws_command",
-            new_callable=AsyncMock,
-            return_value=None,
-        ), patch(
-            "tools.ha_helpers.ha_request",
-            new_callable=AsyncMock,
-            return_value=[],
+        with (
+            patch(
+                "tools.configure.ws_command",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "tools.ha_helpers.ha_request",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
         ):
             result = await _handle_list_stale("", {})
             assert "No active" in result
@@ -644,13 +614,19 @@ class TestWsResultHandling:
         with patch(
             "tools.configure.ws_command",
             new_callable=AsyncMock,
-            return_value={"success": False, "error": {"message": "Entity not found"}},
+            return_value={
+                "success": False,
+                "error": {"message": "Entity not found"},
+            },
         ):
             result = await _handle_rename(
                 "light.missing", {"name": "Test"}
             )
             assert "Error" in result
-            assert "Entity not found" in result or "not found" in result.lower()
+            assert (
+                "Entity not found" in result
+                or "not found" in result.lower()
+            )
 
 
 # ── Error handling ───────────────────────────────────
@@ -662,9 +638,7 @@ class TestConfigureErrorHandling:
         with patch(
             "tools.configure.ws_command",
             new_callable=AsyncMock,
-            side_effect=ConnectionError(
-                "Cannot connect"
-            ),
+            side_effect=ConnectionError("Cannot connect"),
         ):
             result = await configure(
                 action="rename",

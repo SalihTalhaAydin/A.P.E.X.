@@ -29,162 +29,27 @@ from brain.config import settings
 _MAX_CONFAB_NUDGES = 2
 
 # ------------------------------------------------------------------
-# Confabulation & action-request detection
+# Confabulation detection (simplified)
 # ------------------------------------------------------------------
 
-# AI response: claims a device action was performed without using tools
+# AI claims a device action was performed
 _CONFAB_CLAIM_RE = re.compile(
     r"(?:"
-    # Direct action verbs (past tense)
-    r"turned\s+(?:off|on|the)|switched\s+(?:off|on|the)|"
-    r"powered\s+(?:off|on|down|up)|shut\s+(?:off|down)|"
-    # State claims ("lights are now off", "should be off")
-    # Note: bare "on" and "set" are excluded from the is/are pattern
-    # because they cause false positives ("meeting is on Monday",
-    # "alarm is set for 7am"). They require "now" or "to" qualifiers.
-    r"(?:is|are|should\s+be)\s+(?:now\s+)?(?:off|locked"
-    r"|unlocked|open(?:ed)?|closed|armed|disarmed"
-    r"|adjusted|dimmed)|"
-    # "is/are now on/set" — require "now" to avoid false positives
-    r"(?:is|are|should\s+be)\s+now\s+(?:on|set)|"
-    # "should be on/off now" (word-order variant)
-    r"should\s+be\s+(?:on|off)\s+now|"
-    # "is/are set to <value>" — device value assignment
-    r"(?:is|are)\s+set\s+to\b|"
-    # Completion claims ("it is done", "taken care of")
+    r"turned\s+(?:off|on)|switched\s+(?:off|on)|"
+    r"(?:is|are)\s+now\s+(?:on|off|set|locked|unlocked)|"
     r"(?:it\s+is|it's|that's)\s+done|"
-    r"taken\s+care\s+of|"
-    # "all set" only at end of text or before punctuation/dash;
-    # not "all set for tomorrow" (negative lookahead excludes "for")
-    r"all\s+set(?!\s+for)(?:\s*[.!,;\u2014\u2013\-]|\s*$)|"
-    r"all\s+done|"
-    # First-person past claims ("I've turned…", "I have set…")
+    r"taken\s+care\s+of|all\s+done|"
     r"i've\s+(?:turned|set|locked|unlocked|opened|closed|"
-    r"adjusted|activated|dimmed|toggled|armed|disarmed|switched|powered)|"
-    r"i\s+have\s+(?:turned|set|locked|unlocked|opened|closed|"
-    r"adjusted|activated|dimmed|toggled|armed|disarmed|switched|powered)|"
-    # Specific device action verbs
-    r"\bcycled\b|adjusted\s+the|dimmed\s+the|brightened\s+the|"
-    r"activated\s+the|deactivated\s+the|"
-    r"locked\s+the|unlocked\s+the|"
-    r"opened\s+the|closed\s+the|"
-    r"set\s+the\s+.{1,30}\s+to"
+    r"adjusted|activated|dimmed|toggled|armed|disarmed|switched)"
     r")",
     re.IGNORECASE,
 )
 
-# User message: requests a device/service action
+# User requests a device action
 _ACTION_REQUEST_RE = re.compile(
     r"(?:"
     r"turn\s+(?:on|off)|switch\s+(?:on|off)|"
-    r"(?:dim|brighten)\b|"
-    r"(?:lock|unlock)\b|"
-    r"(?:open|close)\s+(?:the|my|all)|"
-    r"set\s+.{1,40}\s+to\b|"
-    r"(?:arm|disarm)\b|"
-    r"shut\s+(?:off|down)|power\s+(?:on|off|down|up)|"
-    r"lights?\s+(?:on|off)"
-    r")",
-    re.IGNORECASE,
-)
-
-# User message: correction after a failed action
-_CORRECTION_RE = re.compile(
-    r"(?:"
-    r"still\s+(?:on|off|open|closed|locked|unlocked"
-    r"|running|not)|"
-    r"didn.t\s+(?:work|turn|change|happen)|"
-    r"(?:they|it|that).{0,3}\s+(?:still|not)\s+"
-    r"(?:on|off|done|working|changed)|"
-    r"(?:are|is)\s+(?:still|not)\s+"
-    r"(?:on|off|open|closed|locked|unlocked|changed)|"
-    r"try\s+again|do\s+it\s+again|"
-    r"you\s+didn|that\s+didn|"
-    r"(?:no|nope|um)[,.]?\s*(?:they|it|still)"
-    r")",
-    re.IGNORECASE,
-)
-
-
-# Tools that actually perform device/HA actions (vs discovery/query)
-_ACTION_TOOLS = frozenset(
-    {
-        "do",
-        "control_area",
-        "control_light",
-        "control_climate",
-        "control_media",
-        "control_cover",
-        "control_fan",
-        "control_lock",
-        "control_switch",
-        "control_alarm",
-        "call_service",
-        "activate_scene",
-        "trigger_automation",
-        "execute_script",
-        "set_input_helper",
-    }
-)
-
-# Tool result phrases that indicate the action did NOT succeed.
-# NOTE: bare "no " was removed — it matched legitimate results
-# like "Done. ...no additional changes needed." Use specific
-# variants instead.
-_TOOL_FAILURE_PHRASES = (
-    "no entities found",
-    "no entities matching",
-    "no area matching",
-    "not found",
-    "error:",
-    "entity not found",
-    "could not",
-    "cannot ",
-    "failed",
-    "connection error",
-    "not available",
-)
-
-
-def _looks_like_device_action_claim(content: str) -> bool:
-    """Check if text claims a device action was performed."""
-    if not content or not isinstance(content, str):
-        return False
-    return bool(_CONFAB_CLAIM_RE.search(content))
-
-
-def _tool_result_indicates_failure(result: str) -> bool:
-    """Check if a tool result indicates the action did not succeed."""
-    if not result or not isinstance(result, str):
-        return False
-    lower = result.lower()
-    return any(phrase in lower for phrase in _TOOL_FAILURE_PHRASES)
-
-
-def _last_tool_result(messages: list[dict]) -> str:
-    """Return the content of the most recent tool result message."""
-    for m in reversed(messages):
-        if m.get("role") == "tool":
-            return m.get("content", "") or ""
-    return ""
-
-
-_INFO_QUESTION_RE = re.compile(
-    r"^\s*(?:when|what\s+time|how\s+long|how\s+often|how\s+many"
-    r"|was\s+the|were\s+the|is\s+the|are\s+the)\b",
-    re.IGNORECASE,
-)
-
-# Matches imperative action commands (optionally prefixed by
-# "please" / "can you" / "could you").  Used to distinguish
-# "Can you lock the door?" (action) from "Is the door locked?"
-# (question) when the message ends with "?".
-_ACTION_IMPERATIVE_RE = re.compile(
-    r"^\s*(?:please\s+|"
-    r"(?:can|could|would)\s+you\s+(?:please\s+)?)?(?:"
-    r"turn\s+(?:on|off)|switch\s+(?:on|off)|"
-    r"(?:dim|brighten)\b|"
-    r"(?:lock|unlock)\b|"
+    r"(?:dim|brighten)\b|(?:lock|unlock)\b|"
     r"(?:open|close)\s+(?:the|my|all)|"
     r"set\s+.{1,40}\s+to\b|"
     r"(?:arm|disarm)\b|"
@@ -208,7 +73,7 @@ def _tc_name(tc) -> str:
 
 
 def _tc_args(tc) -> str:
-    """Safely get function arguments string from a tool call (object or dict)."""
+    """Safely get function arguments string from a tool call."""
     if isinstance(tc, dict):
         fn = tc.get("function") or {}
         return fn.get("arguments", "{}") if isinstance(fn, dict) else "{}"
@@ -220,7 +85,7 @@ def _tc_args(tc) -> str:
 
 
 def _tc_id(tc) -> str:
-    """Safely get tool_call_id from a tool call (object or dict)."""
+    """Safely get tool_call_id from a tool call."""
     if isinstance(tc, dict):
         return tc.get("id", "") or ""
     try:
@@ -230,56 +95,23 @@ def _tc_id(tc) -> str:
 
 
 def _safe_get_tool_calls(msg) -> list:
-    """Safely extract tool_calls from an LLM response message.
-    Handles object (attr) and dict (get); treats None, [], missing key
-    as no tool calls. Normalizes across providers with varying shapes.
-    """
+    """Safely extract tool_calls from an LLM response message."""
     if msg is None:
         return []
 
-    def _normalize(val):
-        if val is None:
-            return []
-        if isinstance(val, list):
-            return val
-        return [val]
-
     if isinstance(msg, dict):
-        for key in ("tool_calls", "tool_call"):
-            val = msg.get(key)
-            if val is not None and val != []:
-                return _normalize(val)
+        val = msg.get("tool_calls")
+        if isinstance(val, list) and val:
+            return val
         return []
 
     try:
-        for attr in ("tool_calls", "tool_call"):
-            val = getattr(msg, attr, None)
-            if val is not None and val != []:
-                return _normalize(val)
+        val = getattr(msg, "tool_calls", None)
+        if isinstance(val, list) and val:
+            return val
         return []
     except (AttributeError, TypeError):
         return []
-
-
-def _user_expects_action(content: str) -> bool:
-    """Check if user message requests an action or corrects a failed one."""
-    if not content or not isinstance(content, str):
-        return False
-    stripped = content.strip()
-    # Messages ending with "?" are questions UNLESS they start
-    # with an imperative command ("Turn off the lights?",
-    # "Can you lock the door?").
-    if stripped.endswith("?") and not _ACTION_IMPERATIVE_RE.match(
-        stripped
-    ):
-        return False
-    # Informational questions about state/history are not action requests
-    if _INFO_QUESTION_RE.search(content):
-        return False
-    return bool(
-        _ACTION_REQUEST_RE.search(content)
-        or _CORRECTION_RE.search(content)
-    )
 
 
 class Conversation:
@@ -296,10 +128,6 @@ class Conversation:
         self.fact_extractor = fact_extractor
         self.context_builder = context_builder
         self.mcp_bridge = mcp_bridge
-
-        # Explainability: track action trace per session (bounded to prevent leak)
-        self._action_traces: dict[str, str] = {}
-        self._max_action_traces: int = 200
 
         # Per-session locks to prevent concurrent handle() interleaving
         self._session_locks: dict[str, asyncio.Lock] = {}
@@ -333,7 +161,7 @@ class Conversation:
         voice_mode: when True, uses reduced tool set and
         shorter max_tokens for faster responses.
         """
-        # Get or create per-session lock (evict oldest when over capacity)
+        # Get or create per-session lock
         async with self._session_locks_meta:
             if session_id not in self._session_locks:
                 while len(self._session_locks) >= self._max_session_locks:
@@ -357,21 +185,11 @@ class Conversation:
             "user", user_message, session_id
         )
 
-        # 2. Build rich context (recent history + relevant facts + time)
+        # 2. Build context (recent history + facts + time + devices)
         system_prompt = await self.context_builder.build(
             user_message, session_id=session_id,
             voice_mode=voice_mode,
         )
-
-        # 2.5. Inject last action trace for explainability
-        if not voice_mode:
-            last_trace = self._action_traces.get(session_id, "")
-            if last_trace:
-                system_prompt += (
-                    "\n\nLAST ACTION TRACE (reference if the user "
-                    "asks why you did something):\n"
-                    f"{last_trace}"
-                )
 
         # 3. Prepare messages for the AI
         messages = [
@@ -407,14 +225,12 @@ class Conversation:
             "assistant", response_text, session_id
         )
 
-        # 7. Background fact extraction (user doesn't wait)
+        # 7. Background fact extraction
         recent = await self.conversation_store.get_recent(
             n=4, session_id=session_id
         )
-        total_chars = sum(
-            len((t.get("content") or "")) for t in recent
-        )
-        if total_chars >= 50:  # skip for very short exchanges (ok, thanks, etc)
+        total_chars = sum(len(t.get("content") or "") for t in recent)
+        if total_chars >= 50:
             task = asyncio.create_task(self._safe_extract_facts(recent))
             self._background_tasks.add(task)
             task.add_done_callback(self._background_tasks.discard)
@@ -422,7 +238,7 @@ class Conversation:
         return response_text
 
     async def shutdown(self) -> None:
-        """Cancel and await all background fact-extraction tasks on shutdown."""
+        """Cancel and await all background tasks on shutdown."""
         for task in self._background_tasks:
             task.cancel()
         if self._background_tasks:
@@ -433,7 +249,10 @@ class Conversation:
                 if isinstance(result, Exception) and not isinstance(
                     result, asyncio.CancelledError
                 ):
-                    logger.warning("Fact extraction shutdown error: %s", result)
+                    logger.warning(
+                        "Background task shutdown error: %s",
+                        result,
+                    )
         self._background_tasks.clear()
         logger.info("Conversation background tasks shut down")
 
@@ -443,18 +262,28 @@ class Conversation:
         _base_delay: float = 2.0,
         **kwargs,
     ):
-        """Call litellm.acompletion with retry on rate limits."""
+        """Call litellm.acompletion with retry on transient errors."""
+        import openai
         from litellm.exceptions import RateLimitError
+
+        _RETRYABLE = (
+            RateLimitError,
+            openai.APIConnectionError,
+            openai.APITimeoutError,
+            ConnectionError,
+            TimeoutError,
+        )
 
         for attempt in range(_max_retries):
             try:
                 return await litellm.acompletion(**kwargs)
-            except RateLimitError:
+            except _RETRYABLE as exc:
                 if attempt == _max_retries - 1:
                     raise
                 delay = _base_delay * (2**attempt)
                 logger.warning(
-                    "Rate limited (attempt %d/%d), retrying in %.1fs...",
+                    "%s (attempt %d/%d), retrying in %.1fs...",
+                    type(exc).__name__,
                     attempt + 1,
                     _max_retries,
                     delay,
@@ -470,7 +299,7 @@ class Conversation:
         session_id: str = "default",
         voice_mode: bool = False,
     ) -> str:
-        """Call AI, handle tool calls, repeat until text."""
+        """Call AI, handle tool calls, repeat until text response."""
         nudge_count = 0
         tools_called: list[str] = []
 
@@ -478,7 +307,7 @@ class Conversation:
         if voice_mode:
             max_iterations = min(max_iterations, 5)
 
-        # Detect if user message expects a device action
+        # Detect if user message requests a device action
         user_msg = next(
             (
                 m.get("content", "")
@@ -487,7 +316,11 @@ class Conversation:
             ),
             "",
         )
-        user_wants_action = _user_expects_action(user_msg)
+        user_wants_action = (
+            bool(_ACTION_REQUEST_RE.search(user_msg))
+            if user_msg
+            else False
+        )
 
         for _iteration in range(max_iterations):
             try:
@@ -499,10 +332,8 @@ class Conversation:
                 }
                 if tool_defs:
                     kwargs["tools"] = tool_defs
-                    # Force tool use when user expects a device
-                    # action and no tools have been called yet.
-                    # After tools run, switch back to auto so
-                    # the model can summarise the result.
+                    # Force tool use when user expects action
+                    # and no tools have been called yet
                     if (
                         user_wants_action or nudge_count > 0
                     ) and not tools_called:
@@ -513,144 +344,80 @@ class Conversation:
                 response = await self._llm_call_with_retry(**kwargs)
             except Exception as e:
                 logger.exception("AI call failed: %s", e)
-                return f"Error reaching AI: {e}"
+                import openai as _openai
+
+                model = settings.litellm_model
+                if isinstance(
+                    e,
+                    (
+                        _openai.APIConnectionError,
+                        ConnectionError,
+                    ),
+                ):
+                    return (
+                        f"Connection error reaching {model}. "
+                        "Check your API key and network."
+                    )
+                elif isinstance(e, _openai.AuthenticationError):
+                    return f"Auth failed for {model}. Check your API key."
+                else:
+                    return f"Error reaching AI ({model}): {e}"
 
             if not response.choices:
-                logger.error("LLM returned empty choices list")
                 return "Error: AI returned an empty response."
+
             msg = response.choices[0].message
             tool_calls = _safe_get_tool_calls(msg)
-            # only system + user so far?
-            is_first_response = len(messages) == 2
 
-            # If no tool calls, we have our answer (or a confabulation)
+            # No tool calls — we have our answer
             if not tool_calls:
                 text = msg.content or "Done."
-                logger.debug(
-                    "Text response (no tools called): %s", text[:150]
-                )
-                if is_first_response:
-                    logger.debug("First response had 0 tool calls.")
 
-                # Detect confabulation: AI claims action or user
-                # expects action, but no tools were called yet.
-                # If tools HAVE been called, the AI is just
-                # summarising — not confabulating (unless tool failed).
-                last_result = _last_tool_result(messages)
-                if not tools_called:
-                    is_confab = _looks_like_device_action_claim(text)
-                    unmet_action = user_wants_action
-                else:
-                    is_confab = False
-                    unmet_action = False
-                    action_tools_used = any(
-                        t in _ACTION_TOOLS for t in tools_called
-                    )
-                    # User wanted action but only non-action tools
-                    # (e.g. discover) were called — still unmet
-                    if user_wants_action and not action_tools_used:
-                        unmet_action = True
-                    # Tool reported failure but AI claims success
-                    if (
-                        _tool_result_indicates_failure(last_result)
-                        and _looks_like_device_action_claim(text)
-                    ):
-                        is_confab = True
-                        logger.warning(
-                            "Tool reported failure but AI claimed success."
-                        )
-                    # Action tool succeeded — trust the result,
-                    # never nudge. The AI is just summarising.
-                    if (
-                        action_tools_used
-                        and last_result.startswith("Done.")
-                        and not _tool_result_indicates_failure(
-                            last_result
-                        )
-                    ):
-                        is_confab = False
-                        unmet_action = False
-
-                if is_confab:
-                    logger.warning(
-                        "Responded with text only (no tool "
-                        "calls); possible confabulation."
-                    )
-                if unmet_action:
-                    logger.warning(
-                        "User expects device action but no "
-                        "action tools were called."
-                    )
-
+                # Confabulation check: AI claims action but
+                # never called any tools
                 if (
-                    (is_confab or unmet_action)
+                    not tools_called
+                    and _CONFAB_CLAIM_RE.search(text)
                     and tool_defs
                     and nudge_count < _MAX_CONFAB_NUDGES
                 ):
                     nudge_count += 1
                     messages.append(msg.model_dump())
-                    nudge_content = (
-                        "The tool reported no entities found or an error. "
-                        "You must NOT claim success. Tell the user what "
-                        "actually happened."
-                        if is_confab and last_result
-                        else (
-                            "You MUST call a tool to perform "
-                            "the action — do not describe or "
-                            "claim it; actually call 'do', "
-                            "'control_area', or the appropriate "
-                            "tool right now."
-                        )
-                    )
                     messages.append(
                         {
                             "role": "user",
-                            "content": nudge_content,
+                            "content": (
+                                "You MUST call a tool to perform "
+                                "the action — do not just claim "
+                                "it was done. Call 'do' or the "
+                                "appropriate tool now."
+                            ),
                         },
                     )
                     continue
 
-                # Build and store action trace for explainability
-                facts_used = self._extract_facts_from_system(messages)
-                self._action_traces[session_id] = self._build_action_trace(
-                    tools_called, facts_used
-                )
-                # Evict oldest entries if trace dict grows
-                while len(self._action_traces) > self._max_action_traces:
-                    oldest_key = next(iter(self._action_traces))
-                    del self._action_traces[oldest_key]
-                if self._action_traces.get(session_id):
-                    logger.debug(
-                        "Action trace: %s", self._action_traces[session_id]
-                    )
                 return text
 
-            # Process tool calls (guard: tool_calls may be None/empty from provider)
-            tool_names_this_turn = [n for tc in tool_calls if (n := _tc_name(tc))]
+            # Process tool calls
+            tool_names = [n for tc in tool_calls if (n := _tc_name(tc))]
             logger.info(
-                "LLM requested %d tool call(s): %s",
+                "LLM requested %d tool(s): %s",
                 len(tool_calls),
-                ", ".join(tool_names_this_turn),
+                ", ".join(tool_names),
             )
             messages.append(msg.model_dump())
 
             for tc in tool_calls:
                 fn_name = _tc_name(tc)
                 if not fn_name:
-                    logger.warning("Skipping tool call with missing function name")
                     continue
                 try:
                     args = json.loads(_tc_args(tc))
                 except json.JSONDecodeError:
-                    logger.warning(
-                        "Failed to parse tool args for %s: %s",
-                        fn_name,
-                        _tc_args(tc)[:200],
-                    )
                     args = {}
 
                 logger.info(
-                    "Tool call: %s(%s)",
+                    "Tool: %s(%s)",
                     fn_name,
                     json.dumps(args, default=str)[:500],
                 )
@@ -664,17 +431,14 @@ class Conversation:
                     )
                 else:
                     result = f"Unknown tool: {fn_name}"
-                # INFO for diagnostics: tool results must be visible when debugging
-                # "turn off X" claims-success-but-nothing-happened issues
+
                 logger.info(
-                    "Tool result: %s -> %s",
+                    "Result: %s -> %s",
                     fn_name,
                     str(result)[:500],
                 )
 
-                # Track for explainability
                 tools_called.append(fn_name)
-
                 messages.append(
                     {
                         "role": "tool",
@@ -682,16 +446,6 @@ class Conversation:
                         "content": str(result),
                     }
                 )
-
-        # Build and store action trace before max_iterations exit
-        # (explainability: user can see which tools were called)
-        facts_used = self._extract_facts_from_system(messages)
-        self._action_traces[session_id] = self._build_action_trace(
-            tools_called, facts_used
-        )
-        while len(self._action_traces) > self._max_action_traces:
-            oldest_key = next(iter(self._action_traces))
-            del self._action_traces[oldest_key]
 
         return (
             "I ran into a loop processing your request. "
@@ -711,46 +465,3 @@ class Conversation:
                 e,
                 exc_info=True,
             )
-
-    # ------------------------------------------------------------------
-    # Explainability helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _build_action_trace(
-        tools_called: list[str],
-        facts_used: list[str],
-    ) -> str:
-        """Build a human-readable trace of why actions were taken."""
-        trace_parts: list[str] = []
-        if tools_called:
-            unique = list(dict.fromkeys(tools_called))
-            trace_parts.append(f"Actions taken: {', '.join(unique)}")
-        if facts_used:
-            trace_parts.append(f"Based on: {', '.join(facts_used)}")
-        return " | ".join(trace_parts) if trace_parts else ""
-
-    @staticmethod
-    def _extract_facts_from_system(
-        messages: list[dict],
-    ) -> list[str]:
-        """Pull fact keys from the WHAT YOU KNOW section."""
-        facts: list[str] = []
-        for m in messages:
-            if m.get("role") != "system":
-                continue
-            content = m.get("content", "")
-            in_section = False
-            for line in content.splitlines():
-                if line.startswith("WHAT YOU KNOW"):
-                    in_section = True
-                    continue
-                if in_section:
-                    if line.startswith("- "):
-                        key = line.split(":")[0].lstrip("- ").strip()
-                        if key:
-                            facts.append(key)
-                    elif line and not line.startswith(" "):
-                        break
-            break  # only first system message
-        return facts

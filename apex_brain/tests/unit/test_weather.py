@@ -1,8 +1,8 @@
 """Tests for weather tool."""
 
-import pytest
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from tools import discover_tools
 from tools.base import TOOL_REGISTRY
 
@@ -66,11 +66,17 @@ async def test_get_weather_forecast_templow_null_no_none_in_output():
 
     with (
         patch("tools.weather.read_state", side_effect=mock_read_state),
-        patch("tools.weather.ha_request", new_callable=AsyncMock, return_value=mock_forecast),
+        patch(
+            "tools.weather.ha_request",
+            new_callable=AsyncMock,
+            return_value=mock_forecast,
+        ),
     ):
         result = await get_weather(
             entity_id="weather.forecast_home",
             forecast_type="daily",
         )
 
-    assert "None" not in result, f"Output must not contain 'None' when templow is null: {result!r}"
+    assert "None" not in result, (
+        f"Output must not contain 'None' when templow is null: {result!r}"
+    )

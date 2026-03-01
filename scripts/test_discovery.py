@@ -1,6 +1,5 @@
-import sys
-import os
 import asyncio
+import sys
 from pathlib import Path
 
 # Add apex_brain to sys.path
@@ -19,14 +18,14 @@ apex_brain_dir = project_root / "apex_brain"
 sys.path.append(str(apex_brain_dir))
 
 # Import brain.config to load env
-import brain.config
 
 # Import the discover tool
 from tools.generic import discover
 
+
 async def main():
     print("Testing 'discover' tool...")
-    
+
     # Test 1: Discover lights
     print("\n--- Discovering Lights ---")
     try:
@@ -43,6 +42,7 @@ async def main():
         print(result)
     except Exception as e:
         print(f"Error discovering info: {e}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

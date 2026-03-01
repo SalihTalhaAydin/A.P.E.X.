@@ -76,7 +76,9 @@ async def list_webhook_automations() -> str:
         if not isinstance(states, list):
             return "Error: Unable to reach Home Assistant."
         automations = [
-            s for s in states if s.get("entity_id", "").startswith("automation.")
+            s
+            for s in states
+            if s.get("entity_id", "").startswith("automation.")
         ]
 
         webhook_autos = []
@@ -92,15 +94,13 @@ async def list_webhook_automations() -> str:
             webhook_trigger_ids = [
                 t.get("webhook_id", "")
                 for t in triggers
-                if isinstance(t, dict)
-                and t.get("platform") == "webhook"
+                if isinstance(t, dict) and t.get("platform") == "webhook"
             ]
             has_webhook_trigger = bool(webhook_trigger_ids)
 
             # Also match by name/entity_id substring
             name_match = (
-                "webhook" in fn.lower()
-                or "webhook" in eid.lower()
+                "webhook" in fn.lower() or "webhook" in eid.lower()
             )
 
             if has_webhook_trigger or name_match:
@@ -109,13 +109,8 @@ async def list_webhook_automations() -> str:
                     ids_str = ", ".join(
                         i for i in webhook_trigger_ids if i
                     )
-                    entry = (
-                        f"- {fn} ({eid}): {state}"
-                        + (
-                            f" [webhook_id: {ids_str}]"
-                            if ids_str
-                            else ""
-                        )
+                    entry = f"- {fn} ({eid}): {state}" + (
+                        f" [webhook_id: {ids_str}]" if ids_str else ""
                     )
                 else:
                     entry = f"- {fn} ({eid}): {state}"

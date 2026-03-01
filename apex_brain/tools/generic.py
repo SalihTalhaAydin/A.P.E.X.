@@ -19,6 +19,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import httpx
+
 from tools.base import tool
 from tools.ha_helpers import (
     HomeAssistantError,
@@ -60,7 +61,9 @@ def _create_confirmation_token() -> str:
 def _cleanup_expired_confirmations() -> None:
     """Remove expired tokens from the pending store."""
     now = datetime.now(timezone.utc)
-    expired = [t for t, exp in _pending_confirmations.items() if exp <= now]
+    expired = [
+        t for t, exp in _pending_confirmations.items() if exp <= now
+    ]
     for t in expired:
         del _pending_confirmations[t]
 
@@ -291,7 +294,7 @@ async def _discover_areas(filter_str: str) -> str:
     result = await ha_request(
         "POST", "/template", json_data={"template": template}
     )
-    if not result or not isinstance(result, str):
+    if not isinstance(result, str):
         return "Unexpected response from Home Assistant (expected area list)."
 
     lines = []
@@ -330,7 +333,7 @@ async def _discover_floors(filter_str: str) -> str:
         raise  # Let discover() wrapper handle connection/auth errors
     except Exception:
         return "Floors not available (requires Home Assistant 2024.2+)."
-    if not result or not isinstance(result, str):
+    if not isinstance(result, str):
         return "Unexpected response from Home Assistant (expected floor list)."
 
     filt = filter_str.strip().lower()
@@ -752,7 +755,9 @@ async def do(
         # Two-step confirmation for protected domains: first call returns
         # a short-lived token; second call must include that token.
         confirmed = bool(data and data.get("confirmed"))
-        confirmation_token = (data or {}).get("confirmation_token") if data else None
+        confirmation_token = (
+            (data or {}).get("confirmation_token") if data else None
+        )
         if isinstance(confirmation_token, str):
             confirmation_token = confirmation_token.strip() or None
 

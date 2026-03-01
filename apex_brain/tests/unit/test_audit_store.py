@@ -1,9 +1,9 @@
 """
 Tests for the AuditStore — system_audit_log table.
 """
+
 from __future__ import annotations
 
-import json
 import pytest
 from memory.audit_store import AuditStore
 
@@ -93,9 +93,7 @@ async def test_get_recent_ordering(store):
 async def test_get_recent_limit(store):
     """Limit parameter restricts results."""
     for i in range(10):
-        await store.log(
-            tool="manage", action=f"action_{i}"
-        )
+        await store.log(tool="manage", action=f"action_{i}")
     entries = await store.get_recent(limit=3)
     assert len(entries) == 3
 
@@ -109,9 +107,7 @@ async def test_get_by_tool(store):
 
     manage_entries = await store.get_by_tool("manage")
     assert len(manage_entries) == 2
-    assert all(
-        e["tool"] == "manage" for e in manage_entries
-    )
+    assert all(e["tool"] == "manage" for e in manage_entries)
 
     config_entries = await store.get_by_tool("configure")
     assert len(config_entries) == 1

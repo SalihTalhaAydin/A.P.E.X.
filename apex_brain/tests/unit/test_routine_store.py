@@ -1,8 +1,8 @@
 """Tests for the Routine Store - dedicated routine storage with lifecycle."""
+
 from __future__ import annotations
 
 import pytest
-
 from memory.routine_store import RoutineStore
 
 
@@ -22,12 +22,18 @@ async def store(tmp_path):
 class TestSaveAndGet:
     @pytest.mark.asyncio
     async def test_save_new_routine(self, store):
-        rid = await store.save_routine("morning", ["Turn on lights", "Set thermostat"])
+        rid = await store.save_routine(
+            "morning", ["Turn on lights", "Set thermostat"]
+        )
         assert rid > 0
 
     @pytest.mark.asyncio
     async def test_get_routine(self, store):
-        await store.save_routine("morning", ["Turn on lights", "Set thermostat"], trigger="morning")
+        await store.save_routine(
+            "morning",
+            ["Turn on lights", "Set thermostat"],
+            trigger="morning",
+        )
         routine = await store.get_routine("morning")
         assert routine is not None
         assert routine["name"] == "morning"
@@ -42,7 +48,9 @@ class TestSaveAndGet:
 
     @pytest.mark.asyncio
     async def test_case_insensitive_name(self, store):
-        await store.save_routine("Movie Night", ["Dim lights", "Turn on TV"])
+        await store.save_routine(
+            "Movie Night", ["Dim lights", "Turn on TV"]
+        )
         routine = await store.get_routine("movie night")
         assert routine is not None
         assert routine["name"] == "movie night"
@@ -50,7 +58,9 @@ class TestSaveAndGet:
     @pytest.mark.asyncio
     async def test_update_existing_routine(self, store):
         await store.save_routine("morning", ["Turn on lights"])
-        await store.save_routine("morning", ["Turn on lights", "Play music"])
+        await store.save_routine(
+            "morning", ["Turn on lights", "Play music"]
+        )
         routine = await store.get_routine("morning")
         assert routine["steps"] == ["Turn on lights", "Play music"]
 
@@ -181,12 +191,24 @@ class TestStaleDetection:
 class TestMigration:
     @pytest.mark.asyncio
     async def test_migration_from_knowledge_store(self, store):
-        mock_ks = type("MockKS", (), {
-            "get_all_facts": lambda self, **kw: _async_return([
-                {"key": "good morning", "value": "Turn on lights. Set thermostat to 72."},
-                {"key": "bedtime", "value": "[trigger: bedtime] Turn off all lights. Lock doors."},
-            ])
-        })()
+        mock_ks = type(
+            "MockKS",
+            (),
+            {
+                "get_all_facts": lambda self, **kw: _async_return(
+                    [
+                        {
+                            "key": "good morning",
+                            "value": "Turn on lights. Set thermostat to 72.",
+                        },
+                        {
+                            "key": "bedtime",
+                            "value": "[trigger: bedtime] Turn off all lights. Lock doors.",
+                        },
+                    ]
+                )
+            },
+        )()
         count = await store.migrate_from_knowledge_store(mock_ks)
         assert count == 2
         morning = await store.get_routine("good morning")
@@ -196,11 +218,17 @@ class TestMigration:
     @pytest.mark.asyncio
     async def test_migration_skips_existing(self, store):
         await store.save_routine("good morning", ["Existing steps"])
-        mock_ks = type("MockKS", (), {
-            "get_all_facts": lambda self, **kw: _async_return([
-                {"key": "good morning", "value": "New steps."},
-            ])
-        })()
+        mock_ks = type(
+            "MockKS",
+            (),
+            {
+                "get_all_facts": lambda self, **kw: _async_return(
+                    [
+                        {"key": "good morning", "value": "New steps."},
+                    ]
+                )
+            },
+        )()
         count = await store.migrate_from_knowledge_store(mock_ks)
         assert count == 0
         routine = await store.get_routine("good morning")
@@ -208,11 +236,20 @@ class TestMigration:
 
     @pytest.mark.asyncio
     async def test_migration_strips_trigger_prefix(self, store):
-        mock_ks = type("MockKS", (), {
-            "get_all_facts": lambda self, **kw: _async_return([
-                {"key": "bedtime", "value": "[trigger: bedtime] Turn off lights. Lock doors."},
-            ])
-        })()
+        mock_ks = type(
+            "MockKS",
+            (),
+            {
+                "get_all_facts": lambda self, **kw: _async_return(
+                    [
+                        {
+                            "key": "bedtime",
+                            "value": "[trigger: bedtime] Turn off lights. Lock doors.",
+                        },
+                    ]
+                )
+            },
+        )()
         await store.migrate_from_knowledge_store(mock_ks)
         routine = await store.get_routine("bedtime")
         assert routine is not None

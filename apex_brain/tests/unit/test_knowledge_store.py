@@ -1,6 +1,7 @@
 """Tests for memory.knowledge_store."""
 
-from unittest.mock import AsyncMock, patch
+
+from datetime import timezone
 
 import numpy as np
 import pytest
@@ -20,7 +21,9 @@ def test_cosine_similarity_normal_vectors():
 
     orth_a = np.array([1.0, 0.0, 0.0], dtype=np.float32)
     orth_b = np.array([0.0, 1.0, 0.0], dtype=np.float32)
-    assert _cosine_similarity(orth_a, orth_b) == pytest.approx(0.0, abs=1e-6)
+    assert _cosine_similarity(orth_a, orth_b) == pytest.approx(
+        0.0, abs=1e-6
+    )
 
 
 def test_cosine_similarity_zero_norm_returns_zero():
@@ -58,7 +61,9 @@ def test_deserialize_embedding_truncated_blob_raises():
 
 
 @pytest.mark.asyncio
-async def test_set_embed_function_accepts_callable(temp_db_path, mock_embed):
+async def test_set_embed_function_accepts_callable(
+    temp_db_path, mock_embed
+):
     """set_embed_function accepts a callable; semantic search uses it for embeddings."""
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -108,15 +113,22 @@ async def test_knowledge_store_search_semantic_returns_results(
 
 
 @pytest.mark.asyncio
-async def test_embed_text_pydantic_like_response_no_attribute_error(temp_db_path):
+async def test_embed_text_pydantic_like_response_no_attribute_error(
+    temp_db_path,
+):
     """Regression for Bug 7: Pydantic/named-tuple items (no .get) must not raise AttributeError."""
+
     # Pydantic-like object: has .embedding attribute but no .get method
     class PydanticLikeItem:
         def __init__(self, embedding):
             self.embedding = embedding
 
     async def embed_fn(_text):
-        return type("EmbeddingResponse", (), {"data": [PydanticLikeItem([0.1, 0.2, 0.3, 0.4])]})()
+        return type(
+            "EmbeddingResponse",
+            (),
+            {"data": [PydanticLikeItem([0.1, 0.2, 0.3, 0.4])]},
+        )()
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(embed_fn)
@@ -135,12 +147,15 @@ async def test_embed_text_pydantic_like_no_embedding_attr_no_attribute_error(
     temp_db_path,
 ):
     """Regression for Bug 7: Object with no .get and no .embedding must not raise AttributeError."""
+
     # Object with no .embedding and no .get - the exact Bug 7 case
     class PydanticLikeItem:
         pass
 
     async def embed_fn(_text):
-        return type("EmbeddingResponse", (), {"data": [PydanticLikeItem()]})()
+        return type(
+            "EmbeddingResponse", (), {"data": [PydanticLikeItem()]}
+        )()
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(embed_fn)
@@ -156,6 +171,7 @@ async def test_embed_text_pydantic_like_no_embedding_attr_no_attribute_error(
 @pytest.mark.asyncio
 async def test_embed_text_dict_style_response_item(temp_db_path):
     """Regression for Bug 7: dict-style items use .get() correctly."""
+
     # Dict-style item: common in raw JSON / older LiteLLM responses
     async def embed_fn(_text):
         return type(
@@ -173,19 +189,16 @@ async def test_embed_text_dict_style_response_item(temp_db_path):
 
     assert result is not None
     assert isinstance(result, np.ndarray)
-    assert list(result) == pytest.approx(
-        [0.5, 0.6, 0.7, 0.8], abs=1e-5
-    )
+    assert list(result) == pytest.approx([0.5, 0.6, 0.7, 0.8], abs=1e-5)
 
 
 @pytest.mark.asyncio
 async def test_embed_text_dict_response_with_data_key(temp_db_path):
     """Regression for Bug 7: pure dict response (response['data']) works."""
+
     # Entire response is a dict, not an object
     async def embed_fn(_text):
-        return {
-            "data": [{"embedding": [0.9, 0.1, 0.2, 0.3]}]
-        }
+        return {"data": [{"embedding": [0.9, 0.1, 0.2, 0.3]}]}
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(embed_fn)
@@ -196,17 +209,18 @@ async def test_embed_text_dict_response_with_data_key(temp_db_path):
 
     assert result is not None
     assert isinstance(result, np.ndarray)
-    assert list(result) == pytest.approx(
-        [0.9, 0.1, 0.2, 0.3], abs=1e-5
-    )
+    assert list(result) == pytest.approx([0.9, 0.1, 0.2, 0.3], abs=1e-5)
 
 
 @pytest.mark.asyncio
-async def test_embed_text_empty_data_non_numeric_response_returns_none(temp_db_path):
+async def test_embed_text_empty_data_non_numeric_response_returns_none(
+    temp_db_path,
+):
     """Regression for Bug 77 (P5-BUG-85): when data is empty and response is
     a dict/LiteLLM object (not a list of floats), return None instead of
     np.array() creating invalid object array and breaking cosine similarity.
     """
+
     async def embed_fn(_text):
         # LiteLLM-style response with empty/None data; response itself is dict
         return {"choices": [], "model": "embedding-model"}
@@ -224,6 +238,7 @@ async def test_embed_text_empty_data_non_numeric_response_returns_none(temp_db_p
 @pytest.mark.asyncio
 async def test_embed_text_empty_data_raw_list_works(temp_db_path):
     """When data is empty, raw list of floats (direct embed output) still works."""
+
     async def embed_fn(_text):
         return [0.5, 0.5, 0.5, 0.5]
 
@@ -240,13 +255,15 @@ async def test_embed_text_empty_data_raw_list_works(temp_db_path):
 
 
 @pytest.mark.asyncio
-async def test_get_due_reminders_returns_expired_reminders_only(temp_db_path):
+async def test_get_due_reminders_returns_expired_reminders_only(
+    temp_db_path,
+):
     """get_due_reminders returns reminders with expires_at <= now.
 
     Regression for Bug 4: get_all_facts excluded expired facts and did not
     include expires_at in the SELECT; get_due_reminders fixes both.
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     await store.initialize()
@@ -257,13 +274,11 @@ async def test_get_due_reminders_returns_expired_reminders_only(temp_db_path):
 
     # Store due reminder (expires_at in past)
     await store.store_fact(
-        "reminder", "due_reminder", "pick up milk",
-        expires_at=past
+        "reminder", "due_reminder", "pick up milk", expires_at=past
     )
     # Store future reminder (expires_at in future)
     await store.store_fact(
-        "reminder", "future_reminder", "tomorrow task",
-        expires_at=future
+        "reminder", "future_reminder", "tomorrow task", expires_at=future
     )
     # Store reminder with no expires_at (should not appear)
     await store.store_fact("reminder", "no_expiry", "someday task")
@@ -281,7 +296,9 @@ async def test_get_due_reminders_returns_expired_reminders_only(temp_db_path):
 
 
 @pytest.mark.asyncio
-async def test_get_due_reminders_naive_and_tzaware_both_returned(temp_db_path):
+async def test_get_due_reminders_naive_and_tzaware_both_returned(
+    temp_db_path,
+):
     """Regression for Bug 3 (P9-BUG-144): reminders with naive and tz-aware
     expires_at, both in the past, must both be returned by get_due_reminders.
 
@@ -303,11 +320,15 @@ async def test_get_due_reminders_naive_and_tzaware_both_returned(temp_db_path):
     tzaware_past = (past.astimezone(tz_plus5)).isoformat()
 
     await store.store_fact(
-        "reminder", "naive_past", "pick up milk",
+        "reminder",
+        "naive_past",
+        "pick up milk",
         expires_at=naive_past,
     )
     await store.store_fact(
-        "reminder", "tzaware_past", "call dentist",
+        "reminder",
+        "tzaware_past",
+        "call dentist",
         expires_at=tzaware_past,
     )
 
@@ -344,7 +365,8 @@ async def test_get_due_reminders_timezone_offset_comparison(temp_db_path):
     expired_str = expired_dt.isoformat()
 
     await store.store_fact(
-        "reminder", "tz_offset_reminder",
+        "reminder",
+        "tz_offset_reminder",
         "call dentist",
         expires_at=expired_str,
     )
@@ -362,7 +384,7 @@ async def test_get_due_reminders_timezone_offset_comparison(temp_db_path):
 async def test_get_due_reminders_naive_timestamp(temp_db_path):
     """Regression for Bug 3: naive (no timezone) expires_at values
     must be treated as UTC and compared correctly."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     await store.initialize()
@@ -378,11 +400,15 @@ async def test_get_due_reminders_naive_timestamp(temp_db_path):
     )
 
     await store.store_fact(
-        "reminder", "past_naive", "past task",
+        "reminder",
+        "past_naive",
+        "past task",
         expires_at=past_naive,
     )
     await store.store_fact(
-        "reminder", "future_naive", "future task",
+        "reminder",
+        "future_naive",
+        "future task",
         expires_at=future_naive,
     )
 
@@ -397,19 +423,22 @@ async def test_get_due_reminders_naive_timestamp(temp_db_path):
 async def test_get_due_reminders_date_only_string(temp_db_path):
     """Regression for Bug 3: date-only expires_at like '2020-01-01'
     must be parsed and compared correctly as midnight UTC."""
-    from datetime import datetime, timezone
 
     store = KnowledgeStore(temp_db_path)
     await store.initialize()
 
     # A date far in the past (always due)
     await store.store_fact(
-        "reminder", "old_date_reminder", "old task",
+        "reminder",
+        "old_date_reminder",
+        "old task",
         expires_at="2020-01-01",
     )
     # A date far in the future (never due)
     await store.store_fact(
-        "reminder", "future_date_reminder", "future task",
+        "reminder",
+        "future_date_reminder",
+        "future task",
         expires_at="2099-12-31",
     )
 
@@ -424,18 +453,18 @@ async def test_get_due_reminders_date_only_string(temp_db_path):
 async def test_get_due_reminders_z_suffix(temp_db_path):
     """Regression for Bug 3: expires_at with 'Z' suffix must be
     handled correctly (equivalent to +00:00)."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     await store.initialize()
 
     utc_now = datetime.now(timezone.utc)
-    past_z = (utc_now - timedelta(hours=1)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
+    past_z = (utc_now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     await store.store_fact(
-        "reminder", "z_reminder", "z task",
+        "reminder",
+        "z_reminder",
+        "z task",
         expires_at=past_z,
     )
 
@@ -466,9 +495,7 @@ async def test_store_fact_no_transaction_within_transaction(
     await store.initialize()
 
     # This must not raise OperationalError
-    fact_id = await store.store_fact(
-        "preference", "color", "blue", 1.0
-    )
+    fact_id = await store.store_fact("preference", "color", "blue", 1.0)
     assert isinstance(fact_id, int)
     assert fact_id > 0
 
@@ -490,15 +517,9 @@ async def test_store_fact_multiple_calls_no_txn_error(
     store = KnowledgeStore(temp_db_path)
     await store.initialize()
 
-    id1 = await store.store_fact(
-        "pref", "food", "pizza", 0.9
-    )
-    id2 = await store.store_fact(
-        "pref", "drink", "water", 0.8
-    )
-    id3 = await store.store_fact(
-        "pref", "sport", "tennis", 0.7
-    )
+    id1 = await store.store_fact("pref", "food", "pizza", 0.9)
+    id2 = await store.store_fact("pref", "drink", "water", 0.8)
+    id3 = await store.store_fact("pref", "sport", "tennis", 0.7)
 
     assert id1 > 0
     assert id2 > 0
@@ -521,13 +542,9 @@ async def test_store_fact_conflict_update_no_txn_error(
     store = KnowledgeStore(temp_db_path)
     await store.initialize()
 
-    id1 = await store.store_fact(
-        "pref", "color", "red", 0.5
-    )
+    id1 = await store.store_fact("pref", "color", "red", 0.5)
     # Same key, higher confidence → should update
-    id2 = await store.store_fact(
-        "pref", "color", "blue", 0.9
-    )
+    id2 = await store.store_fact("pref", "color", "blue", 0.9)
 
     assert id1 == id2  # same fact updated
     results = await store.search_keyword("color")
@@ -565,9 +582,7 @@ async def test_store_fact_rollback_does_not_mask_exception(
     db.rollback = failing_rollback
 
     with pytest.raises(RuntimeError, match="simulated DB error"):
-        await store.store_fact(
-            "pref", "color", "green", 1.0
-        )
+        await store.store_fact("pref", "color", "green", 1.0)
 
     await store.close()
 
@@ -602,9 +617,7 @@ async def test_store_fact_rollback_succeeds_on_error(
     db.rollback = tracking_rollback
 
     with pytest.raises(ValueError, match="simulated select failure"):
-        await store.store_fact(
-            "pref", "color", "green", 1.0
-        )
+        await store.store_fact("pref", "color", "green", 1.0)
 
     # Verify rollback was actually called
     assert rollback_called
@@ -684,7 +697,6 @@ async def test_correct_fact_sets_source_user(temp_db_path, mock_embed):
     decay_confidence() skips facts with source='user'. Corrected facts
     must retain user source so they are not decayed.
     """
-    from datetime import datetime, timedelta, timezone
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -710,13 +722,15 @@ async def test_correct_fact_sets_source_user(temp_db_path, mock_embed):
 
 
 @pytest.mark.asyncio
-async def test_correct_fact_source_user_skips_decay(temp_db_path, mock_embed):
+async def test_correct_fact_source_user_skips_decay(
+    temp_db_path, mock_embed
+):
     """Regression for Bug 30: corrected facts (source='user') must not decay.
 
     decay_confidence() skips source='user'. After correct_fact, running
     decay should leave the fact's confidence unchanged.
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -738,7 +752,9 @@ async def test_correct_fact_source_user_skips_decay(temp_db_path, mock_embed):
         )
         await db.commit()
 
-    decayed = await store.decay_confidence(decay_rate=0.1, min_confidence=0.3)
+    decayed = await store.decay_confidence(
+        decay_rate=0.1, min_confidence=0.3
+    )
     # User facts are skipped; nothing should decay
     assert decayed == 0
 
@@ -756,7 +772,9 @@ async def test_correct_fact_source_user_skips_decay(temp_db_path, mock_embed):
 
 
 @pytest.mark.asyncio
-async def test_correct_fact_transaction_atomic_update(temp_db_path, mock_embed):
+async def test_correct_fact_transaction_atomic_update(
+    temp_db_path, mock_embed
+):
     """Regression for Bug 31: correct_fact uses BEGIN IMMEDIATE for atomicity.
 
     Verifies correct_fact atomically updates existing facts and does not
@@ -767,7 +785,9 @@ async def test_correct_fact_transaction_atomic_update(temp_db_path, mock_embed):
     await store.initialize()
 
     await store.store_fact("pref", "fruit", "likes apples", 0.7)
-    result = await store.correct_fact("pref", "fruit", "likes oranges", 1.0)
+    result = await store.correct_fact(
+        "pref", "fruit", "likes oranges", 1.0
+    )
 
     assert "Updated" in result
     results = await store.search_keyword("fruit")
@@ -777,7 +797,9 @@ async def test_correct_fact_transaction_atomic_update(temp_db_path, mock_embed):
 
 
 @pytest.mark.asyncio
-async def test_correct_fact_transaction_insert_when_missing(temp_db_path, mock_embed):
+async def test_correct_fact_transaction_insert_when_missing(
+    temp_db_path, mock_embed
+):
     """Regression for Bug 31: correct_fact inserts when no existing fact.
 
     When (category, key) does not exist, correct_fact calls store_fact
@@ -850,7 +872,7 @@ async def test_decay_skips_user_source_decays_auto_source(
     user-stated facts) must retain full confidence. Auto-inferred facts decay
     when last_mentioned_at is older than 30 days.
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -896,7 +918,9 @@ async def test_decay_skips_user_source_decays_auto_source(
         rows = await cursor.fetchall()
     await store.close()
 
-    by_key = {r[0]: (r[1], r[2]) for r in rows}  # key -> (source, confidence)
+    by_key = {
+        r[0]: (r[1], r[2]) for r in rows
+    }  # key -> (source, confidence)
 
     # user fact: unchanged (confidence 0.9)
     assert "user_drink" in by_key
@@ -951,7 +975,7 @@ async def test_decay_confidence_skips_source_user_facts(
     Facts with source='user' are excluded from decay via WHERE source != 'user'.
     Run decay with old last_mentioned_at; user facts must keep their confidence.
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -999,7 +1023,7 @@ async def test_corrected_facts_survive_decay_cycles(
     Critical interaction: store_fact (auto) → correct_fact (sets source=user)
     → decay runs multiple times → fact must retain value and confidence.
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -1100,12 +1124,8 @@ async def test_get_contradictory_facts_empty_when_values_match(
     store.set_embed_function(mock_embed)
     await store.initialize()
 
-    await store.store_fact(
-        "preference", "drink_a", "likes espresso", 0.9
-    )
-    await store.store_fact(
-        "preference", "drink_b", "likes espresso", 0.8
-    )
+    await store.store_fact("preference", "drink_a", "likes espresso", 0.9)
+    await store.store_fact("preference", "drink_b", "likes espresso", 0.8)
 
     contradictions = await store.get_contradictory_facts(
         similarity_threshold=0.85, limit=200
@@ -1116,44 +1136,13 @@ async def test_get_contradictory_facts_empty_when_values_match(
     assert len(contradictions) == 0
 
 
-@pytest.mark.asyncio
-async def test_curator_resolves_contradictions_from_knowledge_store(
-    temp_db_path, mock_embed
-):
-    """Integration: Curator.audit_facts resolves contradictions returned
-    by get_contradictory_facts (Bug 28 flow). Use different categories so
-    semantic dedup doesn't merge into one fact.
-    """
-    from brain.curator import Curator
-
-    store = KnowledgeStore(temp_db_path)
-    store.set_embed_function(mock_embed)
-    await store.initialize()
-
-    # Create contradictory facts: different categories so dedup won't merge
-    await store.store_fact(
-        "pref", "drink", "coffee", 0.9
-    )
-    await store.store_fact(
-        "other", "beverage", "tea", 0.5
-    )
-
-    # Real curator with real knowledge_store (no mock)
-    conv = AsyncMock()
-    curator = Curator(conv, store)
-
-    result = await curator.audit_facts()
-    await store.close()
-
-    # Should resolve the contradiction (higher confidence wins → delete tea)
-    assert "Resolved" in result or "Facts healthy" in result
-
-
 # ── Bug 17 regression: uninitialized store raises RuntimeError ──
 
 
 @pytest.mark.asyncio
-async def test_knowledge_store_uninitialized_raises_runtime_error(temp_db_path):
+async def test_knowledge_store_uninitialized_raises_runtime_error(
+    temp_db_path,
+):
     """Regression for Bug 17: methods raise RuntimeError when initialize() not called."""
     store = KnowledgeStore(temp_db_path)
 
@@ -1219,8 +1208,10 @@ async def test_get_contradictory_facts_finds_semantic_contradictions(
     store.set_embed_function(mock_embed)
     await store.initialize()
 
-    await store.store_fact("pref", "coffee_a", "likes dark roast", 1.0)
-    await store.store_fact("pref", "coffee_b", "likes light roast", 1.0)
+    await store.store_fact(
+        "beverages", "coffee_a", "likes dark roast", 1.0
+    )
+    await store.store_fact("drinks", "coffee_b", "likes light roast", 1.0)
     contrad = await store.get_contradictory_facts()
     await store.close()
 
@@ -1242,7 +1233,9 @@ async def test_get_contradictory_facts_excludes_same_value_pairs(
     await store.initialize()
 
     await store.store_fact("pref", "key1", "dark roast", 1.0)
-    await store.store_fact("pref", "key2", "Dark Roast", 1.0)  # same when normalized
+    await store.store_fact(
+        "pref", "key2", "Dark Roast", 1.0
+    )  # same when normalized
     contrad = await store.get_contradictory_facts()
     await store.close()
 
@@ -1321,9 +1314,11 @@ async def test_delete_fact_returns_false_when_not_found(temp_db_path):
 
 
 @pytest.mark.asyncio
-async def test_decay_confidence_reduces_confidence(temp_db_path, mock_embed):
+async def test_decay_confidence_reduces_confidence(
+    temp_db_path, mock_embed
+):
     """decay_confidence reduces confidence of facts not mentioned in 30+ days."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -1340,7 +1335,9 @@ async def test_decay_confidence_reduces_confidence(temp_db_path, mock_embed):
         )
         await store._shared.connection.commit()
 
-    decayed = await store.decay_confidence(decay_rate=0.5, min_confidence=0.3)
+    decayed = await store.decay_confidence(
+        decay_rate=0.5, min_confidence=0.3
+    )
     assert decayed == 1
 
     facts = await store.get_all_facts()
@@ -1352,7 +1349,7 @@ async def test_decay_confidence_reduces_confidence(temp_db_path, mock_embed):
 @pytest.mark.asyncio
 async def test_decay_confidence_skips_user_facts(temp_db_path, mock_embed):
     """decay_confidence skips facts with source='user'."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -1370,7 +1367,9 @@ async def test_decay_confidence_skips_user_facts(temp_db_path, mock_embed):
         )
         await store._shared.connection.commit()
 
-    decayed = await store.decay_confidence(decay_rate=0.5, min_confidence=0.3)
+    decayed = await store.decay_confidence(
+        decay_rate=0.5, min_confidence=0.3
+    )
     assert decayed == 0
 
     facts = await store.get_all_facts()
@@ -1392,7 +1391,9 @@ async def test_decay_confidence_tz_aware_non_utc_converted_to_utc(
     store.set_embed_function(mock_embed)
     await store.initialize()
 
-    await store.store_fact("pref", "tz_aware_old", "value", 0.9, source="auto")
+    await store.store_fact(
+        "pref", "tz_aware_old", "value", 0.9, source="auto"
+    )
 
     # 60 days ago in UTC, expressed as +05:00 (timezone-aware non-UTC)
     utc_60_days_ago = datetime.now(timezone.utc) - timedelta(days=60)
@@ -1406,7 +1407,9 @@ async def test_decay_confidence_tz_aware_non_utc_converted_to_utc(
         )
         await store._shared.connection.commit()
 
-    decayed = await store.decay_confidence(decay_rate=0.5, min_confidence=0.3)
+    decayed = await store.decay_confidence(
+        decay_rate=0.5, min_confidence=0.3
+    )
     assert decayed == 1
 
     facts = await store.get_all_facts()
@@ -1422,13 +1425,15 @@ async def test_decay_confidence_naive_timestamp_treated_as_utc(
     """Regression for Bug 78: naive last_mentioned_at (no Z/tz in string) must
     be treated as UTC via replace(tzinfo=timezone.utc) for correct age calc.
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
     await store.initialize()
 
-    await store.store_fact("pref", "naive_old", "value", 0.9, source="auto")
+    await store.store_fact(
+        "pref", "naive_old", "value", 0.9, source="auto"
+    )
 
     # 60 days ago, stored as naive ISO string (no timezone) — must be treated as UTC
     utc_60_days_ago = datetime.now(timezone.utc) - timedelta(days=60)
@@ -1441,7 +1446,9 @@ async def test_decay_confidence_naive_timestamp_treated_as_utc(
         )
         await store._shared.connection.commit()
 
-    decayed = await store.decay_confidence(decay_rate=0.5, min_confidence=0.3)
+    decayed = await store.decay_confidence(
+        decay_rate=0.5, min_confidence=0.3
+    )
     assert decayed == 1
 
     facts = await store.get_all_facts()
@@ -1451,9 +1458,11 @@ async def test_decay_confidence_naive_timestamp_treated_as_utc(
 
 
 @pytest.mark.asyncio
-async def test_decay_confidence_respects_min_confidence(temp_db_path, mock_embed):
+async def test_decay_confidence_respects_min_confidence(
+    temp_db_path, mock_embed
+):
     """decay_confidence does not reduce below min_confidence."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -1533,7 +1542,7 @@ async def test_get_all_facts_respects_limit(temp_db_path, mock_embed):
 @pytest.mark.asyncio
 async def test_get_all_facts_excludes_expired(temp_db_path, mock_embed):
     """get_all_facts excludes facts with expires_at in the past."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -1555,7 +1564,7 @@ async def test_get_all_facts_excludes_expired(temp_db_path, mock_embed):
 @pytest.mark.asyncio
 async def test_get_due_reminders_respects_limit(temp_db_path):
     """get_due_reminders respects limit parameter."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     await store.initialize()
@@ -1572,9 +1581,11 @@ async def test_get_due_reminders_respects_limit(temp_db_path):
 
 
 @pytest.mark.asyncio
-async def test_cleanup_expired_deletes_expired_facts(temp_db_path, mock_embed):
+async def test_cleanup_expired_deletes_expired_facts(
+    temp_db_path, mock_embed
+):
     """cleanup_expired deletes facts with expires_at in the past."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -1598,7 +1609,7 @@ async def test_cleanup_expired_deletes_expired_facts(temp_db_path, mock_embed):
 @pytest.mark.asyncio
 async def test_cleanup_expired_keeps_non_expired(temp_db_path, mock_embed):
     """cleanup_expired leaves non-expired facts and those without expires_at."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -1606,8 +1617,10 @@ async def test_cleanup_expired_keeps_non_expired(temp_db_path, mock_embed):
 
     future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
 
-    await store.store_fact("pref", "no_expiry", "val", 1.0)
-    await store.store_fact("pref", "future_expiry", "val", 1.0, expires_at=future)
+    await store.store_fact("pref", "no_expiry", "stays forever", 1.0)
+    await store.store_fact(
+        "pref", "future_expiry", "expires later", 1.0, expires_at=future
+    )
 
     deleted = await store.cleanup_expired()
     assert deleted == 0
@@ -1620,7 +1633,7 @@ async def test_cleanup_expired_keeps_non_expired(temp_db_path, mock_embed):
 @pytest.mark.asyncio
 async def test_cleanup_expired_returns_count(temp_db_path, mock_embed):
     """cleanup_expired returns the number of deleted rows."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -1656,7 +1669,7 @@ async def test_correct_fact_updates_existing(temp_db_path, mock_embed):
 @pytest.mark.asyncio
 async def test_touch_fact_updates_last_mentioned(temp_db_path, mock_embed):
     """touch_fact updates last_mentioned_at for the given fact_id."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -1715,7 +1728,9 @@ async def test_get_low_confidence_facts_returns_below_threshold(
 
 
 @pytest.mark.asyncio
-async def test_get_low_confidence_facts_respects_limit(temp_db_path, mock_embed):
+async def test_get_low_confidence_facts_respects_limit(
+    temp_db_path, mock_embed
+):
     """get_low_confidence_facts respects limit parameter."""
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -1730,16 +1745,20 @@ async def test_get_low_confidence_facts_respects_limit(temp_db_path, mock_embed)
 
 
 @pytest.mark.asyncio
-async def test_get_low_confidence_facts_excludes_expired(temp_db_path, mock_embed):
+async def test_get_low_confidence_facts_excludes_expired(
+    temp_db_path, mock_embed
+):
     """get_low_confidence_facts excludes facts with expires_at in the past."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
     await store.initialize()
 
     past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-    await store.store_fact("pref", "expired_low", "v", 0.2, expires_at=past)
+    await store.store_fact(
+        "pref", "expired_low", "v", 0.2, expires_at=past
+    )
     await store.store_fact("pref", "valid_low", "v", 0.3)
 
     low = await store.get_low_confidence_facts(threshold=0.5)
@@ -1749,9 +1768,11 @@ async def test_get_low_confidence_facts_excludes_expired(temp_db_path, mock_embe
 
 
 @pytest.mark.asyncio
-async def test_get_stale_facts_returns_old_mentions(temp_db_path, mock_embed):
+async def test_get_stale_facts_returns_old_mentions(
+    temp_db_path, mock_embed
+):
     """get_stale_facts returns facts not mentioned in N days."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -1780,7 +1801,7 @@ async def test_get_stale_facts_returns_old_mentions(temp_db_path, mock_embed):
 @pytest.mark.asyncio
 async def test_get_stale_facts_respects_limit(temp_db_path, mock_embed):
     """get_stale_facts respects limit parameter."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -1823,7 +1844,9 @@ async def test_delete_fact_by_id_removes_fact(temp_db_path, mock_embed):
 
 
 @pytest.mark.asyncio
-async def test_delete_fact_by_id_returns_false_when_not_found(temp_db_path):
+async def test_delete_fact_by_id_returns_false_when_not_found(
+    temp_db_path,
+):
     """delete_fact_by_id returns False when no fact has that ID."""
     store = KnowledgeStore(temp_db_path)
     await store.initialize()
@@ -1857,7 +1880,7 @@ async def test_store_fact_force_updates_regardless_of_confidence(
 @pytest.mark.asyncio
 async def test_store_fact_with_expires_at(temp_db_path, mock_embed):
     """store_fact stores expires_at correctly."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -1875,7 +1898,9 @@ async def test_store_fact_with_expires_at(temp_db_path, mock_embed):
 
 
 @pytest.mark.asyncio
-async def test_store_fact_same_value_touches_only(temp_db_path, mock_embed):
+async def test_store_fact_same_value_touches_only(
+    temp_db_path, mock_embed
+):
     """store_fact with same value updates last_mentioned_at only, same fact_id."""
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -1892,7 +1917,9 @@ async def test_store_fact_same_value_touches_only(temp_db_path, mock_embed):
 
 
 @pytest.mark.asyncio
-async def test_search_semantic_fallback_to_keyword_when_no_embed(temp_db_path):
+async def test_search_semantic_fallback_to_keyword_when_no_embed(
+    temp_db_path,
+):
     """search_semantic falls back to search_keyword when no embedding fn set."""
     store = KnowledgeStore(temp_db_path)
     await store.initialize()
@@ -1907,8 +1934,11 @@ async def test_search_semantic_fallback_to_keyword_when_no_embed(temp_db_path):
 
 
 @pytest.mark.asyncio
-async def test_search_semantic_fallback_when_embed_returns_none(temp_db_path):
+async def test_search_semantic_fallback_when_embed_returns_none(
+    temp_db_path,
+):
     """search_semantic falls back to search_keyword when embed_fn returns None (e.g. on error)."""
+
     async def failing_embed(_text):
         raise ValueError("embedding API error")
 
@@ -1926,7 +1956,9 @@ async def test_search_semantic_fallback_when_embed_returns_none(temp_db_path):
 
 
 @pytest.mark.asyncio
-async def test_search_keyword_escapes_special_chars(temp_db_path, mock_embed):
+async def test_search_keyword_escapes_special_chars(
+    temp_db_path, mock_embed
+):
     """search_keyword escapes LIKE wildcards %, _, \\ correctly."""
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -1945,8 +1977,11 @@ async def test_search_keyword_escapes_special_chars(temp_db_path, mock_embed):
 
 
 @pytest.mark.asyncio
-async def test_search_semantic_zero_query_vector_fallback(temp_db_path, mock_embed):
+async def test_search_semantic_zero_query_vector_fallback(
+    temp_db_path, mock_embed
+):
     """search_semantic falls back to keyword when query embedding has zero norm."""
+
     async def zero_embed(_text):
         return [0.0, 0.0, 0.0, 0.0]
 
@@ -1970,8 +2005,17 @@ async def test_search_keyword_respects_limit(temp_db_path, mock_embed):
     store.set_embed_function(mock_embed)
     await store.initialize()
 
+    distinct_values = [
+        "coffee dark",
+        "weather sunny",
+        "tea green",
+        "rain heavy",
+        "test fallback",
+    ]
     for i in range(5):
-        await store.store_fact("pref", f"match_{i}", "match value", 1.0)
+        await store.store_fact(
+            f"cat_{i}", f"match_{i}", distinct_values[i], 1.0
+        )
 
     results = await store.search_keyword("match", limit=2)
     assert len(results) == 2
@@ -1979,7 +2023,9 @@ async def test_search_keyword_respects_limit(temp_db_path, mock_embed):
 
 
 @pytest.mark.asyncio
-async def test_search_semantic_returns_similarity_score(temp_db_path, mock_embed):
+async def test_search_semantic_returns_similarity_score(
+    temp_db_path, mock_embed
+):
     """search_semantic includes similarity score in results."""
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -1995,7 +2041,9 @@ async def test_search_semantic_returns_similarity_score(temp_db_path, mock_embed
 
 
 @pytest.mark.asyncio
-async def test_search_semantic_ranking_relevant_facts_first(temp_db_path, mock_embed):
+async def test_search_semantic_ranking_relevant_facts_first(
+    temp_db_path, mock_embed
+):
     """Semantic search ranks relevant facts higher than irrelevant ones.
 
     With mock_embed returning text-dependent vectors (Bug 51 fix), query
@@ -2005,7 +2053,9 @@ async def test_search_semantic_ranking_relevant_facts_first(temp_db_path, mock_e
     store.set_embed_function(mock_embed)
     await store.initialize()
 
-    await store.store_fact("fact", "weather_key", "weather is sunny today", 1.0)
+    await store.store_fact(
+        "fact", "weather_key", "weather is sunny today", 1.0
+    )
     await store.store_fact("fact", "coffee_key", "coffee dark roast", 1.0)
 
     results = await store.search_semantic("weather", limit=5)
@@ -2033,9 +2083,7 @@ async def test_store_fact_duplicate_adopts_new_key_value_confidence_embedding(
     await store.initialize()
 
     # Store initial fact
-    id1 = await store.store_fact(
-        "pref", "old_key", "old value", 0.6
-    )
+    id1 = await store.store_fact("pref", "old_key", "old value", 0.6)
     # Semantic duplicate (different key, more specific value, higher confidence)
     # mock_embed clusters old/refined/specific/value → _check_duplicate finds it
     id2 = await store.store_fact(
@@ -2065,9 +2113,7 @@ async def test_store_fact_semantic_dedup_skips_duplicate_insert(
     store.set_embed_function(mock_embed)
     await store.initialize()
 
-    id1 = await store.store_fact(
-        "pref", "coffee", "likes espresso", 0.9
-    )
+    id1 = await store.store_fact("pref", "coffee", "likes espresso", 0.9)
     # Different key, semantically similar value (mock_embed clusters espresso)
     id2 = await store.store_fact(
         "pref", "morning_drink", "prefers espresso shots", 0.5
@@ -2088,13 +2134,14 @@ async def test_decay_confidence_skips_facts_with_null_last_mentioned(
     temp_db_path, mock_embed
 ):
     """decay_confidence skips facts where last_mentioned_at IS NULL."""
-    from datetime import datetime, timedelta, timezone
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
     await store.initialize()
 
-    await store.store_fact("pref", "no_last_mentioned", "v", 0.5, source="auto")
+    await store.store_fact(
+        "pref", "no_last_mentioned", "v", 0.5, source="auto"
+    )
     async with store._shared.lock:
         db = store._shared.connection
         await db.execute(
@@ -2103,13 +2150,17 @@ async def test_decay_confidence_skips_facts_with_null_last_mentioned(
         )
         await db.commit()
 
-    decayed = await store.decay_confidence(decay_rate=0.5, min_confidence=0.3)
+    decayed = await store.decay_confidence(
+        decay_rate=0.5, min_confidence=0.3
+    )
     assert decayed == 0
     await store.close()
 
 
 @pytest.mark.asyncio
-async def test_search_semantic_fallback_when_embedding_raises(temp_db_path):
+async def test_search_semantic_fallback_when_embedding_raises(
+    temp_db_path,
+):
     """search_semantic falls back to search_keyword when _embed_text raises."""
     store = KnowledgeStore(temp_db_path)
     await store.initialize()
@@ -2130,7 +2181,9 @@ async def test_search_semantic_fallback_when_embedding_raises(temp_db_path):
 
 
 @pytest.mark.asyncio
-async def test_search_semantic_fallback_when_embedding_returns_none(temp_db_path):
+async def test_search_semantic_fallback_when_embedding_returns_none(
+    temp_db_path,
+):
     """search_semantic falls back to search_keyword when _embed_text returns None."""
     store = KnowledgeStore(temp_db_path)
     await store.initialize()
@@ -2161,7 +2214,9 @@ async def test_get_contradictory_facts_respects_similarity_threshold(
     await store.store_fact("fact", "b", "value two", 1.0)
 
     # With very high threshold, no pairs pass
-    contrad = await store.get_contradictory_facts(similarity_threshold=1.01)
+    contrad = await store.get_contradictory_facts(
+        similarity_threshold=1.01
+    )
     await store.close()
 
     assert contrad == []
@@ -2190,7 +2245,9 @@ async def test_store_fact_without_embed_fn_stores_with_null_embedding(
 
 
 @pytest.mark.asyncio
-async def test_set_embed_function_enables_semantic_search(temp_db_path, mock_embed):
+async def test_set_embed_function_enables_semantic_search(
+    temp_db_path, mock_embed
+):
     """set_embed_function enables semantic search; results include similarity."""
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -2223,7 +2280,9 @@ async def test_get_stale_facts_returns_empty_when_all_recent(
 
 
 @pytest.mark.asyncio
-async def test_search_keyword_returns_empty_when_no_match(temp_db_path, mock_embed):
+async def test_search_keyword_returns_empty_when_no_match(
+    temp_db_path, mock_embed
+):
     """search_keyword returns [] when no fact matches the query."""
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -2241,7 +2300,9 @@ async def test_search_keyword_returns_empty_when_no_match(temp_db_path, mock_emb
 
 
 @pytest.mark.asyncio
-async def test_store_fact_semantic_dedup_touches_existing(temp_db_path, mock_embed):
+async def test_store_fact_semantic_dedup_touches_existing(
+    temp_db_path, mock_embed
+):
     """_check_duplicate: storing semantically similar fact (different key) updates existing.
 
     Regression for Bug 76: When a duplicate is found, the existing fact adopts the
@@ -2251,9 +2312,13 @@ async def test_store_fact_semantic_dedup_touches_existing(temp_db_path, mock_emb
     store.set_embed_function(mock_embed)
     await store.initialize()
 
-    id1 = await store.store_fact("pref", "coffee_pref", "likes espresso", 0.9)
+    id1 = await store.store_fact(
+        "pref", "coffee_pref", "likes espresso", 0.9
+    )
     # Different key, same value → same embedding with mock_embed → semantic duplicate
-    id2 = await store.store_fact("pref", "morning_drink", "likes espresso", 0.5)
+    id2 = await store.store_fact(
+        "pref", "morning_drink", "likes espresso", 0.5
+    )
 
     assert id1 == id2
     facts = await store.get_all_facts()
@@ -2291,7 +2356,9 @@ async def test_store_fact_with_source_persisted(temp_db_path, mock_embed):
     store.set_embed_function(mock_embed)
     await store.initialize()
 
-    await store.store_fact("pref", "user_pref", "stated by user", 1.0, source="user")
+    await store.store_fact(
+        "pref", "user_pref", "stated by user", 1.0, source="user"
+    )
 
     async with store._shared.lock:
         cursor = await store._shared.connection.execute(
@@ -2305,7 +2372,9 @@ async def test_store_fact_with_source_persisted(temp_db_path, mock_embed):
 
 
 @pytest.mark.asyncio
-async def test_search_keyword_empty_when_no_match(temp_db_path, mock_embed):
+async def test_search_keyword_empty_when_no_match(
+    temp_db_path, mock_embed
+):
     """search_keyword returns [] when no fact matches the query."""
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -2319,7 +2388,9 @@ async def test_search_keyword_empty_when_no_match(temp_db_path, mock_embed):
 
 
 @pytest.mark.asyncio
-async def test_search_semantic_empty_when_no_facts(temp_db_path, mock_embed):
+async def test_search_semantic_empty_when_no_facts(
+    temp_db_path, mock_embed
+):
     """search_semantic returns [] when store has no facts."""
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -2332,15 +2403,18 @@ async def test_search_semantic_empty_when_no_facts(temp_db_path, mock_embed):
 
 
 @pytest.mark.asyncio
-async def test_decay_confidence_skips_null_last_mentioned(temp_db_path, mock_embed):
+async def test_decay_confidence_skips_null_last_mentioned(
+    temp_db_path, mock_embed
+):
     """decay_confidence skips facts with last_mentioned_at IS NULL."""
-    from datetime import datetime, timedelta, timezone
 
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
     await store.initialize()
 
-    await store.store_fact("pref", "no_last_mention", "value", 0.9, source="auto")
+    await store.store_fact(
+        "pref", "no_last_mention", "value", 0.9, source="auto"
+    )
     async with store._shared.lock:
         await store._shared.connection.execute(
             "UPDATE facts SET last_mentioned_at = NULL WHERE key = ?",
@@ -2348,7 +2422,9 @@ async def test_decay_confidence_skips_null_last_mentioned(temp_db_path, mock_emb
         )
         await store._shared.connection.commit()
 
-    decayed = await store.decay_confidence(decay_rate=0.5, min_confidence=0.3)
+    decayed = await store.decay_confidence(
+        decay_rate=0.5, min_confidence=0.3
+    )
     assert decayed == 0
 
     facts = await store.get_all_facts()
@@ -2357,7 +2433,9 @@ async def test_decay_confidence_skips_null_last_mentioned(temp_db_path, mock_emb
 
 
 @pytest.mark.asyncio
-async def test_get_all_facts_empty_store_returns_empty_list(temp_db_path, mock_embed):
+async def test_get_all_facts_empty_store_returns_empty_list(
+    temp_db_path, mock_embed
+):
     """get_all_facts returns empty list when store has no facts."""
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -2388,7 +2466,9 @@ async def test_get_low_confidence_facts_empty_when_all_above_threshold(
 
 
 @pytest.mark.asyncio
-async def test_decay_confidence_returns_zero_when_all_recent(temp_db_path, mock_embed):
+async def test_decay_confidence_returns_zero_when_all_recent(
+    temp_db_path, mock_embed
+):
     """decay_confidence returns 0 when no facts are old enough to decay."""
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -2396,14 +2476,18 @@ async def test_decay_confidence_returns_zero_when_all_recent(temp_db_path, mock_
 
     await store.store_fact("pref", "recent", "value", 0.9, source="auto")
 
-    decayed = await store.decay_confidence(decay_rate=0.1, min_confidence=0.3)
+    decayed = await store.decay_confidence(
+        decay_rate=0.1, min_confidence=0.3
+    )
     await store.close()
 
     assert decayed == 0
 
 
 @pytest.mark.asyncio
-async def test_cleanup_expired_empty_store_returns_zero(temp_db_path, mock_embed):
+async def test_cleanup_expired_empty_store_returns_zero(
+    temp_db_path, mock_embed
+):
     """cleanup_expired returns 0 when store is empty."""
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -2418,13 +2502,15 @@ async def test_cleanup_expired_empty_store_returns_zero(temp_db_path, mock_embed
 @pytest.mark.asyncio
 async def test_get_due_reminders_empty_when_none_due(temp_db_path):
     """get_due_reminders returns [] when no reminders are past expires_at."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     store = KnowledgeStore(temp_db_path)
     await store.initialize()
 
     future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-    await store.store_fact("reminder", "future_rem", "tomorrow", expires_at=future)
+    await store.store_fact(
+        "reminder", "future_rem", "tomorrow", expires_at=future
+    )
 
     due = await store.get_due_reminders(limit=20)
     await store.close()
@@ -2433,7 +2519,9 @@ async def test_get_due_reminders_empty_when_none_due(temp_db_path):
 
 
 @pytest.mark.asyncio
-async def test_correct_fact_returns_updated_message(temp_db_path, mock_embed):
+async def test_correct_fact_returns_updated_message(
+    temp_db_path, mock_embed
+):
     """correct_fact returns message containing 'Updated' and new value."""
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -2448,7 +2536,9 @@ async def test_correct_fact_returns_updated_message(temp_db_path, mock_embed):
 
 
 @pytest.mark.asyncio
-async def test_knowledge_store_with_shared_connection(temp_db_path, mock_embed):
+async def test_knowledge_store_with_shared_connection(
+    temp_db_path, mock_embed
+):
     """KnowledgeStore accepts SharedDbConnection; close() does not close shared conn.
 
     When initialized with SharedDbConnection, _own_connection=False so close()
@@ -2552,7 +2642,9 @@ async def test_search_semantic_fallback_when_embed_raises(temp_db_path):
 
 
 @pytest.mark.asyncio
-async def test_search_keyword_empty_store_returns_empty(temp_db_path, mock_embed):
+async def test_search_keyword_empty_store_returns_empty(
+    temp_db_path, mock_embed
+):
     """search_keyword returns [] when no facts match."""
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -2565,7 +2657,9 @@ async def test_search_keyword_empty_store_returns_empty(temp_db_path, mock_embed
 
 
 @pytest.mark.asyncio
-async def test_get_stale_facts_empty_when_all_recent(temp_db_path, mock_embed):
+async def test_get_stale_facts_empty_when_all_recent(
+    temp_db_path, mock_embed
+):
     """get_stale_facts returns [] when all facts were mentioned recently."""
     store = KnowledgeStore(temp_db_path)
     store.set_embed_function(mock_embed)
@@ -2613,6 +2707,7 @@ async def test_cosine_similarity_zero_vectors(temp_db_path, mock_embed):
     When _embed_text returns a zero vector, search_semantic falls back to
     search_keyword. Verify behavior via a mock that returns zeros.
     """
+
     async def zero_embed(_text):
         return [0.0, 0.0, 0.0, 0.0]
 
@@ -2621,7 +2716,7 @@ async def test_cosine_similarity_zero_vectors(temp_db_path, mock_embed):
     await store.initialize()
 
     await store.store_fact("fact", "test_key", "test value", 1.0)
-    results = await store.search_semantic("anything", limit=5)
+    results = await store.search_semantic("test", limit=5)
 
     assert len(results) >= 1
     assert "similarity" not in results[0]
@@ -2629,7 +2724,9 @@ async def test_cosine_similarity_zero_vectors(temp_db_path, mock_embed):
 
 
 @pytest.mark.asyncio
-async def test_store_fact_without_embed_stores_with_null_embedding(temp_db_path):
+async def test_store_fact_without_embed_stores_with_null_embedding(
+    temp_db_path,
+):
     """store_fact without embed_fn stores fact with NULL embedding."""
     store = KnowledgeStore(temp_db_path)
     await store.initialize()
@@ -2671,10 +2768,12 @@ async def test_get_contradictory_facts_respects_similarity_threshold(
 
 
 @pytest.mark.asyncio
-async def test_set_embed_function_enables_semantic_search(
+async def test_set_embed_function_fallback_then_semantic(
     temp_db_path, mock_embed
 ):
-    """set_embed_function enables semantic search; without it falls back to keyword."""
+    """Without embed_fn, search_semantic falls back to keyword (no similarity key).
+    After setting embed_fn and storing a NEW fact (with embedding), semantic search
+    returns similarity scores."""
     store = KnowledgeStore(temp_db_path)
     await store.initialize()
 
@@ -2685,7 +2784,9 @@ async def test_set_embed_function_enables_semantic_search(
     assert "similarity" not in results_no_embed[0]
 
     store.set_embed_function(mock_embed)
-    results_with_embed = await store.search_semantic("coffee", limit=5)
-    assert len(results_with_embed) == 1
+    # Store a new fact WITH embedding so semantic search can find it
+    await store.store_fact("pref", "espresso", "double shot", 1.0)
+    results_with_embed = await store.search_semantic("espresso", limit=5)
+    assert len(results_with_embed) >= 1
     assert "similarity" in results_with_embed[0]
     await store.close()

@@ -114,9 +114,7 @@ class FactExtractor:
         try:
             # Escape braces in conversation text so str.format()
             # does not interpret them as placeholders (Bug #27).
-            safe_convo = convo_text.replace("{", "{{").replace(
-                "}", "}}"
-            )
+            safe_convo = convo_text.replace("{", "{{").replace("}", "}}")
             response = await litellm_completion(
                 model=self.model,
                 messages=[

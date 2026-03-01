@@ -3,13 +3,13 @@ Tests for ws_helpers.ws_command() exception handling.
 Verifies that socket/aiohttp errors are caught and re-raised as ConnectionError
 so configure() can handle them (BUG-44).
 """
+
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
-
+import pytest
 from tools.ws_helpers import ws_command
 
 
@@ -78,10 +78,15 @@ class TestWsCommandExceptionConversion:
         )
         mock_session = _make_session_mock(ws=mock_ws)
 
-        with patch(
-            "tools.ws_helpers.aiohttp.ClientSession",
-            return_value=mock_session,
-        ), patch("tools.ws_helpers._get_token", return_value="fake_token"):
+        with (
+            patch(
+                "tools.ws_helpers.aiohttp.ClientSession",
+                return_value=mock_session,
+            ),
+            patch(
+                "tools.ws_helpers._get_token", return_value="fake_token"
+            ),
+        ):
             with pytest.raises(ConnectionError) as exc_info:
                 await ws_command({"type": "config/entity_registry/list"})
             msg = str(exc_info.value)
@@ -94,17 +99,24 @@ class TestWsCommandExceptionConversion:
             ws_connect_raises=aiohttp.ClientError("Connection refused"),
         )
 
-        with patch(
-            "tools.ws_helpers.aiohttp.ClientSession",
-            return_value=mock_session,
-        ), patch("tools.ws_helpers._get_token", return_value="fake_token"):
+        with (
+            patch(
+                "tools.ws_helpers.aiohttp.ClientSession",
+                return_value=mock_session,
+            ),
+            patch(
+                "tools.ws_helpers._get_token", return_value="fake_token"
+            ),
+        ):
             with pytest.raises(ConnectionError) as exc_info:
                 await ws_command({"type": "config/entity_registry/list"})
             msg = str(exc_info.value).lower()
             assert "client error" in msg or "refused" in msg
 
     @pytest.mark.asyncio
-    async def test_connection_reset_error_converted_to_connection_error(self):
+    async def test_connection_reset_error_converted_to_connection_error(
+        self,
+    ):
         """ConnectionResetError (socket-level) → ConnectionError."""
         mock_session = _make_session_mock(
             ws_connect_raises=ConnectionResetError(
@@ -112,10 +124,15 @@ class TestWsCommandExceptionConversion:
             ),
         )
 
-        with patch(
-            "tools.ws_helpers.aiohttp.ClientSession",
-            return_value=mock_session,
-        ), patch("tools.ws_helpers._get_token", return_value="fake_token"):
+        with (
+            patch(
+                "tools.ws_helpers.aiohttp.ClientSession",
+                return_value=mock_session,
+            ),
+            patch(
+                "tools.ws_helpers._get_token", return_value="fake_token"
+            ),
+        ):
             with pytest.raises(ConnectionError) as exc_info:
                 await ws_command({"type": "config/entity_registry/list"})
             assert "reset" in str(exc_info.value).lower()
@@ -127,10 +144,15 @@ class TestWsCommandExceptionConversion:
             ws_connect_raises=OSError(32, "Broken pipe")
         )
 
-        with patch(
-            "tools.ws_helpers.aiohttp.ClientSession",
-            return_value=mock_session,
-        ), patch("tools.ws_helpers._get_token", return_value="fake_token"):
+        with (
+            patch(
+                "tools.ws_helpers.aiohttp.ClientSession",
+                return_value=mock_session,
+            ),
+            patch(
+                "tools.ws_helpers._get_token", return_value="fake_token"
+            ),
+        ):
             with pytest.raises(ConnectionError) as exc_info:
                 await ws_command({"type": "config/entity_registry/list"})
             msg = str(exc_info.value)
@@ -141,16 +163,21 @@ class TestWsCommandConfigureIntegration:
     """Verify converted ConnectionErrors are handled by configure()."""
 
     @pytest.mark.asyncio
-    async def test_configure_handles_connection_error_from_ws_command(self):
+    async def test_configure_handles_connection_error_from_ws_command(
+        self,
+    ):
         """configure() catches ConnectionError and returns user-facing message."""
         from tools.configure import configure
 
-        with patch(
-            "tools.configure.ws_command",
-            new_callable=AsyncMock,
-            side_effect=ConnectionError(
-                "WebSocket connection lost (broken pipe/reset)"
+        with (
+            patch(
+                "tools.configure.ws_command",
+                new_callable=AsyncMock,
+                side_effect=ConnectionError(
+                    "WebSocket connection lost (broken pipe/reset)"
+                ),
             ),
+            patch("tools.configure._audit_store", None),
         ):
             result = await configure(
                 action="rename",

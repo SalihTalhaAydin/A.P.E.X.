@@ -26,6 +26,7 @@ if str(_apex_brain) not in sys.path:
 # Load real .env for live tests (override the dummy URL in conftest.py)
 # ---------------------------------------------------------------------------
 
+
 def _load_dotenv():
     """Load .env from project root into os.environ for live tests."""
     env_path = Path(__file__).resolve().parent.parent.parent / ".env"
@@ -67,8 +68,7 @@ def skip_on_llm_error(response: str) -> None:
     )
     if any(m in response for m in _error_markers):
         pytest.skip(
-            "LLM API unavailable (rate limit / quota): "
-            + response[:120]
+            "LLM API unavailable (rate limit / quota): " + response[:120]
         )
 
 
@@ -106,6 +106,7 @@ def pytest_collection_modifyitems(config, items):
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="session")
 def live_settings():
@@ -182,7 +183,9 @@ class EntityStateGuard:
 
         async with await self._get_client() as client:
             if domain in ("light", "switch", "fan", "input_boolean"):
-                service = "turn_on" if original_state == "on" else "turn_off"
+                service = (
+                    "turn_on" if original_state == "on" else "turn_off"
+                )
                 await client.post(
                     f"{self._ha_url}/services/{domain}/{service}",
                     json={"entity_id": entity_id},
@@ -200,7 +203,7 @@ class EntityStateGuard:
                     )
 
     class _ProtectContext:
-        def __init__(self, guard: "EntityStateGuard", entity_id: str):
+        def __init__(self, guard: EntityStateGuard, entity_id: str):
             self._guard = guard
             self._entity_id = entity_id
             self._saved: dict = {}
@@ -211,12 +214,14 @@ class EntityStateGuard:
 
         async def __aexit__(self, exc_type, exc_val, exc_tb):
             try:
-                await self._guard._restore_state(self._entity_id, self._saved)
+                await self._guard._restore_state(
+                    self._entity_id, self._saved
+                )
                 await asyncio.sleep(0.5)  # let state settle
             except Exception:
                 pass  # best-effort restore
 
-    def protect(self, entity_id: str) -> "_ProtectContext":
+    def protect(self, entity_id: str) -> _ProtectContext:
         return self._ProtectContext(self, entity_id)
 
 
@@ -233,14 +238,17 @@ async def any_light_entity(ha_url, ha_headers):
     Specifically targets lights in the basement area.
     Returns (entity_id, current_state) or skips if no basement lights exist.
     """
-    async with httpx.AsyncClient(timeout=10.0, headers=ha_headers) as client:
+    async with httpx.AsyncClient(
+        timeout=10.0, headers=ha_headers
+    ) as client:
         r = await client.get(f"{ha_url}/states")
         r.raise_for_status()
         states = r.json()
 
     # Only use basement lights for safe write tests
     basement_lights = [
-        s for s in states
+        s
+        for s in states
         if s["entity_id"].startswith("light.")
         and "basement" in s["entity_id"].lower()
         and s.get("state") in ("on", "off")
@@ -248,11 +256,11 @@ async def any_light_entity(ha_url, ha_headers):
     if not basement_lights:
         # Fallback: check friendly names for "basement"
         basement_lights = [
-            s for s in states
+            s
+            for s in states
             if s["entity_id"].startswith("light.")
-            and "basement" in s.get("attributes", {}).get(
-                "friendly_name", ""
-            ).lower()
+            and "basement"
+            in s.get("attributes", {}).get("friendly_name", "").lower()
             and s.get("state") in ("on", "off")
         ]
     if not basement_lights:
@@ -266,13 +274,16 @@ async def any_light_entity(ha_url, ha_headers):
 @pytest.fixture
 async def any_sensor_entity(ha_url, ha_headers):
     """Dynamically discover one sensor entity with a numeric state."""
-    async with httpx.AsyncClient(timeout=10.0, headers=ha_headers) as client:
+    async with httpx.AsyncClient(
+        timeout=10.0, headers=ha_headers
+    ) as client:
         r = await client.get(f"{ha_url}/states")
         r.raise_for_status()
         states = r.json()
 
     sensors = [
-        s for s in states
+        s
+        for s in states
         if s["entity_id"].startswith("sensor.")
         and s.get("state") not in ("unknown", "unavailable", "")
     ]

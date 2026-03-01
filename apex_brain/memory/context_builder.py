@@ -1,13 +1,15 @@
 """
-Context Builder - Assembles rich context before each AI call.
+Context Builder - Assembles context before each AI call.
 Pulls together: recent conversation, relevant facts, time,
-calendar, presence. This is what makes Apex feel like it
-actually knows you.
+devices, presence, calendar, service schemas.
 """
+
+from __future__ import annotations
 
 import asyncio
 import datetime
 import logging
+import time
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
@@ -21,6 +23,91 @@ from brain.system_prompt import (
 
 from memory.conversation_store import ConversationStore
 from memory.knowledge_store import KnowledgeStore
+
+# ---------------------------------------------------------------------------
+# Cached device summary (refreshed in background)
+# ---------------------------------------------------------------------------
+_device_cache: dict = {"summary": "", "presence": "", "timestamp": 0.0}
+_device_lock = None  # Optional[asyncio.Lock]
+
+
+def _get_device_lock() -> asyncio.Lock:
+    global _device_lock
+    if _device_lock is None:
+        _device_lock = asyncio.Lock()
+    return _device_lock
+
+
+async def _refresh_device_cache() -> None:
+    """Refresh the device summary and presence cache."""
+    async with _get_device_lock():
+        try:
+            from tools.ha_helpers import (
+                get_device_summary,
+                ha_request,
+            )
+
+            _device_cache["summary"] = await get_device_summary()
+
+            # Build presence from person entities
+            states = await ha_request("GET", "/states")
+            if isinstance(states, list):
+                persons = [
+                    s
+                    for s in states
+                    if isinstance(s, dict)
+                    and s.get("entity_id", "").startswith("person.")
+                ]
+                parts = []
+                for p in persons:
+                    name = p.get("attributes", {}).get(
+                        "friendly_name",
+                        p.get("entity_id", ""),
+                    )
+                    state = p.get("state", "unknown")
+                    parts.append(f"{name}: {state}")
+                _device_cache["presence"] = (
+                    ", ".join(parts) if parts else ""
+                )
+
+            _device_cache["timestamp"] = time.monotonic()
+        except Exception as e:
+            logger.warning("Failed to refresh device cache: %s", e)
+
+
+async def _get_cached_device_summary() -> str:
+    """Get device summary, refreshing if stale."""
+    now = time.monotonic()
+    if (
+        _device_cache["summary"]
+        and (now - _device_cache["timestamp"])
+        < settings.cache_refresh_seconds
+    ):
+        return _device_cache["summary"]
+
+    await _refresh_device_cache()
+    return _device_cache["summary"]
+
+
+async def _get_cached_presence() -> str:
+    """Get presence summary from cache."""
+    now = time.monotonic()
+    if (
+        now - _device_cache["timestamp"]
+    ) >= settings.cache_refresh_seconds:
+        await _refresh_device_cache()
+    return _device_cache["presence"]
+
+
+async def _get_cached_area_directory() -> str:
+    """Get area directory from ha_helpers (uses its own 5-min cache)."""
+    try:
+        from tools.ha_helpers import get_area_directory
+
+        return await get_area_directory()
+    except Exception as e:
+        logger.warning("Failed to get area directory: %s", e)
+        return ""
 
 
 async def _safe_async(coro, label: str, default=""):
@@ -73,20 +160,13 @@ class ContextBuilder:
                 "Invalid timezone '%s', falling back to UTC",
                 settings.timezone,
             )
-            tz = datetime.timezone.utc
+            tz = datetime.UTC
         now = datetime.datetime.now(tz=tz)
         time_context = _build_time_context(now)
 
         # 2. Prepare parallel coroutines
         fact_limit = 5 if voice_mode else self.max_facts
         semantic_limit = max(1, fact_limit - 5)
-
-        # Lazy imports (avoid circular / heavy imports at module level)
-        from tools.ha_helpers import (
-            get_area_directory,
-            get_device_summary,
-        )
-        from tools.presence import get_presence_summary
 
         # --- Always-run coroutines ---
         async def _no_facts():
@@ -105,13 +185,13 @@ class ContextBuilder:
                 limit=50
             ),
             "presence": _safe_async(
-                get_presence_summary(), "presence"
+                _get_cached_presence(), "presence"
             ),
             "device_summary": _safe_async(
-                get_device_summary(), "device_summary"
+                _get_cached_device_summary(), "device_summary"
             ),
             "area_directory": _safe_async(
-                get_area_directory(), "area_directory"
+                _get_cached_area_directory(), "area_directory"
             ),
         }
 

@@ -87,13 +87,11 @@ async def define_routine(
     parts: list[str] = []
     for line in steps.split("\n"):
         for p in line.split(". "):
-            p = p.strip()
+            p = p.strip().rstrip(".")
             if p:
                 parts.append(p)
     step_list = parts
-    await _routine_store.save_routine(
-        name, step_list, trigger=trigger
-    )
+    await _routine_store.save_routine(name, step_list, trigger=trigger)
     return f"Got it. Routine '{name}' saved with {len(step_list)} steps."
 
 
@@ -139,8 +137,7 @@ async def list_routines() -> str:
             "name": {
                 "type": "string",
                 "description": (
-                    "Routine name to run, "
-                    "e.g. 'good morning'."
+                    "Routine name to run, e.g. 'good morning'."
                 ),
             },
         },
@@ -157,19 +154,14 @@ async def run_routine(name: str) -> str:
     if not routine:
         available = await _routine_store.list_routines()
         names = ", ".join(r["name"] for r in available) or "none"
-        return (
-            f"No routine named '{name}' found. "
-            f"Available: {names}"
-        )
+        return f"No routine named '{name}' found. Available: {names}"
 
     # Track usage
     await _routine_store.record_usage(name)
 
     steps = routine["steps"]
     use_count = routine["use_count"] + 1
-    steps_text = "\n".join(
-        f"  {i + 1}. {s}" for i, s in enumerate(steps)
-    )
+    steps_text = "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(steps))
     return (
         f'Routine "{routine["name"]}" (used {use_count} times) steps:\n'
         f"{steps_text}\n\n"
@@ -184,9 +176,7 @@ async def run_routine(name: str) -> str:
         "properties": {
             "name": {
                 "type": "string",
-                "description": (
-                    "Routine name to delete."
-                ),
+                "description": ("Routine name to delete."),
             },
         },
         "required": ["name"],

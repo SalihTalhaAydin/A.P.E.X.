@@ -57,7 +57,9 @@ class SharedDbConnection:
         """Open the connection and set PRAGMAs for WAL + busy timeout."""
         if self._conn is not None:
             return
-        self._conn = await aiosqlite.connect(self.db_path)
+        self._conn = await aiosqlite.connect(
+            self.db_path, isolation_level=None
+        )
         await self._conn.execute("PRAGMA journal_mode=WAL")
         # 10s busy timeout: retry on lock before raising "database is locked"
         await self._conn.execute("PRAGMA busy_timeout=10000")

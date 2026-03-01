@@ -31,12 +31,11 @@ def tool(
 
     Parameters schema is auto-generated from type hints if not provided.
 
-    Set hidden=True for deprecated tools that should remain callable
-    but not be advertised to the LLM (reduces tool count confusion).
+    Set hidden=True for tools that should remain callable
+    but not be advertised to the LLM.
     """
 
     def decorator(func: Callable) -> Callable:
-        # Auto-generate parameter schema from type hints
         schema = parameters or _schema_from_hints(func)
 
         TOOL_REGISTRY[func.__name__] = {
@@ -56,7 +55,6 @@ def _schema_from_hints(func: Callable) -> dict:
     try:
         hints = get_type_hints(func)
     except (TypeError, NameError):
-        # Fallback for older Python where PEP 604 unions can't be evaluated
         hints = {}
     sig = inspect.signature(func)
 
@@ -72,14 +70,12 @@ def _schema_from_hints(func: Callable) -> dict:
 
         prop: dict[str, Any] = {"type": json_type}
 
-        # Use parameter default as description hint if no other info
         if param.default is inspect.Parameter.empty:
             required.append(name)
         else:
             if param.default is not None:
                 prop["default"] = param.default
 
-        # Clean up the parameter name for description
         prop["description"] = name.replace("_", " ").capitalize()
 
         properties[name] = prop
@@ -108,15 +104,11 @@ def _python_type_to_json(hint) -> str:
     elif hint is dict or origin is dict:
         return "object"
     else:
-        return "string"  # Default fallback
+        return "string"
 
 
 def get_openai_tool_definitions() -> list[dict]:
-    """Convert visible (non-hidden) tools to OpenAI function-calling format.
-
-    Hidden tools (deprecated wrappers) are still callable via execute_tool()
-    but are not advertised to the LLM, reducing tool count and confusion.
-    """
+    """Convert visible (non-hidden) tools to OpenAI function-calling format."""
     definitions = []
     for name, info in TOOL_REGISTRY.items():
         if info.get("hidden"):
@@ -176,65 +168,6 @@ def get_voice_tool_definitions() -> list[dict]:
             }
         )
     return definitions
-
-
-def hide_tools(*names: str) -> None:
-    """Mark tools as hidden (not advertised to LLM but still callable).
-
-    Used to suppress deprecated wrapper tools that create confusion
-    when the LLM sees 70+ overlapping tool definitions.
-    """
-    for name in names:
-        if name in TOOL_REGISTRY:
-            TOOL_REGISTRY[name]["hidden"] = True
-
-
-# Deprecated wrapper tools that delegate to the 6 generic tools.
-# Kept callable for backward compatibility but hidden from the LLM
-# to reduce tool count from ~70 to ~30 and prevent confusion.
-DEPRECATED_TOOLS = (
-    # smart_home.py wrappers → do/query/discover
-    "list_entities",
-    "get_entity_state",
-    "get_areas",
-    "query_sensors",
-    "control_light",
-    "control_climate",
-    "control_media",
-    "control_cover",
-    "control_fan",
-    # control_area now deprecated: do() accepts area_name directly
-    "control_area",
-    "call_service",
-    # history.py → history()
-    "get_history",
-    "get_logbook",
-    # lock.py → do()
-    "control_lock",
-    # switch.py → do()
-    "control_switch",
-    # security.py → do()  (camera tools kept — no generic equivalent)
-    "control_alarm",
-    # template.py → query()
-    "evaluate_template",
-    # script.py → do/discover()
-    "list_scripts",
-    "execute_script",
-    # system_info.py → discover()
-    "get_ha_info",
-    "list_devices",
-    "list_integrations",
-    "list_services",
-    # presence.py → query()
-    "get_presence",
-    # config_reload.py → do()
-    "reload_config",
-    # input_helpers.py → do/query()
-    "set_input_helper",
-    "list_input_helpers",
-    # energy.py → query()
-    "get_energy_summary",
-)
 
 
 async def execute_tool(name: str, arguments: dict) -> str:

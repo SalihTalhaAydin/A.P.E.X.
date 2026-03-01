@@ -56,12 +56,14 @@ def _parse_event_dt(dt_str: str | None) -> _dt.datetime | None:
         return None
     try:
         from zoneinfo import ZoneInfo
+
         from brain.config import settings
+
         tz = ZoneInfo(getattr(settings, "timezone", "UTC"))
         utc = ZoneInfo("UTC")
     except Exception:
-        tz = _dt.timezone.utc
-        utc = _dt.timezone.utc
+        tz = _dt.UTC
+        utc = _dt.UTC
 
     try:
         dt = _dt.datetime.fromisoformat(dt_str)
@@ -102,10 +104,12 @@ def _format_event_line(
 def _today_date() -> _dt.date:
     try:
         from zoneinfo import ZoneInfo
+
         from brain.config import settings
+
         tz = ZoneInfo(getattr(settings, "timezone", "UTC"))
     except Exception:
-        tz = _dt.timezone.utc
+        tz = _dt.UTC
     return _dt.datetime.now(tz=tz).date()
 
 
@@ -173,14 +177,13 @@ async def get_today_schedule() -> str:
     start_str = today_start.strftime("%Y-%m-%dT%H:%M:%S")
     end_str = today_end.strftime("%Y-%m-%dT%H:%M:%S")
 
-    all_events: list[tuple[_dt.datetime | None, str]] = []  # (sort_key, line)
+    all_events: list[
+        tuple[_dt.datetime | None, str]
+    ] = []  # (sort_key, line)
 
     for eid in entity_ids:
         try:
-            path = (
-                f"/calendars/{eid}"
-                f"?start={start_str}&end={end_str}"
-            )
+            path = f"/calendars/{eid}?start={start_str}&end={end_str}"
             events = await ha_request("GET", path)
         except Exception as exc:
             logger.warning("Failed to fetch calendar %s: %s", eid, exc)
@@ -208,20 +211,26 @@ async def get_today_schedule() -> str:
                 all_day = all_day or ("dateTime" not in start_info)
             else:
                 # Flat string
-                start_dt = _parse_event_dt(str(start_info) if start_info else None)
+                start_dt = _parse_event_dt(
+                    str(start_info) if start_info else None
+                )
 
             if isinstance(end_info, dict):
                 end_dt = _parse_event_dt(
                     end_info.get("dateTime") or end_info.get("date")
                 )
             else:
-                end_dt = _parse_event_dt(str(end_info) if end_info else None)
+                end_dt = _parse_event_dt(
+                    str(end_info) if end_info else None
+                )
 
             # Filter: must overlap today (includes multi-day events spanning today)
             if not _event_overlaps_today(start_dt, end_dt, all_day, today):
                 continue
 
-            line = _format_event_line(summary, start_dt, end_dt, all_day, eid)
+            line = _format_event_line(
+                summary, start_dt, end_dt, all_day, eid
+            )
             all_events.append((start_dt, line))
 
     if not all_events:
@@ -276,10 +285,7 @@ async def get_events(days_ahead: int = 7) -> str:
 
     for eid in entity_ids:
         try:
-            path = (
-                f"/calendars/{eid}"
-                f"?start={start_str}&end={end_str}"
-            )
+            path = f"/calendars/{eid}?start={start_str}&end={end_str}"
             events = await ha_request("GET", path)
         except Exception as exc:
             logger.warning("Failed to fetch calendar %s: %s", eid, exc)
@@ -304,14 +310,18 @@ async def get_events(days_ahead: int = 7) -> str:
                 )
                 all_day = all_day or ("dateTime" not in start_info)
             else:
-                start_dt = _parse_event_dt(str(start_info) if start_info else None)
+                start_dt = _parse_event_dt(
+                    str(start_info) if start_info else None
+                )
 
             if isinstance(end_info, dict):
                 end_dt = _parse_event_dt(
                     end_info.get("dateTime") or end_info.get("date")
                 )
             else:
-                end_dt = _parse_event_dt(str(end_info) if end_info else None)
+                end_dt = _parse_event_dt(
+                    str(end_info) if end_info else None
+                )
 
             # Determine the day this event belongs to
             if start_dt is not None:
@@ -374,15 +384,13 @@ async def get_events(days_ahead: int = 7) -> str:
             "start": {
                 "type": "string",
                 "description": (
-                    "Start time in ISO format, "
-                    "e.g. '2026-02-18T10:00:00'."
+                    "Start time in ISO format, e.g. '2026-02-18T10:00:00'."
                 ),
             },
             "end": {
                 "type": "string",
                 "description": (
-                    "End time in ISO format, "
-                    "e.g. '2026-02-18T11:00:00'."
+                    "End time in ISO format, e.g. '2026-02-18T11:00:00'."
                 ),
             },
             "description": {

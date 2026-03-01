@@ -1,15 +1,16 @@
 """Tests for knowledge tool (remember, recall, forget)."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from tools.base import TOOL_REGISTRY
-from tools.knowledge import remember, recall, forget, set_knowledge_store
+from tools.knowledge import forget, recall, remember, set_knowledge_store
 
 
 @pytest.fixture(scope="module")
 def _tools_loaded():
     from tools import discover_tools
+
     discover_tools()
 
 
@@ -149,7 +150,11 @@ async def test_recall_includes_category_label_when_present():
     mock_store.search_semantic = AsyncMock(
         return_value=[
             {"category": "explicit", "key": "wifi", "value": "secret123"},
-            {"category": "inferred", "key": "preference", "value": "dark mode"},
+            {
+                "category": "inferred",
+                "key": "preference",
+                "value": "dark mode",
+            },
         ]
     )
     set_knowledge_store(mock_store)
@@ -169,7 +174,11 @@ async def test_remember_and_recall_roundtrip():
     mock_store.store_fact = AsyncMock()
     mock_store.search_semantic = AsyncMock(
         return_value=[
-            {"category": "explicit", "key": "coffee_order", "value": "double espresso"},
+            {
+                "category": "explicit",
+                "key": "coffee_order",
+                "value": "double espresso",
+            },
         ]
     )
     set_knowledge_store(mock_store)
