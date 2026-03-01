@@ -2,7 +2,7 @@
 # https://developers.home-assistant.io/docs/add-ons/configuration
 
 name: "Apex Brain"
-version: "0.8.0"
+version: "0.8.1"
 slug: "apex_brain"
 description: "Personal AI assistant — full HA control, memory, vision, shell access"
 url: "https://github.com/SalihTalhaAydin/A.P.E.X."
@@ -36,12 +36,12 @@ map:
 
 # Configuration options
 options:
-  litellm_model: "claude-sonnet-4-20250514"
+  litellm_model: "anthropic/claude-sonnet-4-6"
   openai_api_key: ""
   anthropic_api_key: ""
   gemini_api_key: ""
   embedding_model: "text-embedding-3-small"
-  fact_extraction_model: "claude-sonnet-4-20250514"
+  fact_extraction_model: "anthropic/claude-haiku-4-5-20251001"
   recent_turns: 10
   max_facts_in_context: 20
   ha_url_override: ""

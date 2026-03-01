@@ -138,7 +138,9 @@ class ContextBuilder:
         self.max_facts = max_facts
 
     async def build(
-        self, user_message: str, session_id: str = "default",
+        self,
+        user_message: str,
+        session_id: str = "default",
         voice_mode: bool = False,
     ) -> str:
         """Build a full system prompt with all context.
@@ -181,12 +183,8 @@ class ContextBuilder:
                 if user_message
                 else _no_facts()
             ),
-            "core_facts": self.knowledge_store.get_all_facts(
-                limit=50
-            ),
-            "presence": _safe_async(
-                _get_cached_presence(), "presence"
-            ),
+            "core_facts": self.knowledge_store.get_all_facts(limit=50),
+            "presence": _safe_async(_get_cached_presence(), "presence"),
             "device_summary": _safe_async(
                 _get_cached_device_summary(), "device_summary"
             ),
@@ -195,14 +193,15 @@ class ContextBuilder:
             ),
         }
 
+        # --- Conversation history (always, fewer in voice mode) ---
+        turns_count = 4 if voice_mode else self.recent_turns_count
+        coros["recent_turns"] = self.conversation_store.get_recent(
+            n=turns_count,
+            session_id=session_id,
+        )
+
         # --- Text-mode only ---
         if not voice_mode:
-            coros["recent_turns"] = (
-                self.conversation_store.get_recent(
-                    n=self.recent_turns_count,
-                    session_id=session_id,
-                )
-            )
             coros["service_schemas"] = _safe_async(
                 fetch_service_schemas(), "service_schemas"
             )
@@ -233,12 +232,25 @@ class ContextBuilder:
             else:
                 fetched[key] = result
 
-        # 4. Post-process facts (dedup core into semantic)
+        # 4. Cross-session fallback: if this session has no
+        #    history (user opened a new chat), load the most
+        #    recent turns from any session so the AI still has
+        #    context from the previous conversation.
+        recent_turns = fetched.get("recent_turns") or []
+        if not recent_turns and session_id != "default":
+            try:
+                recent_turns = await self.conversation_store.get_recent(
+                    n=turns_count,
+                    session_id=None,  # all sessions
+                )
+                fetched["recent_turns"] = recent_turns
+            except Exception:
+                pass
+
+        # 5. Post-process facts (dedup core into semantic)
         relevant_facts = fetched.get("semantic_facts") or []
         core_facts = fetched.get("core_facts") or []
-        core_set = {
-            f.get("id") for f in relevant_facts if f.get("id")
-        }
+        core_set = {f.get("id") for f in relevant_facts if f.get("id")}
         for fact in core_facts:
             if len(relevant_facts) >= fact_limit:
                 break
@@ -248,7 +260,7 @@ class ContextBuilder:
             ):
                 relevant_facts.append(fact)
 
-        # 5. Build the system prompt
+        # 6. Build the system prompt
         return build_system_prompt(
             calendar_summary=fetched.get("calendar", ""),
             relevant_facts=relevant_facts,

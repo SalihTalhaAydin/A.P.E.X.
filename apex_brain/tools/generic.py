@@ -295,7 +295,9 @@ async def _discover_areas(filter_str: str) -> str:
         "POST", "/template", json_data={"template": template}
     )
     if not isinstance(result, str):
-        return "Unexpected response from Home Assistant (expected area list)."
+        return (
+            "Unexpected response from Home Assistant (expected area list)."
+        )
 
     lines = []
     for line in result.strip().split("\n"):
@@ -678,8 +680,7 @@ async def _query_template(template: str) -> str:
                     "entity_id": {
                         "type": "string",
                         "description": (
-                            "Entity ID, e.g. "
-                            "'light.kitchen_ceiling'."
+                            "Entity ID, e.g. 'light.kitchen_ceiling'."
                         ),
                     },
                     "area_name": {
@@ -691,10 +692,7 @@ async def _query_template(template: str) -> str:
                     },
                     "area_id": {
                         "type": "string",
-                        "description": (
-                            "Area ID from area "
-                            "directory."
-                        ),
+                        "description": ("Area ID from area directory."),
                     },
                     "device_id": {
                         "type": "string",
@@ -702,10 +700,7 @@ async def _query_template(template: str) -> str:
                     },
                     "floor_id": {
                         "type": "string",
-                        "description": (
-                            "Floor ID, e.g. "
-                            "'ground_floor'."
-                        ),
+                        "description": ("Floor ID, e.g. 'ground_floor'."),
                     },
                 },
             },
@@ -731,10 +726,10 @@ async def do(
     data: dict = None,
 ) -> str:
     """Call any Home Assistant service with verification."""
-    from tools.ha_helpers import resolve_area_name
+    from tools.ha_helpers import resolve_area_name, resolve_floor_name
 
     try:
-        # Resolve area_name -> area_id if provided
+        # Resolve area_name -> area_id (or floor_id) if provided
         if targets and "area_name" in targets:
             area_name_raw = targets.pop("area_name", "")
             if area_name_raw and "area_id" not in targets:
@@ -747,10 +742,25 @@ async def do(
                         resolved,
                     )
                 else:
-                    return (
-                        f"No area matching '{area_name_raw}' found. "
-                        "Use discover(what='areas') to see available areas."
+                    # Fallback: check if name matches a floor
+                    floor_resolved = await resolve_floor_name(
+                        area_name_raw
                     )
+                    if floor_resolved:
+                        targets["floor_id"] = floor_resolved
+                        logger.info(
+                            "do() resolved area_name '%s' -> "
+                            "floor_id '%s' (floor fallback)",
+                            area_name_raw,
+                            floor_resolved,
+                        )
+                    else:
+                        return (
+                            f"No area or floor matching "
+                            f"'{area_name_raw}' found. "
+                            "Use discover(what='areas') to "
+                            "see available areas."
+                        )
 
         # Two-step confirmation for protected domains: first call returns
         # a short-lived token; second call must include that token.
@@ -962,19 +972,13 @@ async def _verify_area_or_floor(
                         matching += 1
             if matching == count:
                 svc_label = service.replace("_", " ")
-                return (
-                    f"Done. {count} {domain}(s) "
-                    f"{svc_label} in {label}."
-                )
+                return f"Done. {count} {domain}(s) {svc_label} in {label}."
             return (
                 f"Done. Called {domain}.{service} on "
                 f"{label}: {matching}/{count} now "
                 f"{expected}."
             )
-        return (
-            f"Done. {count} {domain}(s) in {label} "
-            f"affected."
-        )
+        return f"Done. {count} {domain}(s) in {label} affected."
 
     except Exception:
         logger.debug("Area/floor verify failed", exc_info=True)

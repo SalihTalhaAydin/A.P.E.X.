@@ -258,6 +258,9 @@ _area_cache: dict = {
     "directory": "",  # formatted string for prompt
     "map": {},  # area_id -> area_name
     "reverse": {},  # area_name_lower -> area_id
+    "floor_map": {},  # floor_id -> floor_name
+    "floor_reverse": {},  # floor_name_lower -> floor_id
+    "floor_areas": {},  # floor_id -> [area_id, ...]
     "timestamp": 0.0,
 }
 _area_cache_lock: asyncio.Lock | None = None
@@ -298,6 +301,27 @@ async def resolve_area_name(name: str) -> str | None:
     return None
 
 
+async def resolve_floor_name(name: str) -> str | None:
+    """Resolve a human floor name to floor_id.
+
+    Case-insensitive. Tries exact match first, then substring.
+    Returns floor_id or None.
+    """
+    await _refresh_area_cache()
+    reverse = _area_cache["floor_reverse"]
+    if not reverse:
+        return None
+    search = name.strip().lower()
+    # Exact match
+    if search in reverse:
+        return reverse[search]
+    # Substring match
+    for floor_name_lower, floor_id in reverse.items():
+        if search in floor_name_lower:
+            return floor_id
+    return None
+
+
 async def _refresh_area_cache() -> None:
     """Refresh area cache if stale."""
     global _area_cache
@@ -312,8 +336,7 @@ async def _refresh_area_cache() -> None:
         now = time.monotonic()
         if (
             _area_cache["directory"]
-            and (now - _area_cache["timestamp"])
-            < _AREA_CACHE_SECONDS
+            and (now - _area_cache["timestamp"]) < _AREA_CACHE_SECONDS
         ):
             return
 
@@ -345,27 +368,90 @@ async def _refresh_area_cache() -> None:
                     continue
                 area_map[area_id] = area_nm
                 reverse[area_nm.lower()] = area_id
-                lines.append(
-                    f"  - {area_nm} (area_id: {area_id})"
-                )
+                lines.append(f"  - {area_nm} (area_id: {area_id})")
 
-            directory = (
-                f"## Areas ({len(lines)}):\n"
-                + "\n".join(lines)
-            )
+            directory = f"## Areas ({len(lines)}):\n" + "\n".join(lines)
+
+            # Fetch floors and their area assignments
+            floor_map: dict[str, str] = {}
+            floor_reverse: dict[str, str] = {}
+            floor_areas_map: dict[str, list[str]] = {}
+            try:
+                floor_tpl = (
+                    "{% for floor in floors() %}"
+                    "{{ floor }}|{{ floor_name(floor) }}|"
+                    "{{ floor_areas(floor) | join(',') }}\n"
+                    "{% endfor %}"
+                )
+                floor_raw = await ha_request(
+                    "POST",
+                    "/template",
+                    json_data={"template": floor_tpl},
+                )
+                if isinstance(floor_raw, str) and floor_raw.strip():
+                    floor_lines: list[str] = []
+                    for fl in floor_raw.strip().split("\n"):
+                        fl = fl.strip()
+                        if not fl:
+                            continue
+                        parts = fl.split("|", 2)
+                        if len(parts) < 2:
+                            continue
+                        fid = parts[0].strip()
+                        fnm = parts[1].strip()
+                        fareas = (
+                            [
+                                a.strip()
+                                for a in parts[2].split(",")
+                                if a.strip()
+                            ]
+                            if len(parts) > 2
+                            else []
+                        )
+                        if not fid:
+                            continue
+                        floor_map[fid] = fnm
+                        floor_reverse[fnm.lower()] = fid
+                        floor_areas_map[fid] = fareas
+                        area_names = ", ".join(
+                            area_map.get(a, a) for a in fareas
+                        )
+                        floor_lines.append(
+                            f"  - {fnm} (floor_id: {fid})"
+                            + (
+                                f" — areas: {area_names}"
+                                if area_names
+                                else ""
+                            )
+                        )
+                    if floor_lines:
+                        directory += (
+                            f"\n## Floors ({len(floor_lines)}):\n"
+                            + "\n".join(floor_lines)
+                        )
+                        logger.info(
+                            "Floor directory refreshed: %d floors",
+                            len(floor_lines),
+                        )
+            except Exception:
+                logger.debug(
+                    "Floor fetch failed (may need HA 2024.2+)",
+                    exc_info=True,
+                )
 
             _area_cache["directory"] = directory
             _area_cache["map"] = area_map
             _area_cache["reverse"] = reverse
+            _area_cache["floor_map"] = floor_map
+            _area_cache["floor_reverse"] = floor_reverse
+            _area_cache["floor_areas"] = floor_areas_map
             _area_cache["timestamp"] = now
             logger.info(
                 "Area directory refreshed: %d areas",
                 len(lines),
             )
         except Exception as exc:
-            logger.warning(
-                "Area directory refresh failed: %s", exc
-            )
+            logger.warning("Area directory refresh failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -394,8 +480,7 @@ async def get_device_summary() -> str:
     now = time.monotonic()
     if (
         _device_cache["summary"]
-        and (now - _device_cache["timestamp"])
-        < _DEVICE_CACHE_SECONDS
+        and (now - _device_cache["timestamp"]) < _DEVICE_CACHE_SECONDS
     ):
         return _device_cache["summary"]
 
@@ -403,8 +488,7 @@ async def get_device_summary() -> str:
         now = time.monotonic()
         if (
             _device_cache["summary"]
-            and (now - _device_cache["timestamp"])
-            < _DEVICE_CACHE_SECONDS
+            and (now - _device_cache["timestamp"]) < _DEVICE_CACHE_SECONDS
         ):
             return _device_cache["summary"]
 
@@ -423,7 +507,10 @@ async def _build_device_summary() -> str:
         return ""
 
     if not isinstance(states, list):
-        logger.warning("Device summary: /states returned non-list: %s", type(states).__name__)
+        logger.warning(
+            "Device summary: /states returned non-list: %s",
+            type(states).__name__,
+        )
         return ""
 
     # Collect all entity IDs we will show; sections_data = (header, state dicts)

@@ -45,6 +45,9 @@ after actions. Never fabricate — if something fails, say so.
 TOOLS:
 - do(domain, service, targets, data) — call ANY HA service. \
 For rooms, use area_name: do("light", "turn_off", \
+targets={{"area_name": "kitchen"}}). \
+For entire floors (multiple rooms), use area_name with the \
+floor name — it auto-resolves: do("light", "turn_off", \
 targets={{"area_name": "basement"}})
 - query(target) — read entity state or Jinja2 template
 - discover(what, filter_str) — find entities, services, areas, \
@@ -230,6 +233,9 @@ this is voice output, not a screen. One short sentence max.
 TOOLS:
 - do(domain, service, targets, data) — call any HA service.
   For rooms, use area_name: do("light", "turn_off", \
+targets={{"area_name": "kitchen"}}). \
+For entire floors, use the floor name as area_name — it \
+auto-resolves: do("light", "turn_off", \
 targets={{"area_name": "basement"}})
 - query(target) — read entity state.
 - discover(what, filter_str) — find entities or areas.

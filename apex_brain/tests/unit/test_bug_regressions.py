@@ -712,10 +712,14 @@ async def test_bug104_context_builder_passes_session_id():
         mock_settings.cache_refresh_seconds = 300
         await cb.build("hello", session_id="my_session")
 
-    # Verify session_id was passed through
-    conv_store.get_recent.assert_awaited_once()
-    call_kwargs = conv_store.get_recent.call_args
-    assert call_kwargs.kwargs.get("session_id") == "my_session"
+    # Verify session_id was passed through on first call;
+    # second call is the cross-session fallback (session_id=None)
+    # since the mock returns [] (empty).
+    calls = conv_store.get_recent.call_args_list
+    assert len(calls) >= 1
+    assert calls[0].kwargs.get("session_id") == "my_session"
+    if len(calls) == 2:
+        assert calls[1].kwargs.get("session_id") is None
 
 
 # ------------------------------------------------------------------ #
