@@ -261,6 +261,7 @@ def build_system_prompt(
     service_schemas: str = "",
     area_directory: str = "",
     voice_mode: bool = False,
+    cross_session: bool = False,
 ) -> str:
     """Build the full system prompt with injected context.
 
@@ -294,7 +295,13 @@ def build_system_prompt(
             if t.get("content")
         )
         if turns_text:
-            sections.append(f"RECENT CONVERSATION:\n{turns_text}")
+            label = (
+                "RECENT CONVERSATION (from earlier chat — "
+                "treat as ongoing context):"
+                if cross_session
+                else "RECENT CONVERSATION:"
+            )
+            sections.append(f"{label}\n{turns_text}")
 
     context_block = "\n\n".join(sections) if sections else ""
 

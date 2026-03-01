@@ -243,7 +243,14 @@ class ContextBuilder:
                     n=turns_count,
                     session_id=None,  # all sessions
                 )
-                fetched["recent_turns"] = recent_turns
+                if recent_turns:
+                    fetched["recent_turns"] = recent_turns
+                    fetched["_cross_session"] = True
+                    logger.info(
+                        "Cross-session fallback: loaded %d "
+                        "turns from previous sessions",
+                        len(recent_turns),
+                    )
             except Exception:
                 pass
 
@@ -271,4 +278,5 @@ class ContextBuilder:
             service_schemas=fetched.get("service_schemas", ""),
             area_directory=fetched.get("area_directory", ""),
             voice_mode=voice_mode,
+            cross_session=bool(fetched.get("_cross_session")),
         )
