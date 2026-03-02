@@ -12,6 +12,7 @@ Implements tiered confirmation with dry-run mode:
 
 from __future__ import annotations
 
+import json
 import logging
 
 from tools.base import tool
@@ -407,6 +408,12 @@ async def configure(
           Use data={"confirmed": true} to confirm.
     session_id: originating session for audit logging.
     """
+    # LLMs sometimes pass data as a JSON string instead of dict
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except (json.JSONDecodeError, TypeError):
+            data = {}
     data = data or {}
     tier = _get_tier(action)
 

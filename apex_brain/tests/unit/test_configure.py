@@ -629,6 +629,66 @@ class TestWsResultHandling:
             )
 
 
+# ── Bug: LLM passes data as JSON string ─────────────
+
+
+class TestDataStringDeserialization:
+    """Regression: LLM sometimes passes data as a JSON string
+    instead of a dict, causing AttributeError on .get()."""
+
+    @pytest.mark.asyncio
+    async def test_rename_with_string_data(self):
+        """configure() deserializes data when passed as JSON string."""
+        with patch(
+            "tools.configure.ws_command",
+            new_callable=AsyncMock,
+            return_value={"name": "Basement Vacuum"},
+        ) as mock_ws:
+            result = await configure(
+                action="rename",
+                target="vacuum.hairy",
+                data='{"name": "Basement Vacuum"}',
+            )
+            assert "Renamed" in result
+            assert "Basement Vacuum" in result
+            mock_ws.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_dry_run_with_string_data(self):
+        """Dry-run flag works even when data is a JSON string."""
+        result = await configure(
+            action="disable",
+            target="sensor.test",
+            data='{"dry_run": true}',
+        )
+        assert "DRY RUN" in result
+
+    @pytest.mark.asyncio
+    async def test_confirmed_with_string_data(self):
+        """Confirmation flag works when data is a JSON string."""
+        with patch(
+            "tools.configure.ws_command",
+            new_callable=AsyncMock,
+            return_value={},
+        ):
+            result = await configure(
+                action="disable",
+                target="sensor.test",
+                data='{"confirmed": true}',
+            )
+            assert "Disabled" in result
+
+    @pytest.mark.asyncio
+    async def test_invalid_json_string_treated_as_empty(self):
+        """Malformed JSON string falls back to empty dict."""
+        result = await configure(
+            action="rename",
+            target="light.test",
+            data="{not valid json}",
+        )
+        assert "name is required" in result.lower() or "Error" in result
+
+
 # ── Error handling ───────────────────────────────────
 
 
